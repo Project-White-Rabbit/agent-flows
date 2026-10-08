@@ -1,0 +1,71 @@
+{
+  "name": "agent-flows",
+  "version": "0.1.0",
+  "description": "Typed flow schema and compiler that renders one agent workflow into skill files for Claude Code, Cursor, Codex, Amp, and any other agent host",
+  "keywords": [
+    "agents",
+    "skills",
+    "claude-code",
+    "cursor",
+    "codex",
+    "amp",
+    "prompt",
+    "workflow",
+    "compiler",
+    "mcp",
+    "zod"
+  ],
+  "homepage": "https://github.com/Project-White-Rabbit/agent-flows#readme",
+  "bugs": {
+    "url": "https://github.com/Project-White-Rabbit/agent-flows/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Project-White-Rabbit/agent-flows.git"
+  },
+  "license": "MIT",
+  "author": "Ruven Chu",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "test": "vitest run",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "tsc": "tsc --noEmit",
+    "validate": "pnpm lint && pnpm tsc && pnpm test && pnpm build",
+    "prepublishOnly": "pnpm validate",
+    "clean": "rm -rf dist"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.19.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "peerDependencies": {
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10",
+    "zod": "^4.6.5"
+  }
+}

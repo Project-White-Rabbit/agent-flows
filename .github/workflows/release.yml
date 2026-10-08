@@ -1,0 +1,30 @@
+name: Release
+
+# Publishes to npm when a GitHub release is published. Uses npm trusted
+# publishing (OIDC), so no npm token is stored in the repo. Configure the
+# trusted publisher on npmjs.com: repo Project-White-Rabbit/agent-flows,
+# workflow release.yml.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - name: Check the tag matches package.json
+        run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
+      - run: pnpm validate
+      - run: npm publish
