@@ -24,7 +24,7 @@
     "url": "git+https://github.com/Project-White-Rabbit/agent-flows.git"
   },
   "license": "MIT",
-  "author": "Ruven Chu",
+  "author": "Bitfab",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
