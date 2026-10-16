@@ -7,13 +7,13 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-pnpm --dir "$root" pack --pack-destination "$work" >/dev/null
+(cd "$root" && bun pm pack --destination "$work" --quiet) >/dev/null
 cd "$work"
 npm init -y >/dev/null
-npm install --no-audit --no-fund ./agent-flows-*.tgz "zod@${ZOD_VERSION:-4}" typescript@5 @types/node@22 >/dev/null
+npm install --no-audit --no-fund ./agent-flows-core-*.tgz "zod@${ZOD_VERSION:-4}" typescript@5 @types/node@22 >/dev/null
 
 cat > smoke.ts <<'TS'
-import { claudeCode, createFlowKit } from "agent-flows"
+import { claudeCode, createFlowKit } from "@agent-flows/core"
 
 const kit = createFlowKit({ targets: { claude: claudeCode({ plugin: "demo" }) } })
 const flow = kit.defineFlow({
