@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.1]
+
+No code changes. First release published from CI with npm provenance, so the package can be verified as built from this repository.
+
 ## [0.1.0]
 
 First release.
@@ -15,5 +19,6 @@ First release.
 - `renderProject`, `resolveOutputPath` and `writeGeneratedFiles` (with a `check` mode for CI).
 - `renderMermaid` and `describeFlow` for diagrams and snapshot tests.
 
-[Unreleased]: https://github.com/Project-White-Rabbit/agent-flows/compare/core@0.1.0...HEAD
+[Unreleased]: https://github.com/Project-White-Rabbit/agent-flows/compare/core@0.1.1...HEAD
+[0.1.1]: https://github.com/Project-White-Rabbit/agent-flows/compare/core@0.1.0...core@0.1.1
 [0.1.0]: https://github.com/Project-White-Rabbit/agent-flows/releases/tag/core@0.1.0
