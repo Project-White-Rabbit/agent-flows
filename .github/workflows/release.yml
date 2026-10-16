@@ -1,30 +1,60 @@
 name: Release
 
-# Publishes to npm when a GitHub release is published. Uses npm trusted
-# publishing (OIDC), so no npm token is stored in the repo. Configure the
-# trusted publisher on npmjs.com: repo Project-White-Rabbit/agent-flows,
-# workflow release.yml.
+# Publishes @agent-flows/core to npm on every push to main whose
+# packages/core/package.json version is not on npm yet, then tags the commit
+# core@X.Y.Z and creates a GitHub release. Pushes that don't bump the version
+# are a no-op. Uses npm trusted publishing (OIDC), so no npm token is stored in
+# the repo. Configure the trusted publisher on the @agent-flows/core package on
+# npmjs.com: repo Project-White-Rabbit/agent-flows, workflow release.yml.
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - name: Check whether this version is already published
+        id: version
+        working-directory: packages/core
+        run: |
+          name=$(node -p 'require("./package.json").name')
+          version=$(node -p 'require("./package.json").version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "$name@$version" version > /dev/null 2>&1; then
+            echo "$name@$version is already on npm; skipping publish"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.version.outputs.publish == 'true'
+        uses: oven-sh/setup-bun@v2
+      - if: steps.version.outputs.publish == 'true'
+        uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: pnpm
           registry-url: https://registry.npmjs.org
-      - run: pnpm install --frozen-lockfile
-      - name: Check the tag matches package.json
-        run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
-      - run: pnpm validate
-      - run: npm publish
+      - if: steps.version.outputs.publish == 'true'
+        run: bun install --frozen-lockfile
+      - if: steps.version.outputs.publish == 'true'
+        run: bun run validate
+      # npm, not bun publish: only npm supports trusted publishing and provenance.
+      # prepublishOnly is skipped since validate just ran.
+      - if: steps.version.outputs.publish == 'true'
+        working-directory: packages/core
+        run: npm publish --ignore-scripts
+      - name: Tag and create the GitHub release
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: core@${{ steps.version.outputs.version }}
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes

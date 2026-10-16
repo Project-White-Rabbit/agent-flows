@@ -3,7 +3,7 @@
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!node_modules", "!dist"]
+    "includes": ["**", "!**/node_modules", "!**/dist"]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2 },
   "javascript": { "formatter": { "semicolons": "asNeeded" } },
