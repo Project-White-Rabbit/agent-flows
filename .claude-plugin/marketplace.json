@@ -1,0 +1,14 @@
+{
+  "name": "agent-flows",
+  "description": "Dev workflow plugins compiled from agent-flows.",
+  "owner": {
+    "name": "Bitfab"
+  },
+  "plugins": [
+    {
+      "name": "agent-flows",
+      "source": "./packages/dev",
+      "description": "Dev workflow commands for any repository: configure the repo's third-party services, evaluate a branch or PR for shippability."
+    }
+  ]
+}

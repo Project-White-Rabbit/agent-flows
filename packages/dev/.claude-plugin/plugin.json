@@ -1,0 +1,10 @@
+{
+  "name": "agent-flows",
+  "description": "Dev workflow commands for any repository: configure the repo's third-party services, evaluate a branch or PR for shippability.",
+  "version": "0.0.1",
+  "author": {
+    "name": "Bitfab"
+  },
+  "license": "MIT",
+  "keywords": ["dev", "workflow", "agent-flows"]
+}
