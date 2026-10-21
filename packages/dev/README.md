@@ -12,6 +12,10 @@ On Claude Code before 2.1.275, add the marketplace first: `/plugin marketplace a
 
 Commands run with the `node` already on the machine (22.18+, which runs TypeScript directly). The plugin has no dependencies and no build step.
 
+### Updates
+
+Claude Code doesn't auto-update plugins from this marketplace unless you turn it on: `/plugin` → **Marketplaces** → `agent-flows` → **Enable auto-update**. Otherwise update by hand with `/plugin marketplace update agent-flows`. Either way, a new version takes effect in the next session or after `/reload-plugins`.
+
 ## Commands
 
 | Command | What it does |
@@ -63,6 +67,14 @@ export const jira: SectionSpec = {
 
 That's all. Validation, detection, the plan, `get`, and the configure skill's section table come from the registry; `bun run build` regenerates the skill. The registry tests check every section against the shared contract (well-formed path, unique fields, examples that match their types). `required: true` makes a section always configured (like `repo`), for settings every flow can rely on. Changing the *shape* of existing data, rather than adding to it, means bumping `CONFIG_VERSION` and adding a migration.
 
+## Releasing
+
+The version lives in one place, `.claude-plugin/plugin.json`, because that's what Claude Code compares: an installed plugin updates only when the version changes, so a change merged without a bump never reaches anyone.
+
+- **Bump it in every PR that changes the plugin.** Use X.Y.Z: patch for fixes and wording, minor for new commands, sections, or fields, major when a change breaks existing configs or habits. CI's `plugin-version` check fails a PR that changes `packages/dev` (test files aside) without bumping; run it locally with `bun run check-version origin/main`.
+- **Merging releases it.** Users pull from `main` through the marketplace. On each push to `main` with a new version, the release workflow tags the commit `agent-flows--vX.Y.Z` and creates a GitHub release with generated notes.
+- **The config format has its own version** (`CONFIG_VERSION`), separate from the plugin's. Bump it only when the shape of `.agent-flows/config.json` changes, with a migration.
+
 ## Layout
 
 | Path | Contents |
@@ -71,6 +83,7 @@ That's all. Validation, detection, the plan, `get`, and the configure skill's se
 | `src/commands/` | Scripts the skills run. Node built-ins only, since nothing is installed at runtime |
 | `src/config/` | The config format: section registry (`sections/`), validation, patching, planning, detection. Runtime code, same rules |
 | `skills/` | Generated skill files. Don't edit them; run `bun run build` |
-| `.claude-plugin/plugin.json` | Plugin manifest. The repo-root `.claude-plugin/marketplace.json` points here |
+| `scripts/` | `build-skills.ts` renders `skills/`; `check-version.ts` is the CI version-bump check |
+| `.claude-plugin/plugin.json` | Plugin manifest and the plugin's version. The repo-root `.claude-plugin/marketplace.json` points here |
 
 `bun run validate` typechecks, tests, and fails when `skills/` is stale.

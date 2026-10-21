@@ -1,7 +1,7 @@
 {
   "name": "agent-flows",
   "description": "Dev workflow commands for any repository: configure the repo's third-party services, evaluate a branch or PR for shippability.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": {
     "name": "Bitfab"
   },
