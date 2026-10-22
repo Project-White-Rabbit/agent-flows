@@ -6,6 +6,13 @@ name: Release
 # are a no-op. Uses npm trusted publishing (OIDC), so no npm token is stored in
 # the repo. Configure the trusted publisher on the @agent-flows/core package on
 # npmjs.com: repo Project-White-Rabbit/agent-flows, workflow release.yml.
+#
+# Also tags each new version of the agent-flows Claude Code plugin
+# (packages/dev/.claude-plugin/plugin.json) as agent-flows--vX.Y.Z with a
+# GitHub release. The plugin ships from the marketplace in this repo, so
+# merging is what releases it; the tag records which commit each version is.
+# If the version is already released but the plugin changed since, the job
+# fails: those changes can't reach users until the version is bumped.
 on:
   push:
     branches: [main]
@@ -58,3 +65,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: core@${{ steps.version.outputs.version }}
         run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+  tag-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Tag and create the GitHub release if this version is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(node packages/dev/scripts/version.ts release)
+          if [ -z "$tag" ]; then
+            echo "This plugin version is already released; nothing to do"
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --title "agent-flows plugin ${tag#agent-flows--v}" --generate-notes
+          fi

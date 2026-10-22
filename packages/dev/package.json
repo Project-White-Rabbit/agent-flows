@@ -1,0 +1,27 @@
+{
+  "name": "@agent-flows/dev",
+  "private": true,
+  "description": "Dev workflow commands for any repository, compiled from agent-flows and shipped as the agent-flows plugin",
+  "license": "MIT",
+  "author": "Bitfab",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-skills.ts",
+    "check": "node scripts/build-skills.ts --check",
+    "bump": "node scripts/version.ts bump",
+    "check-version": "node scripts/version.ts check",
+    "test": "vitest run",
+    "tsc": "tsc --noEmit",
+    "validate": "bun run tsc && bun run test && bun run check"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "devDependencies": {
+    "@agent-flows/core": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "zod": "^4.6.7"
+  }
+}

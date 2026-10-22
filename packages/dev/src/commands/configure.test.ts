@@ -1,0 +1,143 @@
+import { execFileSync, spawnSync } from "node:child_process"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { afterEach, describe, expect, it } from "vitest"
+
+describe("configure.ts (as a script)", () => {
+  let dir: string | undefined
+  afterEach(() => {
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  const script = path.join(import.meta.dirname, "configure.ts")
+  const run = (args: string[], input?: string) =>
+    spawnSync("node", [script, ...args], {
+      cwd: dir,
+      input,
+      encoding: "utf8",
+    })
+
+  const configFile = () => path.join(dir as string, ".agent-flows/config.json")
+  const json = (result: { stdout: string }) => JSON.parse(result.stdout)
+
+  function init(): void {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-script-"))
+    execFileSync("git", ["-C", dir, "init", "-q"])
+  }
+
+  it("sends flows to configure when there is no config, and re-runs are no-ops", () => {
+    init()
+    const missing = run(["get", "repo.baseBranch"])
+    expect(missing.status).toBe(2)
+    expect(json(missing)).toMatchObject({ configured: false })
+
+    const patch = JSON.stringify({
+      sections: {
+        repo: { baseBranch: "main" },
+        "services.github": { owner: "acme", repo: "web" },
+      },
+      skip: ["services.sentry"],
+    })
+    expect(json(run(["write"], patch)).written).toBe(true)
+    const first = fs.readFileSync(configFile(), "utf8")
+    expect(json(run(["write"], patch)).written).toBe(false)
+    expect(fs.readFileSync(configFile(), "utf8")).toBe(first)
+
+    const got = run(["get", "repo.baseBranch", "services.github"])
+    expect(got.status).toBe(0)
+    expect(json(got)).toEqual({
+      values: {
+        "repo.baseBranch": "main",
+        "services.github": { owner: "acme", repo: "web" },
+      },
+    })
+  })
+
+  it("reports missing and skipped paths with the same not-configured exit", () => {
+    init()
+    run(
+      ["write"],
+      JSON.stringify({
+        sections: { repo: { baseBranch: "main" } },
+        skip: ["services.linear"],
+      }),
+    )
+    const result = run(["get", "services.linear.teamKey", "services.sentry"])
+    expect(result.status).toBe(2)
+    expect(json(result)).toMatchObject({
+      configured: false,
+      missing: [
+        { path: "services.linear.teamKey", skipped: true },
+        { path: "services.sentry" },
+      ],
+    })
+  })
+
+  it("detects and plans only the sections named, even skipped ones", () => {
+    init()
+    run(
+      ["write"],
+      JSON.stringify({
+        sections: { repo: { baseBranch: "main" } },
+        skip: ["services.linear"],
+      }),
+    )
+    const result = run(["detect", "linear"])
+    expect(result.status).toBe(0)
+    const out = json(result)
+    expect(out.requested).toEqual(["services.linear"])
+    expect(out.plan.changes).toEqual([
+      expect.objectContaining({ section: "services.linear", kind: "add" }),
+    ])
+    expect(out.plan.needs).toEqual([
+      { section: "services.linear", fields: ["teamKey"] },
+    ])
+
+    const unknown = run(["detect", "jira"])
+    expect(unknown.status).toBe(1)
+    expect(unknown.stderr).toContain("unknown section(s): jira")
+  })
+
+  it("rejects unknown paths, so a typo in a flow fails loudly", () => {
+    init()
+    const result = run(["get", "repo.baseBrnch"])
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("unknown config path(s): repo.baseBrnch")
+  })
+
+  it("keeps sections a newer plugin wrote, and refuses newer formats", () => {
+    init()
+    fs.mkdirSync(path.dirname(configFile()))
+    fs.writeFileSync(
+      configFile(),
+      JSON.stringify({
+        version: 1,
+        repo: { baseBranch: "main" },
+        services: { jira: { project: "ENG" } },
+      }),
+    )
+    const written = json(
+      run(
+        ["write"],
+        JSON.stringify({ sections: { "services.linear": { teamKey: "ENG" } } }),
+      ),
+    )
+    expect(written.warnings).toEqual([
+      expect.stringContaining('unknown section "services.jira"'),
+    ])
+    expect(JSON.parse(fs.readFileSync(configFile(), "utf8")).services).toEqual({
+      linear: { teamKey: "ENG" },
+      jira: { project: "ENG" },
+    })
+
+    fs.writeFileSync(configFile(), JSON.stringify({ version: 99 }))
+    const newer = run(["get", "repo.baseBranch"])
+    expect(newer.status).toBe(2)
+    expect(json(newer).issues).toEqual([
+      expect.stringContaining("upgrade the agent-flows plugin"),
+    ])
+  })
+})
