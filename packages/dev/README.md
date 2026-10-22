@@ -71,8 +71,9 @@ That's all. Validation, detection, the plan, `get`, and the configure skill's se
 
 The version lives in one place, `.claude-plugin/plugin.json`, because that's what Claude Code compares: an installed plugin updates only when the version changes, so a change merged without a bump never reaches anyone.
 
-- **Bump it in every PR that changes the plugin.** Use X.Y.Z: patch for fixes and wording, minor for new commands, sections, or fields, major when a change breaks existing configs or habits. CI's `plugin-version` check fails a PR that changes `packages/dev` (test files aside) without bumping; run it locally with `bun run check-version origin/main`.
-- **Merging releases it.** Users pull from `main` through the marketplace. On each push to `main` with a new version, the release workflow tags the commit `agent-flows--vX.Y.Z` and creates a GitHub release with generated notes.
+- **Bump it in every PR that changes the plugin:** `bun run bump patch` (or `minor`, `major`) in `packages/dev`. Patch for fixes and wording, minor for new commands, sections, or fields, major when a change breaks existing configs or habits. It bumps from the latest of `main` and the released versions, not from the file, so re-running it (say, after another PR took the next version and you rebased) lands on the right number.
+- **CI rejects a PR whose version won't ship.** The `plugin-version` check fails when `packages/dev` changed (test files aside) and the version isn't past `main`'s current one, or is already released, e.g. two PRs that both bumped to the same version. Run it locally with `bun run check-version origin/main`.
+- **Merging releases it.** Users pull from `main` through the marketplace. On each push to `main` with a new version, the release workflow tags the commit `agent-flows--vX.Y.Z` and creates a GitHub release with generated notes. If the version was already released but the plugin changed since (a PR merged without re-running the check against the latest `main`), the release job fails, so it can't go unnoticed; bump and merge to fix it.
 - **The config format has its own version** (`CONFIG_VERSION`), separate from the plugin's. Bump it only when the shape of `.agent-flows/config.json` changes, with a migration.
 
 ## Layout
@@ -83,7 +84,7 @@ The version lives in one place, `.claude-plugin/plugin.json`, because that's wha
 | `src/commands/` | Scripts the skills run. Node built-ins only, since nothing is installed at runtime |
 | `src/config/` | The config format: section registry (`sections/`), validation, patching, planning, detection. Runtime code, same rules |
 | `skills/` | Generated skill files. Don't edit them; run `bun run build` |
-| `scripts/` | `build-skills.ts` renders `skills/`; `check-version.ts` is the CI version-bump check |
+| `scripts/` | `build-skills.ts` renders `skills/`; `version.ts` bumps the version and backs the CI version checks |
 | `.claude-plugin/plugin.json` | Plugin manifest and the plugin's version. The repo-root `.claude-plugin/marketplace.json` points here |
 
 `bun run validate` typechecks, tests, and fails when `skills/` is stale.

@@ -8,7 +8,8 @@
   "scripts": {
     "build": "node scripts/build-skills.ts",
     "check": "node scripts/build-skills.ts --check",
-    "check-version": "node scripts/check-version.ts",
+    "bump": "node scripts/version.ts bump",
+    "check-version": "node scripts/version.ts check",
     "test": "vitest run",
     "tsc": "tsc --noEmit",
     "validate": "bun run tsc && bun run test && bun run check"

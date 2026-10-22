@@ -11,6 +11,8 @@ name: Release
 # (packages/dev/.claude-plugin/plugin.json) as agent-flows--vX.Y.Z with a
 # GitHub release. The plugin ships from the marketplace in this repo, so
 # merging is what releases it; the tag records which commit each version is.
+# If the version is already released but the plugin changed since, the job
+# fails: those changes can't reach users until the version is bumped.
 on:
   push:
     branches: [main]
@@ -67,14 +69,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
       - name: Tag and create the GitHub release if this version is new
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(node -p 'require("./packages/dev/.claude-plugin/plugin.json").version')
-          tag="agent-flows--v$version"
-          if gh release view "$tag" > /dev/null 2>&1; then
-            echo "$tag already released; skipping"
+          tag=$(node packages/dev/scripts/version.ts release)
+          if [ -z "$tag" ]; then
+            echo "This plugin version is already released; nothing to do"
           else
-            gh release create "$tag" --target "$GITHUB_SHA" --title "agent-flows plugin $version" --generate-notes
+            gh release create "$tag" --target "$GITHUB_SHA" --title "agent-flows plugin ${tag#agent-flows--v}" --generate-notes
           fi
