@@ -8,6 +8,9 @@ import { ISSUE_KEY } from "./patterns.ts"
 const GRAPHQL =
   "`POST https://api.linear.app/graphql` (headers `Authorization: {token}`, `Content-Type: application/json`):"
 
+// Only when the repo set one; Linear issues need no project.
+const IN_PROJECT = "When `values.project` is set, put it in that project"
+
 const STATE_MAP =
   "whose type matches: `todo` → `unstarted`, `in progress` → `started`, `in review` → a `started` state named for review when the team has one (else `started`), `done` → `completed`, `canceled` → `canceled`"
 
@@ -58,9 +61,15 @@ export const linear: IntegrationSpec = {
       description: "URL slug in linear.app/<slug>",
       example: "acme",
     },
+    {
+      key: "project",
+      description: "Project new issues go in (its name)",
+      example: "Web app",
+    },
   ],
   multiple: true,
-  lookup: "Linear MCP (list teams), or the API's `teams` query",
+  lookup:
+    "Linear MCP (`list_teams`; `list_projects` for the team's projects), or the API's `teams` and `projects` queries",
   access: {
     mcp: { server: "Linear" },
     api: { base: "https://api.linear.app/graphql", token: ["LINEAR_API_KEY"] },
@@ -81,8 +90,8 @@ export const linear: IntegrationSpec = {
         mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <line>`, `includeArchived: false`, and `limit: 250`, once per open state type (`backlog`, `unstarted`, `started`), following `cursor` until `hasNextPage` is false: its `query` is a fuzzy search, so a match can be on any page. Keep only issues whose description has exactly that line",
       },
       createIssue: {
-        mcp: 'The Linear MCP\'s `save_issue` with `team: {teamKey}`, `title`, `description`, and `assignee: "me"`',
-        api: `${GRAPHQL} \`issueCreate(input: { teamId, title, description, assigneeId })\`, with \`teamId\` from \`teams(filter: { key: { eq: "{teamKey}" } })\` and \`assigneeId\` from \`viewer { id }\`; it returns \`issue { identifier url }\``,
+        mcp: `The Linear MCP's \`save_issue\` with \`team: {teamKey}\`, \`title\`, \`description\`, and \`assignee: "me"\`. ${IN_PROJECT}: \`project\` set to it`,
+        api: `${GRAPHQL} \`issueCreate(input: { teamId, title, description, assigneeId, projectId })\`, with \`teamId\` from \`teams(filter: { key: { eq: "{teamKey}" } })\` and \`assigneeId\` from \`viewer { id }\`; it returns \`issue { identifier url }\`. ${IN_PROJECT}: \`projectId\` from \`projects(filter: { name: { eq: <project> } })\`, else leave it out`,
       },
       updateIssue: {
         mcp: `The Linear MCP's \`save_issue\` with \`id\`, \`title\`, \`description\`, and \`state\`: the team's workflow state (\`list_issue_statuses\`) ${STATE_MAP}`,

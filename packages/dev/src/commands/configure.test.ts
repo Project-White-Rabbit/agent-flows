@@ -424,6 +424,7 @@ describe("configure.ts (as a script)", () => {
           "integrations.github": { owner: "acme", repo: "web" },
           "integrations.linear": {
             teamKey: "ENG",
+            project: "Web app",
             use: { issueTracker: "track" },
           },
           "integrations.posthog": {
@@ -447,9 +448,12 @@ describe("configure.ts (as a script)", () => {
     expect(integrations.sourceControl[0]).toMatchObject({ level: "write" })
     expect(integrations.issueTracker[0]).toMatchObject({
       level: "track",
-      values: { teamKey: "ENG" },
+      values: { teamKey: "ENG", project: "Web app" },
     })
     expect(integrations.issueTracker[0].values).not.toHaveProperty("use")
+    expect(integrations.issueTracker[0].ops.createIssue.mcp).toContain(
+      "When `values.project` is set, put it in that project",
+    )
     // PostHog is only used for feature flags here.
     expect(integrations.analytics).toEqual([])
     expect(integrations.featureFlags).toEqual([

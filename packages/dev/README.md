@@ -34,7 +34,7 @@ The repo's shared dev configuration, committed so the whole team uses the same v
   "repo": { "baseBranch": "main" },
   "integrations": {
     "github": { "owner": "acme", "repo": "web" },
-    "linear": { "teamKey": "ENG" },
+    "linear": { "teamKey": "ENG", "project": "Web app" },
     "jira": { "site": "acme.atlassian.net", "projectKey": "SUP" },
     "vercel": [
       { "name": "web", "project": "prj_web", "directory": "apps/web" },

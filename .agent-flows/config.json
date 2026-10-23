@@ -10,16 +10,11 @@
       "use": {
         "sourceControl": "write"
       }
-    },
-    "linear": {
-      "teamKey": "HVT",
-      "use": {
-        "issueTracker": "link"
-      }
     }
   },
   "skipped": [
     "integrations.graphite",
+    "integrations.linear",
     "integrations.vercel",
     "integrations.neon",
     "integrations.sentry",
