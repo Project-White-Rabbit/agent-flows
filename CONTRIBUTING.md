@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping. Issues and pull requests are both welcome; for a large change, open an issue first so we can agree on the shape.
+Thanks for helping. Issues and pull requests are both welcome; for a large change, open an issue first so we can agree on the shape. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Setup
 
@@ -22,6 +22,12 @@ The repo is a Bun workspace. Each package lives under `packages/`; `@agent-flows
 
 ## Releasing
 
+### `@agent-flows/core`
+
 1. Move the `[Unreleased]` entries in `packages/core/CHANGELOG.md` under the new version and bump `version` in `packages/core/package.json`.
 2. Merge to `main`.
 3. The `Release` workflow sees a version that isn't on npm yet, validates, publishes `@agent-flows/core` to npm with provenance, and creates the `core@X.Y.Z` tag and GitHub release.
+
+### The `agent-flows` plugin
+
+Bump the plugin's version in every PR that changes `packages/dev` (`bun run bump patch` in that directory); CI rejects the PR otherwise. Merging releases it. See [Releasing in the plugin README](packages/dev/README.md#releasing).

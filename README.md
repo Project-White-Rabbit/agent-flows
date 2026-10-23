@@ -20,7 +20,7 @@ Write an agent workflow once as typed data. Compile it into skill files for each
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Bugs and ideas go in [issues](https://github.com/Project-White-Rabbit/agent-flows/issues).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Bugs and ideas go in [issues](https://github.com/Project-White-Rabbit/agent-flows/issues). This project follows a [Code of Conduct](CODE_OF_CONDUCT.md); report security issues as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
