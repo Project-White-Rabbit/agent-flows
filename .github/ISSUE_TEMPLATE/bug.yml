@@ -1,0 +1,40 @@
+name: Bug report
+description: Something renders, validates, or runs wrong
+labels: [bug]
+body:
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options:
+        - "@agent-flows/core"
+        - agent-flows plugin (@agent-flows/dev)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The package version, or the plugin version from `/plugin`
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Agent host
+      description: Claude Code, Cursor, Codex, Amp, or a custom target, with its version
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, what you got instead, and any error output
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: The smallest flow definition or steps that show the problem
+      render: ts
+    validations:
+      required: true
