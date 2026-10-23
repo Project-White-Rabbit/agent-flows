@@ -70,28 +70,65 @@ describe("detect", () => {
     }
 
     const found = detectSections(createDetectContext(dir))
-    expect(found["services.github"]?.values).toEqual({
+    expect(found["integrations.github"]?.values).toEqual({
       owner: "acme",
       repo: "web",
     })
-    expect(found["services.linear"]?.values).toEqual({
+    expect(found["integrations.linear"]?.values).toEqual({
       teamKey: "ENG",
     })
-    expect(found["services.vercel"]?.values).toEqual({
+    expect(found["integrations.vercel"]?.values).toEqual({
       team: "team_1",
       project: "prj_1",
+      directory: "apps/web",
     })
-    expect(found["services.neon"]?.values).toEqual({
+    expect(found["integrations.vercel"]?.instances).toBeUndefined()
+    expect(found["integrations.neon"]?.values).toEqual({
       projectId: "dry-sun-1",
     })
-    expect(found["services.posthog"]?.values).toEqual({
+    expect(found["integrations.posthog"]?.values).toEqual({
       host: "https://eu.posthog.com",
     })
-    expect(found["services.sentry"]?.evidence).toEqual([
+    expect(found["integrations.sentry"]?.evidence).toEqual([
       "apps/web/package.json depends on @sentry/nextjs",
     ])
     expect(found.repo?.values).toEqual({ baseBranch: "main" })
     expect(JSON.stringify(found)).not.toContain("should-never-be-read")
+  })
+
+  it("finds one Vercel instance per linked app", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-detect-"))
+    const root = dir
+    const write = (file: string, content: string) => {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
+      fs.writeFileSync(path.join(root, file), content)
+    }
+    execFileSync("git", ["-C", root, "init", "-q"])
+    for (const app of ["apps/web", "apps/docs", "packages/web"]) {
+      write(`${app}/package.json`, "{}")
+      write(
+        `${app}/.vercel/project.json`,
+        JSON.stringify({
+          orgId: "team_1",
+          projectId: `prj_${app.replace("/", "_")}`,
+        }),
+      )
+    }
+    execFileSync("git", ["-C", root, "add", "apps", "packages"])
+    const vercel = detectSections(createDetectContext(root))[
+      "integrations.vercel"
+    ]
+    // Two apps called web: the full path tells them apart.
+    expect(vercel?.instances?.map((i) => [i.name, i.directory])).toEqual([
+      ["docs", "apps/docs"],
+      ["apps-web", "apps/web"],
+      ["packages-web", "packages/web"],
+    ])
+    expect(vercel?.values).toEqual({
+      team: "team_1",
+      project: "prj_apps_docs",
+      directory: "apps/docs",
+    })
   })
 })
 

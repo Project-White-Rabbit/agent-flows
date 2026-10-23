@@ -1,4 +1,5 @@
-import type { SectionSpec, SectionValues } from "../types.ts"
+import type { IntegrationSpec, SectionValues } from "../types.ts"
+import { jiraLinkedKeys } from "./jira.ts"
 
 // Key-shaped tokens that aren't ticket prefixes.
 const NOT_TEAM_KEYS = new Set(["UTF", "ISO", "ES", "SHA", "RFC", "CVE", "HTTP"])
@@ -10,12 +11,13 @@ const NOT_TEAM_KEYS = new Set(["UTF", "ISO", "ES", "SHA", "RFC", "CVE", "HTTP"])
 export function inferLinearTeamKey(
   texts: string[],
   minHits = 3,
+  notLinear: Set<string> = new Set(),
 ): { key: string; hits: number } | undefined {
   const counts = new Map<string, number>()
   for (const text of texts) {
     for (const match of text.matchAll(/\b([A-Za-z][A-Za-z0-9]{1,6})-\d+\b/g)) {
       const key = match[1].toUpperCase()
-      if (!NOT_TEAM_KEYS.has(key)) {
+      if (!NOT_TEAM_KEYS.has(key) && !notLinear.has(key)) {
         counts.set(key, (counts.get(key) ?? 0) + 1)
       }
     }
@@ -29,8 +31,8 @@ export function inferLinearTeamKey(
   return best && best.hits >= minHits ? best : undefined
 }
 
-export const linear: SectionSpec = {
-  path: "services.linear",
+export const linear: IntegrationSpec = {
+  path: "integrations.linear",
   name: "Linear",
   purpose: "Tickets: link branches and PRs, file and close issues",
   fields: [
@@ -46,7 +48,9 @@ export const linear: SectionSpec = {
       example: "acme",
     },
   ],
+  multiple: true,
   lookup: "Linear MCP (list teams)",
+  provides: { issueTracker: {} },
   detect(ctx) {
     const refs = (
       ctx.git([
@@ -58,7 +62,11 @@ export const linear: SectionSpec = {
     ).split("\n")
     const subjects = (ctx.git(["log", "-300", "--format=%s"]) ?? "").split("\n")
     const evidence = ctx.dependsOn(/^@linear\//)
-    const team = inferLinearTeamKey([...refs, ...subjects])
+    // Keys the team links to Jira are Jira's, however often they show up.
+    const jiraKeys = jiraLinkedKeys(
+      (ctx.git(["log", "-300", "--format=%B"]) ?? "").split("\n"),
+    )
+    const team = inferLinearTeamKey([...refs, ...subjects], 3, jiraKeys)
     if (team) {
       evidence.unshift(
         `${team.hits} branch names or commit subjects reference ${team.key}-<n>`,

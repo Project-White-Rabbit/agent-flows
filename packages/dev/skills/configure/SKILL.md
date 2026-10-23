@@ -1,38 +1,66 @@
 ---
-description: Set up or update .agent-flows/config.json, the repo's shared dev configuration: base branch and the third-party services it uses (GitHub, Linear, Vercel, Neon, Sentry, …).
-argument-hint: "[section ...]"
+description: Set up or update .agent-flows/config.json, the repo's shared dev configuration: base branch and the integrations it uses for each capability (source control, issue tracker, deployments, error tracking, …).
+argument-hint: "[section | capability ...]"
 ---
 
 # /agent-flows:configure
 
-Record this repository's dev configuration in `.agent-flows/config.json` at the repo root: settings every flow relies on (like the base branch) and the third-party services the repo uses, with the ids flows need to reach them. Other agent-flows commands read it instead of guessing or asking every time. The file is committed and shared with the team, so it holds **configuration only**: ids, slugs, branch names. No secrets, and nothing that points at one.
+Record this repository's dev configuration in `.agent-flows/config.json` at the repo root: settings every flow relies on (like the base branch) and the integrations the repo uses, with the ids flows need to reach them. Other agent-flows commands read it instead of guessing or asking every time. The file is committed and shared with the team, so it holds **configuration only**: ids, slugs, branch names. No secrets, and nothing that points at one.
 
-The file is made of **sections**, each an object of fields at a dotted path:
+Flows never ask for a vendor. They ask for a **capability**, and use every integration the repo configured for it:
 
-| Section | Name | Used for | Fields | Look up with |
-|---|---|---|---|---|
-| `repo` | Repository (always) | The branch work merges into, for diffs, reviews, and PRs | `baseBranch` (required): Branch feature work merges into | `git symbolic-ref --short refs/remotes/origin/HEAD`, or ask |
-| `services.github` | GitHub | Pull requests, CI checks, code review | `owner` (required): Org or user; `repo` (required): Repository name | `gh repo view --json owner,name` |
-| `services.graphite` | Graphite | Stacked branches and PRs | `trunk` (required): Trunk branch stacks build on | `gt trunk` |
-| `services.linear` | Linear | Tickets: link branches and PRs, file and close issues | `teamKey` (required): Issue key prefix; `workspace`: URL slug in linear.app/<slug> | Linear MCP (list teams) |
-| `services.vercel` | Vercel | Preview and production deployments, runtime logs | `team`: Team id or slug; `project` (required): Project id or name | Vercel MCP, or `vercel project ls` |
-| `services.neon` | Neon | Postgres branches per worktree, migrations | `projectId` (required): Neon project id; `parentBranch`: Branch new dev branches fork from; `database`: Database name | Neon MCP (list projects), or `neonctl projects list` |
-| `services.sentry` | Sentry | Production errors behind a bug | `org` (required): Organization slug; `project` (required): Project slug; `url`: Self-hosted base URL | Sentry MCP (find projects), or `sentry-cli projects list` |
-| `services.posthog` | PostHog | Product analytics, feature flags, session replay | `projectId` (required): Numeric project id; `host`: App host | PostHog MCP (list projects) |
-| `services.slack` | Slack | Where dev flows post announcements and alerts | `channel` (required): Channel name or id | Slack MCP (search channels), or ask |
+| Capability | Name | Used for | Integrations |
+|---|---|---|---|
+| `sourceControl` | Source control | The hosted repository: pull requests, CI checks, code review | GitHub, GitLab |
+| `stacking` | Stacked PRs | Stacked branches and pull requests on top of source control | Graphite |
+| `issueTracker` | Issue tracker | Tickets: link branches and PRs, file and close issues | Linear, Jira |
+| `deployments` | Deployments | Preview and production deployments, runtime logs | Vercel |
+| `database` | Database | Database branches per worktree, migrations | Neon |
+| `errorTracking` | Error tracking | Production errors behind a bug | Sentry |
+| `analytics` | Product analytics | Usage events, funnels, session replay | PostHog |
+| `featureFlags` | Feature flags | Gated rollouts and experiments | PostHog |
+| `chat` | Team chat | Where dev flows post announcements and alerts | Slack |
+
+A repo can configure any number of integrations for a capability (none, one, or several, like Linear for product work and Jira for support tickets), and flows use all of them. An integration can provide more than one capability, and most can be configured more than once (one Vercel project per app in a monorepo): the entry is then a list of instances, each with a unique `name`:
+
+```json
+"vercel": [
+  { "name": "web", "project": "prj_web", "directory": "apps/web" },
+  { "name": "docs", "project": "prj_docs", "directory": "apps/docs" }
+]
+```
+
+The file is made of **sections**, each an object of fields at a dotted path. Every section but `repo` is an integration:
+
+| Section | Name | Provides | Used for | Fields | Look up with |
+|---|---|---|---|---|---|
+| `repo` | Repository (always) |  | The branch work merges into, for diffs, reviews, and PRs | `baseBranch` (required): Branch feature work merges into | `git symbolic-ref --short refs/remotes/origin/HEAD`, or ask |
+| `integrations.github` | GitHub | `sourceControl` | Pull requests, CI checks, code review | `owner` (required): Org or user; `repo` (required): Repository name | `gh repo view --json owner,name` |
+| `integrations.gitlab` | GitLab | `sourceControl` | Merge requests, CI pipelines, code review | `project` (required): Project path, including groups; `host`: Self-managed host name | `glab repo view` |
+| `integrations.graphite` | Graphite | `stacking` | Stacked branches and PRs | `trunk` (required): Trunk branch stacks build on | `gt trunk` |
+| `integrations.linear` | Linear | `issueTracker` | Tickets: link branches and PRs, file and close issues | `teamKey` (required): Issue key prefix; `workspace`: URL slug in linear.app/<slug> | Linear MCP (list teams) |
+| `integrations.jira` | Jira | `issueTracker` | Tickets: link branches and PRs, file and close issues | `site` (required): Atlassian site host; `projectKey` (required): Issue key prefix | Atlassian MCP (list projects), or ask |
+| `integrations.vercel` | Vercel | `deployments` | Preview and production deployments, runtime logs | `team`: Team id or slug; `project` (required): Project id or name; `directory`: App directory it deploys, in a monorepo | Vercel MCP, or `vercel project ls` |
+| `integrations.neon` | Neon | `database` | Postgres branches per worktree, migrations | `projectId` (required): Neon project id; `parentBranch`: Branch new dev branches fork from; `database`: Database name | Neon MCP (list projects), or `neonctl projects list` |
+| `integrations.sentry` | Sentry | `errorTracking` | Production errors behind a bug | `org` (required): Organization slug; `project` (required): Project slug; `url`: Self-hosted base URL | Sentry MCP (find projects), or `sentry-cli projects list` |
+| `integrations.posthog` | PostHog | `analytics`, `featureFlags` | Product analytics, feature flags, session replay | `projectId` (required): Numeric project id; `host`: App host | PostHog MCP (list projects) |
+| `integrations.slack` | Slack | `chat` | Where dev flows post announcements and alerts | `channel` (required): Channel name or id | Slack MCP (search channels), or ask |
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "repo": { "baseBranch": "main" },
-  "services": { "github": { "owner": "acme", "repo": "web" } },
-  "skipped": ["services.sentry"]
+  "integrations": {
+    "github": { "owner": "acme", "repo": "web" },
+    "linear": { "teamKey": "ENG" }
+  },
+  "skipped": ["integrations.sentry"]
 }
 ```
 
-`version` is the file format, set by `write`. `skipped` lists sections the team chose not to configure. Sections and fields this plugin doesn't know (from a newer plugin, or added by hand) are reported as warnings and kept as they are.
+`version` is the file format, set by `write`. An older file is upgraded when it's read (version 1 called the integrations `services`), and the next `write` saves it in the current format. `skipped` lists integrations the team chose not to configure. Sections and fields this plugin doesn't know (from a newer plugin, or added by hand) are reported as warnings and kept as they are.
 
-To configure individual sections, name them ($ARGUMENTS): `/agent-flows:configure linear vercel`. A name is a section path or its last part (`services.linear` or `linear`). Only the named sections are detected, shown, and changed, even ones that were skipped or are already configured; the rest of the file stays as it is. With no names, every section above is considered.
+To configure individual sections, name them ($ARGUMENTS): `/agent-flows:configure linear vercel`. A name is a section path or its last part (`integrations.linear` or `linear`), or a capability (`issueTracker`), which stands for every integration that provides it. Only the named sections are detected, shown, and changed, even ones that were skipped or are already configured; the rest of the file stays as it is. With no names, every section above is considered.
 
 Re-running is safe: values already in the file are kept, skipped sections stay skipped, and when nothing new turns up the command says so and changes nothing.
 
@@ -40,7 +68,7 @@ Re-running is safe: values already in the file are kept, skipped sections stay s
 
 | Command | Description |
 |---------|-------------|
-| `configure.ts <subcommand>` | `show` the config, `detect` what this checkout uses and plan changes, `get <path>...` values, or `write` a patch read from stdin (JSON) |
+| `configure.ts <subcommand>` | `show` the config, `detect` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, or `write` a patch read from stdin (JSON) |
 
 ## Invariants
 
@@ -51,24 +79,25 @@ Re-running is safe: values already in the file are kept, skipped sections stay s
 ## 1. Detect
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" detect [section ...]
+node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" detect [section | capability ...]
 ```
 
-Pass the sections the user named, if any, as they typed them. An unknown name fails with the list of known sections: show it and ask which they meant.
+Pass the sections or capabilities the user named, if any, as they typed them. An unknown name fails with the list of known sections and capabilities: show it and ask which they meant.
 
-The JSON has `configPath`, `exists`, the current `config` (when valid), its `issues`, `detected` (per section path: guessed `values` and the `evidence` behind them, from local files and git metadata only), and a `plan`:
+The JSON has `configPath`, `exists`, the current `config` (when valid), its `issues`, `requested` (when you passed names: the section paths they resolved to, with each capability expanded to its integrations), `coverage` (per capability, the integrations configured for it), `detected` (per section path: guessed `values` and the `evidence` behind them, from local files and git metadata only), and a `plan`:
 
 - `changes`: sections to `add`, and empty fields of configured sections to `fill`.
-- `needs`: required fields still missing after those changes.
+- `needs`: required fields still missing after those changes (per instance, with its `instance` name, for a list).
 - `conflicts`: configured values that disagree with detection. Configured values always win; mention a conflict, never change it on your own.
-- `requested`: the section paths you passed. The plan then covers only those, and proposes each even if it was skipped or nothing was detected, plus any section marked *always* that the config still lacks (the file isn't valid without it).
+- `moreInstances`: for an integration that's already configured, instances detected that match none of its configured ones (a second linked Vercel app). Detection only fills the instance it matches, and never edits a list. These are offered, not planned, and don't make the config out of date.
+- With `requested` set, the plan covers only those sections, and proposes each even if it was skipped or nothing was detected, plus any section marked *always* that the config still lacks (the file isn't valid without it).
 - `upToDate`: the config exists and there is nothing to add or fill. Sections listed in `skipped` were deliberately left out on an earlier run and are never proposed again.
 
 Route on the result:
 
 - **`issues` is non-empty (the file is broken)**: show the issues and stop. For each issue, say what's wrong and the fix (a wrong type or a missing required field); with the user's OK, fix it with `write`, or by hand only when `write` refuses because the file is unreadable, then re-run this command. A version newer than the plugin means the user should upgrade the plugin instead
-- **`plan.upToDate` is true and the user named no sections**: say the config is already up to date (list its sections, any `skipped`, any `warnings`, and any `conflicts`) and stop. Change nothing
-- **the user named sections**: go to fill for exactly the `requested` sections. For each one already configured, show its current values and ask what to change; for the rest, fill them as usual → step 2
+- **`plan.upToDate` is true and the user named no sections**: say the config is already up to date (list its sections, any `skipped`, any `warnings`, and any `conflicts`) and stop. Change nothing. If `plan.moreInstances` isn't empty, add one line per integration naming the instances found, and that `/agent-flows:configure <integration>` adds them
+- **the user named sections**: go to fill for exactly the `requested` sections. For each one already configured, show its current values (and any of its `plan.moreInstances`) and ask what to change; for the rest, fill them as usual → step 2
 - **otherwise**: continue → step 2
 
 ## 2. Fill the gaps
@@ -78,13 +107,17 @@ Work through `plan.changes` and `plan.needs`, plus any sections the user named. 
 1. **The section's lookup** from the table above: a connected MCP server or a signed-in CLI.
 2. **The user**, for anything still missing or ambiguous (two Vercel projects, several Linear teams).
 
+When detection finds several instances of one integration (`detected.<path>.instances`, like a linked Vercel project per app), the plan proposes them all as a list: confirm each, and drop the ones the team doesn't want. To add instances to an integration configured as a single object (the user asked, or accepted some of `plan.moreInstances`), turn its entry into a list: give the existing one a `name` and add the new ones. Names are unique within the list and use lowercase letters, digits, `.`, `_`, and `-` (`web`, `apps-docs`).
+
+Several integrations can provide the same capability (Linear and Jira are both issue trackers). Don't make the user pick just one: when detection finds evidence for more than one, propose each, and when the user named a capability, ask which of its integrations the team uses. They can choose any number; configure those and skip the rest.
+
 When the user named sections, touch only those (and any *always* section the plan adds because the config lacks it): don't propose, fill, or skip any other section.
 
 A section whose required fields can't be found, or that the user doesn't want, goes in the write's `skip` list (sections marked *always* can't be skipped; ask for their values instead), so the next run doesn't propose it again. Never change a value the config already has unless the user asks.
 
 ## 3. Confirm
 
-Show one table of what will change: section, field, new value, and where it came from (detected, looked up, or asked). Then the sections you'll mark skipped. Leave out everything that stays the same, and say how many sections are unchanged.
+Show one table of what will change: section (with the instance name, for a list), field, new value, and where it came from (detected, looked up, or asked). Then the sections you'll mark skipped. Leave out everything that stays the same, and say how many sections are unchanged.
 
 Then use `AskUserQuestion`:
 
@@ -98,12 +131,14 @@ Pass only what changes on stdin, keyed by section path. Each section you include
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" write <<'JSON'
-{"sections": {"repo": {"baseBranch": "main"}, "services.github": {"owner": "acme", "repo": "web"}, "services.linear": {"teamKey": "ENG"}}, "skip": ["services.sentry"]}
+{"sections": {"repo": {"baseBranch": "main"}, "integrations.github": {"owner": "acme", "repo": "web"}, "integrations.linear": {"teamKey": "ENG"}}, "skip": ["integrations.sentry"]}
 JSON
 ```
+
+A list entry replaces the whole list, so include every instance you're keeping: `"integrations.vercel": [{"name": "web", ...}, {"name": "docs", ...}]`.
 
 It validates the whole result and writes only if the content changed, in a fixed order, so the same answers always produce the same file. On issues it prints them with `"written": false` and exits 1: fix each one and run it again. `warnings` (unknown sections or fields it kept) are worth mentioning but don't block.
 
 ## 5. Report
 
-Say what changed in `.agent-flows/config.json`, or that nothing did (`"written": false` with no issues). If it changed, remind the user to commit it so the team shares it.
+Say what changed in `.agent-flows/config.json`, or that nothing did (`"written": false` with no issues). Then, from `coverage`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. If the file changed, remind the user to commit it so the team shares it.

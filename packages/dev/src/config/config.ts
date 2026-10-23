@@ -9,21 +9,41 @@
 // - Known fields are strict: wrong types and missing required fields are
 //   errors, and a write can never introduce an unknown section.
 
+import { freeInstanceName, INSTANCE_KEY, INSTANCE_NAME } from "./instances.ts"
 import { SECTIONS } from "./sections/index.ts"
 import type {
   Detection,
   FieldSpec,
   FieldValue,
   Migration,
+  SectionEntry,
   SectionSpec,
   SectionValues,
 } from "./types.ts"
 
 export const CONFIG_PATH = ".agent-flows/config.json"
-export const CONFIG_VERSION = 1
 
-/** Upgrades from each older version. Empty until the format first changes. */
-export const MIGRATIONS: Migration[] = []
+export { INSTANCE_KEY }
+export const CONFIG_VERSION = 2
+
+/** Upgrades from each older version. */
+export const MIGRATIONS: Migration[] = [
+  {
+    // `services.<id>` became `integrations.<id>` when integrations started
+    // declaring the capabilities they provide.
+    from: 1,
+    migrate({ services, ...rest }) {
+      const out: RawConfig =
+        services === undefined ? rest : { ...rest, integrations: services }
+      if (Array.isArray(out.skipped)) {
+        out.skipped = out.skipped.map((p: unknown) =>
+          typeof p === "string" ? p.replace(/^services\./, "integrations.") : p,
+        )
+      }
+      return out
+    },
+  },
+]
 
 export type RawConfig = Record<string, unknown>
 
@@ -66,7 +86,7 @@ function deleteAt(config: RawConfig, path: string): void {
   }
 }
 
-/** Container paths (`services`) implied by section paths, top-down. */
+/** Container paths (`integrations`) implied by section paths, top-down. */
 function containerPaths(registry: SectionSpec[]): string[] {
   const out = new Set<string>()
   for (const { path } of registry) {
@@ -117,9 +137,12 @@ function checkField(
 ): string | undefined {
   const type = field.type ?? "string"
   if (type === "string") {
-    return typeof value === "string" && value.trim() !== ""
-      ? undefined
-      : `${where} must be a non-empty string`
+    if (typeof value !== "string" || value.trim() === "") {
+      return `${where} must be a non-empty string`
+    }
+    return field.pattern && !field.pattern.regex.test(value)
+      ? `${where} must be ${field.pattern.hint}`
+      : undefined
   }
   if (type === "boolean") {
     return typeof value === "boolean"
@@ -130,6 +153,48 @@ function checkField(
     value.every((v) => typeof v === "string" && v.trim() !== "")
     ? undefined
     : `${where} must be a list of non-empty strings`
+}
+
+const UNKNOWN_NOTE = "kept as is; it may come from a newer plugin"
+
+/** Field problems in one entry (or instance), reported at `where`. */
+function checkEntry(
+  spec: SectionSpec,
+  entry: Record<string, unknown>,
+  where: string,
+  instance: boolean,
+  warnings: string[],
+): string[] {
+  const issues: string[] = []
+  const fields = new Map(spec.fields.map((f) => [f.key, f]))
+  for (const [key, fieldValue] of Object.entries(entry)) {
+    if (instance && key === INSTANCE_KEY) {
+      continue
+    }
+    const field = fields.get(key)
+    if (!field) {
+      warnings.push(`unknown field "${where}.${key}" (${UNKNOWN_NOTE})`)
+      continue
+    }
+    const problem = checkField(field, fieldValue, `${where}.${key}`)
+    if (problem) {
+      issues.push(problem)
+    }
+  }
+  for (const field of spec.fields) {
+    if (field.required && entry[field.key] === undefined) {
+      issues.push(`${where}.${field.key} is required`)
+    }
+  }
+  return issues
+}
+
+/** A configured entry as a list of instances (one, unless it's a list). */
+export function instancesOf(entry: unknown): SectionValues[] {
+  if (Array.isArray(entry)) {
+    return entry.filter(isRecord) as SectionValues[]
+  }
+  return isRecord(entry) ? [entry as SectionValues] : []
 }
 
 export type Check = { issues: string[]; warnings: string[] }
@@ -143,7 +208,6 @@ export function checkConfig(
   const warnings: string[] = []
   const known = new Map(registry.map((s) => [s.path, s]))
   const containers = containerPaths(registry)
-  const unknownNote = "kept as is; it may come from a newer plugin"
 
   const topLevel = new Set(["version", "skipped"])
   for (const path of [...known.keys(), ...containers]) {
@@ -151,7 +215,7 @@ export function checkConfig(
   }
   for (const key of Object.keys(config)) {
     if (!topLevel.has(key)) {
-      warnings.push(`unknown key "${key}" (${unknownNote})`)
+      warnings.push(`unknown key "${key}" (${UNKNOWN_NOTE})`)
     }
   }
   for (const container of containers) {
@@ -166,7 +230,7 @@ export function checkConfig(
     for (const child of Object.keys(value)) {
       const path = `${container}.${child}`
       if (!known.has(path) && !containers.includes(path)) {
-        warnings.push(`unknown section "${path}" (${unknownNote})`)
+        warnings.push(`unknown section "${path}" (${UNKNOWN_NOTE})`)
       }
     }
   }
@@ -192,33 +256,51 @@ export function checkConfig(
       }
       continue
     }
-    if (!isRecord(value)) {
+    if (Array.isArray(value)) {
+      if (!spec.multiple) {
+        issues.push(
+          `${spec.path} must be an object (it can't be configured more than once)`,
+        )
+        continue
+      }
+      if (value.length === 0) {
+        issues.push(`${spec.path} must list at least one instance`)
+        continue
+      }
+    } else if (!isRecord(value)) {
       issues.push(`${spec.path} must be an object`)
       continue
     }
-    const fields = new Map(spec.fields.map((f) => [f.key, f]))
-    for (const [key, fieldValue] of Object.entries(value)) {
-      const field = fields.get(key)
-      if (!field) {
-        warnings.push(`unknown field "${spec.path}.${key}" (${unknownNote})`)
+    const list = Array.isArray(value)
+    const names = new Set<string>()
+    for (const [index, entry] of (list ? value : [value]).entries()) {
+      let where = spec.path
+      if (list) {
+        const name = isRecord(entry) ? entry[INSTANCE_KEY] : undefined
+        const valid = typeof name === "string" && INSTANCE_NAME.test(name)
+        if (!valid) {
+          issues.push(
+            `${spec.path}[${index}].${INSTANCE_KEY} must be lowercase letters, digits, ".", "_", or "-"`,
+          )
+        } else if (names.has(name)) {
+          issues.push(`${spec.path} has two instances named "${name}"`)
+        } else {
+          names.add(name)
+        }
+        where = valid ? `${spec.path}[${name}]` : `${spec.path}[${index}]`
+      }
+      if (!isRecord(entry)) {
+        issues.push(`${where} must be an object`)
         continue
       }
-      const problem = checkField(field, fieldValue, `${spec.path}.${key}`)
-      if (problem) {
-        issues.push(problem)
-      }
-    }
-    for (const field of spec.fields) {
-      if (field.required && value[field.key] === undefined) {
-        issues.push(`${spec.path}.${field.key} is required`)
-      }
+      issues.push(...checkEntry(spec, entry, where, list, warnings))
     }
   }
 
   for (const path of skippedList) {
     const spec = known.get(path)
     if (!spec) {
-      warnings.push(`skipped lists unknown section "${path}" (${unknownNote})`)
+      warnings.push(`skipped lists unknown section "${path}" (${UNKNOWN_NOTE})`)
     } else if (spec.required) {
       issues.push(`${path} is required and can't be skipped`)
     } else if (getAt(config, path) !== undefined) {
@@ -229,8 +311,8 @@ export function checkConfig(
 }
 
 export type ConfigPatch = {
-  /** Each section given replaces its whole entry; `null` removes it. */
-  sections?: Record<string, SectionValues | null>
+  /** Each section given replaces its whole entry (an object, or a list of named instances); `null` removes it. */
+  sections?: Record<string, SectionEntry | null>
   /** Sections to mark as deliberately not configured (removes their entries). */
   skip?: string[]
 }
@@ -289,13 +371,16 @@ export function normalize(
   const out = structuredClone(config)
   for (const spec of registry) {
     const value = getAt(out, spec.path)
+    const keys = spec.fields.map((f) => f.key)
     if (isRecord(value)) {
+      setAt(out, spec.path, ordered(value, keys))
+    } else if (Array.isArray(value)) {
+      // Instances keep their order: it's the team's, and flows try them in it.
       setAt(
         out,
         spec.path,
-        ordered(
-          value,
-          spec.fields.map((f) => f.key),
+        value.map((entry) =>
+          isRecord(entry) ? ordered(entry, [INSTANCE_KEY, ...keys]) : entry,
         ),
       )
     }
@@ -375,7 +460,7 @@ export function serializeConfig(config: RawConfig): string {
 }
 
 export type PlannedChange =
-  | { section: string; kind: "add"; values: SectionValues; evidence: string[] }
+  | { section: string; kind: "add"; values: SectionEntry; evidence: string[] }
   | {
       section: string
       kind: "fill"
@@ -389,8 +474,8 @@ export type Plan = {
   upToDate: boolean
   /** What detection would add: new sections, and empty fields of configured ones. */
   changes: PlannedChange[]
-  /** Required fields still missing after the changes, per section. */
-  needs: { section: string; fields: string[] }[]
+  /** Required fields still missing after the changes, per section (and instance, for a list). */
+  needs: { section: string; instance?: string; fields: string[] }[]
   /** Configured values that disagree with detection. Never changed automatically. */
   conflicts: {
     section: string
@@ -398,6 +483,12 @@ export type Plan = {
     configured: FieldValue
     detected: FieldValue
   }[]
+  /**
+   * Instances detected for a configured section that allows several, matching
+   * none of its configured ones (a second linked Vercel app). Offered, never
+   * added automatically, and they don't make the plan out of date.
+   */
+  moreInstances: { section: string; instances: SectionValues[] }[]
 }
 
 function sameValue(a: unknown, b: unknown): boolean {
@@ -405,7 +496,33 @@ function sameValue(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Resolve section names as a user types them: a full path (`services.linear`)
+ * Whether a detected instance is a configured one: they share at least one
+ * required field (its identity: a project id, a repo), and agree on every
+ * required field both set.
+ */
+function sameInstance(
+  spec: SectionSpec,
+  configured: SectionValues,
+  detected: SectionValues,
+): boolean {
+  const shared = spec.fields.filter(
+    (f) =>
+      f.required &&
+      configured[f.key] !== undefined &&
+      detected[f.key] !== undefined,
+  )
+  return (
+    shared.length > 0 &&
+    shared.every((f) => sameValue(configured[f.key], detected[f.key]))
+  )
+}
+
+function identifiable(spec: SectionSpec, values: SectionValues): boolean {
+  return spec.fields.some((f) => f.required && values[f.key] !== undefined)
+}
+
+/**
+ * Resolve section names as a user types them: a full path (`integrations.linear`)
  * or its last segment (`linear`).
  */
 export function resolveSections(
@@ -446,10 +563,11 @@ export function planConfig(
 ): Plan {
   const changes: PlannedChange[] = []
   const conflicts: Plan["conflicts"] = []
+  const moreInstances: Plan["moreInstances"] = []
   const skipped = new Set(
     Array.isArray(config?.skipped) ? (config.skipped as string[]) : [],
   )
-  const proposed = new Map<string, SectionValues>()
+  const proposed = new Map<string, SectionEntry>()
   const specs = only
     ? registry.filter(
         (spec) =>
@@ -467,52 +585,102 @@ export function planConfig(
         : spec.required
           ? { values: {}, evidence: ["always configured"] }
           : undefined)
-    if (isRecord(current)) {
-      proposed.set(spec.path, current as SectionValues)
+    if (isRecord(current) || Array.isArray(current)) {
+      proposed.set(spec.path, current as SectionEntry)
     }
     if (!found || (!only && skipped.has(spec.path))) {
       continue
     }
-    if (!isRecord(current)) {
+    if (!isRecord(current) && !Array.isArray(current)) {
+      const values: SectionEntry =
+        spec.multiple && (found.instances?.length ?? 0) > 1
+          ? (found.instances as SectionValues[])
+          : found.values
       changes.push({
         section: spec.path,
         kind: "add",
-        values: found.values,
+        values,
         evidence: found.evidence,
       })
-      proposed.set(spec.path, found.values)
+      proposed.set(spec.path, values)
       continue
     }
-    for (const [field, value] of Object.entries(found.values)) {
-      if (current[field] === undefined) {
-        changes.push({
-          section: spec.path,
-          kind: "fill",
-          field,
-          value,
-          evidence: found.evidence,
-        })
-      } else if (!sameValue(current[field], value)) {
-        conflicts.push({
-          section: spec.path,
-          field,
-          configured: current[field] as FieldValue,
-          detected: value,
-        })
+    const compare = (configured: SectionValues, values: SectionValues) => {
+      for (const [field, value] of Object.entries(values)) {
+        if (field === INSTANCE_KEY) {
+          continue
+        }
+        if (configured[field] === undefined) {
+          changes.push({
+            section: spec.path,
+            kind: "fill",
+            field,
+            value,
+            evidence: found.evidence,
+          })
+        } else if (!sameValue(configured[field], value)) {
+          conflicts.push({
+            section: spec.path,
+            field,
+            configured: configured[field],
+            detected: value,
+          })
+        }
       }
+    }
+    if (!spec.multiple) {
+      compare(current as SectionValues, found.values)
+      continue
+    }
+    // Several can exist, so detected values that differ from the configured
+    // ones are another instance, not a conflict. Fill only the instance they
+    // match, and never edit a list: the team curated it.
+    const configured = instancesOf(current)
+    const unmatched: SectionValues[] = []
+    // Offered names must be free, so adding them to the list can't collide.
+    const taken = new Set(configured.map((c) => String(c[INSTANCE_KEY])))
+    for (const instance of found.instances ?? [found.values]) {
+      const match = configured.find((c) => sameInstance(spec, c, instance))
+      if (match && !Array.isArray(current)) {
+        compare(match, instance)
+      } else if (!match && identifiable(spec, instance)) {
+        const name = instance[INSTANCE_KEY]
+        if (typeof name === "string") {
+          const free = freeInstanceName(name, taken)
+          taken.add(free)
+          unmatched.push({ ...instance, [INSTANCE_KEY]: free })
+        } else {
+          unmatched.push(instance)
+        }
+      } else if (!match && !found.instances && !Array.isArray(current)) {
+        // Nothing to identify an instance by (only optional fields, like a
+        // self-hosted URL): it can only describe the one configured.
+        compare(current as SectionValues, instance)
+      }
+    }
+    if (unmatched.length > 0) {
+      moreInstances.push({ section: spec.path, instances: unmatched })
     }
   }
   const needs: Plan["needs"] = []
   for (const spec of specs) {
-    const values = proposed.get(spec.path)
-    if (!values) {
+    const entry = proposed.get(spec.path)
+    if (!entry) {
       continue
     }
-    const missing = spec.fields
-      .filter((f) => f.required && values[f.key] === undefined)
-      .map((f) => f.key)
-    if (missing.length > 0) {
-      needs.push({ section: spec.path, fields: missing })
+    for (const values of instancesOf(entry)) {
+      const missing = spec.fields
+        .filter((f) => f.required && values[f.key] === undefined)
+        .map((f) => f.key)
+      if (missing.length > 0) {
+        needs.push({
+          section: spec.path,
+          ...(Array.isArray(entry)
+            ? { instance: String(values[INSTANCE_KEY]) }
+            : {}),
+          fields: missing,
+        })
+      }
     }
   }
   return {
@@ -521,6 +689,7 @@ export function planConfig(
     changes,
     needs,
     conflicts,
+    moreInstances,
   }
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { knownPaths } from "../commands/configure.ts"
+import { findCapability } from "../config/integrations.ts"
 import { configureFlow } from "./configure.ts"
 import { renderAllSkills } from "./index.ts"
 import { devKit } from "./kit.ts"
@@ -34,6 +35,22 @@ describe("dev flows", () => {
     expect(reads).toContain("repo.baseBranch")
     for (const path of reads) {
       expect(known.has(path), path).toBe(true)
+    }
+  })
+
+  it("only asks for capabilities that exist, never a vendor", () => {
+    const asks = files.flatMap((f) =>
+      [
+        ...f.content.matchAll(/configure\.ts" integrations ((?:\w+ ?)+)/g),
+      ].flatMap((m) => m[1].trim().split(" ")),
+    )
+    expect(asks).toContain("sourceControl")
+    for (const id of asks) {
+      expect(findCapability(id), id).toBeDefined()
+    }
+    const evaluate = files.filter((f) => f.path.includes("evaluate"))
+    for (const file of evaluate) {
+      expect(file.content).not.toMatch(/\bgh |\bglab |GitHub|GitLab/)
     }
   })
 

@@ -1,5 +1,5 @@
 import path from "node:path"
-import type { SectionSpec } from "../types.ts"
+import type { IntegrationSpec } from "../types.ts"
 
 /** Graphite's repo config: `{ "trunk": "main" }` or `{ "trunks": [{ "name": "main" }] }`. */
 export function parseGraphiteConfig(text: string): string | undefined {
@@ -18,8 +18,8 @@ export function parseGraphiteConfig(text: string): string | undefined {
   }
 }
 
-export const graphite: SectionSpec = {
-  path: "services.graphite",
+export const graphite: IntegrationSpec = {
+  path: "integrations.graphite",
   name: "Graphite",
   purpose: "Stacked branches and PRs",
   fields: [
@@ -31,6 +31,7 @@ export const graphite: SectionSpec = {
     },
   ],
   lookup: "`gt trunk`",
+  provides: { stacking: {} },
   detect(ctx) {
     const text = ctx.gitCommonDir
       ? ctx.read(path.join(ctx.gitCommonDir, ".graphite_repo_config"))

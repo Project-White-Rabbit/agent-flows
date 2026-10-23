@@ -8,7 +8,7 @@
     {
       "name": "agent-flows",
       "source": "./packages/dev",
-      "description": "Dev workflow commands for any repository: configure the repo's third-party services, evaluate a branch or PR for shippability."
+      "description": "Dev workflow commands for any repository: configure the repo's integrations, evaluate a branch or PR for shippability."
     }
   ]
 }

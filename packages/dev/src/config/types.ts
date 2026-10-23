@@ -1,8 +1,12 @@
 // The shape every piece of agent-flows configuration is declared in. A section
-// (`repo`, `services.github`, …) is one object of fields at a dotted path in
+// (`repo`, `integrations.github`, …) is one object of fields at a dotted path in
 // .agent-flows/config.json. Adding configuration means adding a SectionSpec;
 // validation, detection, planning, reads, and the configure skill's docs are
 // all derived from the registry, so every section behaves the same way.
+//
+// Most sections are integrations: a third-party tool that fills one or more
+// capabilities (source control, issue tracker, …). Flows ask for a capability,
+// never a vendor, so a repo can swap Linear for Jira, or use both.
 //
 // Runtime code: commands import this straight from the installed plugin, so it
 // uses Node built-ins only.
@@ -11,6 +15,9 @@ export type FieldType = "string" | "boolean" | "string[]"
 
 export type FieldValue = string | boolean | string[]
 
+/** A shape a string field must match, and how to describe it in an error. */
+export type FieldPattern = { regex: RegExp; hint: string }
+
 export type FieldSpec = {
   key: string
   description: string
@@ -18,13 +25,27 @@ export type FieldSpec = {
   type?: FieldType
   example: FieldValue
   required?: boolean
+  /** Required for any field an op uses, since ops become shell commands. */
+  pattern?: FieldPattern
 }
 
 export type SectionValues = Record<string, FieldValue>
 
+/**
+ * What a section holds in the config: one object of fields, or, for a section
+ * that allows several instances, a list of them, each with a unique `name`.
+ */
+export type SectionEntry = SectionValues | SectionValues[]
+
 export type Detection = {
   /** Guessed field values; may be partial or empty. */
   values: SectionValues
+  /**
+   * When the checkout has several (one Vercel project per app), each one's
+   * values with a `name`; `values` is then the first. Only for sections that
+   * allow `multiple`.
+   */
+  instances?: SectionValues[]
   /** Why we think the repo uses this, one short phrase per clue. */
   evidence: string[]
 }
@@ -54,7 +75,7 @@ export type DetectContext = {
 }
 
 export type SectionSpec = {
-  /** Dotted location in the config file: `repo`, `services.github`. */
+  /** Dotted location in the config file: `repo`, `integrations.github`. */
   path: string
   name: string
   /** What dev flows use it for. */
@@ -65,10 +86,43 @@ export type SectionSpec = {
    * can't be skipped. For settings every flow can rely on.
    */
   required?: boolean
+  /**
+   * Can be configured more than once (two Vercel projects, two Sentry
+   * projects): the entry is then a list, each item with a unique `name`.
+   */
+  multiple?: boolean
   /** How to look values up when detection can't (MCP tools, CLI commands). */
   lookup?: string
   /** Guess values from the checkout. Return undefined when there's no sign of it. */
   detect?(ctx: DetectContext): Detection | undefined
+}
+
+/**
+ * A job flows need done, independent of the tool that does it. Flows ask for
+ * every configured integration that provides it, so a repo can have several.
+ */
+export type CapabilitySpec = {
+  id: string
+  name: string
+  /** What dev flows use it for. */
+  purpose: string
+  /**
+   * What flows can ask a provider to do: op name → the contract every
+   * integration providing this capability implements. Only ops a flow uses.
+   */
+  ops: Record<string, string>
+}
+
+/**
+ * A section at `integrations.<id>` for a third-party tool. For each capability
+ * it provides, it says how to perform that capability's ops: prose or a
+ * command, where `{field}` stands for a required field's value, `{field|x}`
+ * for an optional field's value or `x` when it's unset, and `{field:encoded}`
+ * URL-encodes it; `<N>`-style placeholders are filled in by the flow. An integration configured several times gets its ops filled
+ * once per instance, so each op must name the instance it acts on.
+ */
+export type IntegrationSpec = SectionSpec & {
+  provides: Record<string, Record<string, string>>
 }
 
 /**

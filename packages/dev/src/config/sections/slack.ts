@@ -1,7 +1,7 @@
-import type { SectionSpec } from "../types.ts"
+import type { IntegrationSpec } from "../types.ts"
 
-export const slack: SectionSpec = {
-  path: "services.slack",
+export const slack: IntegrationSpec = {
+  path: "integrations.slack",
   name: "Slack",
   purpose: "Where dev flows post announcements and alerts",
   fields: [
@@ -12,7 +12,9 @@ export const slack: SectionSpec = {
       required: true,
     },
   ],
+  multiple: true,
   lookup: "Slack MCP (search channels), or ask",
+  provides: { chat: {} },
   detect(ctx) {
     const evidence = ctx.dependsOn(/^@slack\//)
     return evidence.length > 0 ? { values: {}, evidence } : undefined

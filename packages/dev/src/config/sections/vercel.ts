@@ -1,8 +1,9 @@
 import path from "node:path"
-import type { Detection, SectionSpec, SectionValues } from "../types.ts"
+import { uniqueInstanceNames } from "../instances.ts"
+import type { Detection, IntegrationSpec, SectionValues } from "../types.ts"
 
-export const vercel: SectionSpec = {
-  path: "services.vercel",
+export const vercel: IntegrationSpec = {
+  path: "integrations.vercel",
   name: "Vercel",
   purpose: "Preview and production deployments, runtime logs",
   fields: [
@@ -13,12 +14,21 @@ export const vercel: SectionSpec = {
       example: "prj_abc123",
       required: true,
     },
+    {
+      key: "directory",
+      description: "App directory it deploys, in a monorepo",
+      example: "apps/web",
+    },
   ],
+  multiple: true,
   lookup: "Vercel MCP, or `vercel project ls`",
+  provides: { deployments: {} },
   detect(ctx) {
     const evidence = ctx.dependsOn(/^(@vercel\/|vercel$)/)
-    let values: SectionValues = {}
-    // A monorepo app keeps its own .vercel/ next to its package.json.
+    // A monorepo app keeps its own .vercel/ next to its package.json, so each
+    // linked app is an instance.
+    const instances: SectionValues[] = []
+    const names: { preferred: string; fallback: string }[] = []
     for (const dir of ctx.packageDirs) {
       const file = path.join(dir, ".vercel", "project.json")
       const project = ctx.readJson(file)
@@ -26,19 +36,36 @@ export const vercel: SectionSpec = {
         continue
       }
       evidence.unshift(`${file} (linked with vercel link)`)
-      if (Object.keys(values).length === 0) {
-        values = {
-          ...(typeof project.orgId === "string" ? { team: project.orgId } : {}),
-          ...(typeof project.projectId === "string"
-            ? { project: project.projectId }
-            : {}),
-        }
-      }
+      // Named after the project, else its app directory; the full path
+      // breaks ties (apps/web vs packages/web).
+      names.push({
+        preferred:
+          typeof project.projectName === "string"
+            ? project.projectName
+            : dir === ""
+              ? "root"
+              : path.basename(dir),
+        fallback: dir === "" ? "root" : dir,
+      })
+      instances.push({
+        ...(typeof project.orgId === "string" ? { team: project.orgId } : {}),
+        ...(typeof project.projectId === "string"
+          ? { project: project.projectId }
+          : {}),
+        ...(dir !== "" ? { directory: dir } : {}),
+      })
     }
     if (ctx.tracked.includes("vercel.json")) {
       evidence.push("vercel.json")
     }
-    const detection: Detection = { values, evidence }
+    const unique = uniqueInstanceNames(names)
+    const detection: Detection = {
+      values: instances[0] ?? {},
+      ...(instances.length > 1
+        ? { instances: instances.map((v, i) => ({ name: unique[i], ...v })) }
+        : {}),
+      evidence,
+    }
     return evidence.length > 0 ? detection : undefined
   },
 }

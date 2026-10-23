@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   applyPatch,
+  CONFIG_VERSION,
   checkConfig,
   checkPatch,
   migrate,
@@ -37,11 +38,15 @@ const REGISTRY: SectionSpec[] = [
     path: "services.beta",
     name: "Beta",
     purpose: "",
-    fields: [{ key: "id", description: "", example: "b1", required: true }],
+    multiple: true,
+    fields: [
+      { key: "id", description: "", example: "b1", required: true },
+      { key: "url", description: "", example: "https://b.example" },
+    ],
   },
 ]
 
-const base = { version: 1, repo: { baseBranch: "main" } }
+const base = { version: CONFIG_VERSION, repo: { baseBranch: "main" } }
 
 describe("checkConfig", () => {
   it("accepts a minimal valid config", () => {
@@ -109,6 +114,48 @@ describe("checkConfig", () => {
   })
 })
 
+describe("checkConfig with instance lists", () => {
+  it("accepts named instances of a section that allows several", () => {
+    expect(
+      checkConfig(
+        {
+          ...base,
+          services: {
+            beta: [
+              { name: "web", id: "b1" },
+              { name: "docs", id: "b2" },
+            ],
+          },
+        },
+        REGISTRY,
+      ),
+    ).toEqual({ issues: [], warnings: [] })
+  })
+
+  it("checks every instance, and their names", () => {
+    expect(
+      checkConfig(
+        {
+          ...base,
+          services: {
+            alpha: [{ name: "a", id: "a1" }],
+            beta: [{ name: "web", id: "b1" }, { name: "web" }, { id: "b3" }],
+          },
+        },
+        REGISTRY,
+      ).issues,
+    ).toEqual([
+      "services.alpha must be an object (it can't be configured more than once)",
+      'services.beta has two instances named "web"',
+      "services.beta[web].id is required",
+      'services.beta[2].name must be lowercase letters, digits, ".", "_", or "-"',
+    ])
+    expect(
+      checkConfig({ ...base, services: { beta: [] } }, REGISTRY).issues,
+    ).toEqual(["services.beta must list at least one instance"])
+  })
+})
+
 describe("migrate", () => {
   const migrations = [
     {
@@ -128,6 +175,25 @@ describe("migrate", () => {
     expect(migrate({ version: 3 }, migrations, 2).issues).toEqual([
       expect.stringContaining("upgrade the agent-flows plugin"),
     ])
+  })
+
+  it("moves v1 services to integrations, skipped entries included", () => {
+    expect(
+      migrate({
+        version: 1,
+        repo: { baseBranch: "main" },
+        services: { github: { owner: "acme", repo: "web" } },
+        skipped: ["services.sentry"],
+      }),
+    ).toEqual({
+      config: {
+        version: 2,
+        repo: { baseBranch: "main" },
+        integrations: { github: { owner: "acme", repo: "web" } },
+        skipped: ["integrations.sentry"],
+      },
+      issues: [],
+    })
   })
 
   it("needs a version", () => {
@@ -168,7 +234,7 @@ describe("applyPatch", () => {
       REGISTRY,
     )
     expect(next).toEqual({
-      version: 1,
+      version: CONFIG_VERSION,
       repo: { baseBranch: "main" },
       services: { alpha: { id: "a" }, gamma: { id: "g" } },
       hooks: { pre: "x" },
@@ -218,7 +284,7 @@ describe("applyPatch", () => {
     )
     expect(serializeConfig(b)).toBe(serializeConfig(a))
     expect(serializeConfig(a)).toBe(`{
-  "version": 1,
+  "version": ${CONFIG_VERSION},
   "repo": {
     "baseBranch": "main",
     "protected": false
@@ -303,6 +369,7 @@ describe("planConfig", () => {
       changes: [],
       needs: [],
       conflicts: [],
+      moreInstances: [],
     })
   })
 
@@ -335,6 +402,162 @@ describe("planConfig", () => {
         detected: "a",
       },
     ])
+  })
+})
+
+describe("planConfig with instances", () => {
+  it("proposes every detected instance as a list, with needs per instance", () => {
+    const plan = planConfig(
+      base,
+      {
+        "services.beta": {
+          values: { id: "b1" },
+          instances: [{ name: "web", id: "b1" }, { name: "docs" }],
+          evidence: ["two linked apps"],
+        },
+      },
+      REGISTRY,
+    )
+    expect(plan.changes).toEqual([
+      expect.objectContaining({
+        section: "services.beta",
+        kind: "add",
+        values: [{ name: "web", id: "b1" }, { name: "docs" }],
+      }),
+    ])
+    expect(plan.needs).toEqual([
+      { section: "services.beta", instance: "docs", fields: ["id"] },
+    ])
+  })
+
+  it("never edits a list the team configured, and offers new instances", () => {
+    const config = {
+      ...base,
+      services: { beta: [{ name: "web", id: "b1" }] },
+    }
+    expect(
+      planConfig(
+        config,
+        {
+          "services.beta": {
+            values: { id: "b1" },
+            instances: [
+              { name: "web", id: "b1" },
+              { name: "docs", id: "b2" },
+            ],
+            evidence: ["clue"],
+          },
+        },
+        REGISTRY,
+      ),
+    ).toEqual({
+      upToDate: true,
+      changes: [],
+      needs: [],
+      conflicts: [],
+      moreInstances: [
+        { section: "services.beta", instances: [{ name: "docs", id: "b2" }] },
+      ],
+    })
+  })
+
+  it("fills a single entry only from the instance it matches", () => {
+    // The bug: a configured web project got the first detected app's values.
+    const config = {
+      ...base,
+      services: { beta: { id: "b-web" } },
+    }
+    const plan = planConfig(
+      config,
+      {
+        "services.beta": {
+          values: { id: "b-docs", tags: ["docs"] },
+          instances: [
+            { name: "docs", id: "b-docs" },
+            { name: "web", id: "b-web" },
+          ],
+          evidence: ["two linked apps"],
+        },
+      },
+      REGISTRY,
+    )
+    expect(plan.conflicts).toEqual([])
+    expect(plan.changes).toEqual([])
+    expect(plan.moreInstances).toEqual([
+      { section: "services.beta", instances: [{ name: "docs", id: "b-docs" }] },
+    ])
+  })
+
+  it("offers new instances under names the list doesn't use yet", () => {
+    const plan = planConfig(
+      { ...base, services: { beta: [{ name: "web", id: "b-old" }] } },
+      {
+        "services.beta": {
+          values: { id: "b-web" },
+          instances: [
+            { name: "web", id: "b-web" },
+            { name: "docs", id: "b-docs" },
+          ],
+          evidence: ["two linked apps"],
+        },
+      },
+      REGISTRY,
+    )
+    expect(plan.moreInstances[0].instances.map((i) => i.name)).toEqual([
+      "web-2",
+      "docs",
+    ])
+  })
+
+  it("still fills optional fields when there's nothing to match on", () => {
+    const plan = planConfig(
+      { ...base, services: { beta: { id: "b1" } } },
+      {
+        "services.beta": {
+          values: { url: "https://s.acme" },
+          evidence: ["clue"],
+        },
+      },
+      REGISTRY,
+    )
+    expect(plan.changes).toEqual([
+      expect.objectContaining({
+        kind: "fill",
+        field: "url",
+        value: "https://s.acme",
+      }),
+    ])
+    expect(plan.moreInstances).toEqual([])
+  })
+
+  it("treats a different id as another instance, not a conflict", () => {
+    const plan = planConfig(
+      { ...base, services: { beta: { id: "b1" } } },
+      { "services.beta": { values: { id: "b2" }, evidence: ["clue"] } },
+      REGISTRY,
+    )
+    expect(plan.conflicts).toEqual([])
+    expect(plan.moreInstances).toEqual([
+      { section: "services.beta", instances: [{ id: "b2" }] },
+    ])
+  })
+
+  it("orders instance keys with the name first and keeps instance order", () => {
+    const out = normalize(
+      {
+        ...base,
+        services: {
+          beta: [
+            { id: "b2", name: "z" },
+            { id: "b1", name: "a" },
+          ],
+        },
+      },
+      REGISTRY,
+    )
+    expect(JSON.stringify((out.services as { beta: unknown }).beta)).toBe(
+      '[{"name":"z","id":"b2"},{"name":"a","id":"b1"}]',
+    )
   })
 })
 
