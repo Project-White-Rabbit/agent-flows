@@ -1,4 +1,4 @@
-import type { SectionSpec, SectionValues } from "../types.ts"
+import type { IntegrationSpec, SectionValues } from "../types.ts"
 
 /** `defaults.org=acme` (sentry.properties) or `[defaults]\norg=acme` (.sentryclirc). */
 export function parseSentryConfig(text: string): SectionValues {
@@ -27,8 +27,8 @@ export function parseSentryConfig(text: string): SectionValues {
   return out
 }
 
-export const sentry: SectionSpec = {
-  path: "services.sentry",
+export const sentry: IntegrationSpec = {
+  path: "integrations.sentry",
   name: "Sentry",
   purpose: "Production errors behind a bug",
   fields: [
@@ -50,7 +50,9 @@ export const sentry: SectionSpec = {
       example: "https://sentry.acme.dev",
     },
   ],
+  multiple: true,
   lookup: "Sentry MCP (find projects), or `sentry-cli projects list`",
+  provides: { errorTracking: {} },
   detect(ctx) {
     const evidence: string[] = []
     let values: SectionValues = {}

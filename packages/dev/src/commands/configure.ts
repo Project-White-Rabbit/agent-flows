@@ -4,6 +4,7 @@
 
 import fs from "node:fs"
 import path from "node:path"
+import { CAPABILITIES } from "../config/capabilities.ts"
 import {
   applyPatch,
   CONFIG_PATH,
@@ -11,6 +12,7 @@ import {
   checkConfig,
   checkPatch,
   getAt,
+  INSTANCE_KEY,
   isRecord,
   migrate,
   planConfig,
@@ -19,6 +21,12 @@ import {
   serializeConfig,
 } from "../config/config.ts"
 import { createDetectContext, detectSections } from "../config/detect.ts"
+import {
+  coverage,
+  findCapability,
+  providersOf,
+  resolveCapability,
+} from "../config/integrations.ts"
 import { SECTIONS } from "../config/sections/index.ts"
 import { isMain, printJson, readStdin, run, runMain } from "./lib.ts"
 
@@ -101,6 +109,24 @@ function notConfigured(
   process.exitCode = NOT_CONFIGURED_EXIT
 }
 
+/** The config, or `"configured": false` (exit 2) when it's missing or invalid. */
+function requireConfig(root: string): RawConfig | undefined {
+  const loaded = loadConfig(root)
+  if (!loaded.config) {
+    notConfigured(
+      {
+        configPath: loaded.configPath,
+        ...(loaded.exists ? { issues: loaded.issues } : {}),
+      },
+      loaded.exists
+        ? `${CONFIG_PATH} is invalid. Run the agent-flows configure command to fix it.`
+        : `This repo has no ${CONFIG_PATH} yet. Run the agent-flows configure command first.`,
+    )
+    return undefined
+  }
+  return loaded.config
+}
+
 /**
  * Print the values at `paths`, or `"configured": false` and exit 2 when the
  * config is missing, invalid, or lacks any of them. Flows read configuration
@@ -118,28 +144,18 @@ function get(root: string, paths: string[]): void {
       `unknown config path(s): ${unknown.join(", ")} (known: ${[...known].join(", ")})`,
     )
   }
-  const loaded = loadConfig(root)
-  if (!loaded.config) {
-    notConfigured(
-      {
-        configPath: loaded.configPath,
-        ...(loaded.exists ? { issues: loaded.issues } : {}),
-      },
-      loaded.exists
-        ? `${CONFIG_PATH} is invalid. Run the agent-flows configure command to fix it.`
-        : `This repo has no ${CONFIG_PATH} yet. Run the agent-flows configure command first.`,
-    )
+  const config = requireConfig(root)
+  if (!config) {
     return
   }
-  const config = loaded.config
   const skipped = Array.isArray(config.skipped)
     ? (config.skipped as string[])
     : []
-  const missing = paths.filter((p) => getAt(config, p) === undefined)
+  const missing = paths.filter((p) => readPath(config, p) === undefined)
   if (missing.length > 0) {
     notConfigured(
       {
-        configPath: loaded.configPath,
+        configPath: path.join(root, CONFIG_PATH),
         missing: missing.map((p) => ({
           path: p,
           ...(skipped.some((s) => p === s || p.startsWith(`${s}.`))
@@ -152,12 +168,104 @@ function get(root: string, paths: string[]): void {
     return
   }
   printJson({
-    values: Object.fromEntries(paths.map((p) => [p, getAt(config, p)])),
+    values: Object.fromEntries(paths.map((p) => [p, readPath(config, p)])),
   })
 }
 
+/**
+ * The value at `path`. A field of a section configured as a list reads as
+ * `[{"name": ..., "value": ...}]`, one per instance, with `null` for an
+ * instance that doesn't set it; missing only when none does.
+ */
+function readPath(config: RawConfig, path: string): unknown {
+  const spec = SECTIONS.find((s) => path.startsWith(`${s.path}.`))
+  const entry = spec ? getAt(config, spec.path) : undefined
+  if (!spec || !Array.isArray(entry)) {
+    return getAt(config, path)
+  }
+  const key = path.slice(spec.path.length + 1)
+  const instances = entry.filter(isRecord)
+  return instances.some((e) => e[key] !== undefined)
+    ? instances.map((e) => ({ name: e[INSTANCE_KEY], value: e[key] ?? null }))
+    : undefined
+}
+
+/**
+ * Print every configured integration for each capability, with its values and
+ * ops. A capability with none is `"configured": false` (exit 2) unless
+ * `--optional`, where the flow can carry on without it and gets an empty list.
+ */
+function integrations(root: string, args: string[]): void {
+  const optional = args.includes("--optional")
+  const names = args.filter((a) => a !== "--optional")
+  if (names.length === 0) {
+    throw new Error(
+      "integrations needs at least one capability, e.g. `integrations sourceControl`",
+    )
+  }
+  const unknown = names.filter((n) => !findCapability(n))
+  if (unknown.length > 0) {
+    throw new Error(
+      `unknown capability(s): ${unknown.join(", ")} (known: ${CAPABILITIES.map((c) => c.id).join(", ")})`,
+    )
+  }
+  const config = requireConfig(root)
+  if (!config) {
+    return
+  }
+  const resolved = names.map((name) => {
+    const { id } = findCapability(name) as { id: string }
+    return [id, resolveCapability(config, id)] as const
+  })
+  const missing = resolved.filter(([, r]) => r.configured.length === 0)
+  if (!optional && missing.length > 0) {
+    notConfigured(
+      {
+        configPath: path.join(root, CONFIG_PATH),
+        missing: missing.map(([capability, r]) => ({
+          capability,
+          ...(r.unconfigured.length > 0 ? { options: r.unconfigured } : {}),
+          ...(r.skipped.length > 0 ? { skipped: r.skipped } : {}),
+        })),
+      },
+      `${CONFIG_PATH} has no integration for ${missing.map(([c]) => c).join(", ")}. Run the agent-flows configure command with that capability to add one.`,
+    )
+    return
+  }
+  printJson({
+    integrations: Object.fromEntries(
+      resolved.map(([id, r]) => [id, r.configured]),
+    ),
+  })
+}
+
+/**
+ * Section paths for what a user typed: a section path, its last segment, or a
+ * capability (every integration that provides it).
+ */
+export function resolveNames(names: string[]): {
+  paths: string[]
+  unknown: string[]
+} {
+  const paths: string[] = []
+  const rest: string[] = []
+  for (const name of names) {
+    const capability = findCapability(name)
+    if (capability) {
+      paths.push(...providersOf(capability.id).map((s) => s.path))
+    } else {
+      rest.push(name)
+    }
+  }
+  const sections = resolveSections(rest)
+  return {
+    paths: [...new Set([...paths, ...sections.paths])],
+    unknown: sections.unknown,
+  }
+}
+
 const PATCH_SHAPE =
-  '{"sections": {"<path>": {...} | null}, "skip": ["<path>", ...]}'
+  '{"sections": {"<path>": {...} | [{"name": ..., ...}, ...] | null}, "skip": ["<path>", ...]}'
 
 function parsePatch(input: string): ConfigPatch {
   let patch: unknown
@@ -173,7 +281,10 @@ function parsePatch(input: string): ConfigPatch {
   const sectionsOk =
     sections === undefined ||
     (isRecord(sections) &&
-      Object.values(sections).every((v) => v === null || isRecord(v)))
+      Object.values(sections).every(
+        (v) =>
+          v === null || isRecord(v) || (Array.isArray(v) && v.every(isRecord)),
+      ))
   const skipOk =
     skip === undefined ||
     (Array.isArray(skip) && skip.every((p) => typeof p === "string"))
@@ -228,6 +339,7 @@ async function write(root: string): Promise<void> {
     configPath: current.configPath,
     written: changed,
     config: next,
+    coverage: coverage(next),
     ...(warnings.length > 0 ? { warnings } : {}),
   })
 }
@@ -235,19 +347,31 @@ async function write(root: string): Promise<void> {
 const HELP = `Usage: configure.ts <command>
 
   show            Print ${CONFIG_PATH} with its issues and warnings.
-  detect [section...]
+  detect [section | capability ...]
                   Print the current config, what each section's detector found
                   (values and evidence), and a plan: what's new, which required
                   fields are missing, and whether it's already upToDate. Given
-                  sections (linear or services.linear), detects and plans only
-                  those, including ones skipped before.
+                  sections (linear or integrations.linear) or capabilities
+                  (issueTracker: every integration providing it), detects and
+                  plans only those, including ones skipped before.
   get <path>...   Print {"values": {"<path>": value}} for sections or fields
-                  (repo.baseBranch, services.linear). Exits ${NOT_CONFIGURED_EXIT} with
+                  (repo.baseBranch, integrations.linear). A field of an
+                  integration configured as a list prints one {name, value}
+                  per instance. Exits ${NOT_CONFIGURED_EXIT} with
                   {"configured": false} when the config is missing, invalid, or
                   doesn't set a path.
+  integrations <capability>... [--optional]
+                  Print {"integrations": {"<capability>": [...]}}: every
+                  configured integration providing it (one per instance), with
+                  its values and ops.
+                  Exits ${NOT_CONFIGURED_EXIT} with {"configured": false} when the config is
+                  missing or invalid, or (without --optional) a capability has
+                  no integration.
   write           Read ${PATCH_SHAPE}
-                  on stdin. Each section given replaces its entry, null removes
-                  it, skip marks sections as deliberately not configured.
+                  on stdin. Each section given replaces its entry (a list of
+                  named instances, for an integration configured more than
+                  once), null removes it, skip marks sections as deliberately
+                  not configured.
                   Validates, and writes only if the content changed; on issues,
                   prints them and exits 1.
 `
@@ -260,14 +384,18 @@ async function main(): Promise<void> {
     return
   }
   if (command === "show") {
-    printJson(loadConfig(root))
+    const loaded = loadConfig(root)
+    printJson({
+      ...loaded,
+      ...(loaded.config ? { coverage: coverage(loaded.config) } : {}),
+    })
     return
   }
   if (command === "detect") {
-    const { paths, unknown } = resolveSections(args)
+    const { paths, unknown } = resolveNames(args)
     if (unknown.length > 0) {
       throw new Error(
-        `unknown section(s): ${unknown.join(", ")} (known: ${SECTIONS.map((s) => s.path).join(", ")})`,
+        `unknown section(s): ${unknown.join(", ")} (known sections: ${SECTIONS.map((s) => s.path).join(", ")}; capabilities: ${CAPABILITIES.map((c) => c.id).join(", ")})`,
       )
     }
     const only = paths.length > 0 ? paths : undefined
@@ -281,6 +409,7 @@ async function main(): Promise<void> {
     printJson({
       ...loaded,
       ...(only ? { requested: only } : {}),
+      ...(loaded.config ? { coverage: coverage(loaded.config) } : {}),
       detected,
       // A broken file has to be fixed first, so there is no plan.
       ...(loaded.exists && !loaded.config
@@ -293,12 +422,16 @@ async function main(): Promise<void> {
     get(root, args)
     return
   }
+  if (command === "integrations") {
+    integrations(root, args)
+    return
+  }
   if (command === "write") {
     await write(root)
     return
   }
   throw new Error(
-    `Unknown command '${command}'. Use show, detect, get, or write.`,
+    `Unknown command '${command}'. Use show, detect, get, integrations, or write.`,
   )
 }
 

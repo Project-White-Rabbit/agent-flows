@@ -12,42 +12,50 @@ user-invocable: false
 
 Pure reads.
 
-1. **Base branch:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" get repo.baseBranch` prints `{"values": {"repo.baseBranch": "<base>"}}`. If it exits with status 2 and prints `"configured": false`, stop this command here. Relay its `message`: the repo isn't set up for agent-flows yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`). Tell the user to run `/agent-flows:configure` (naming the missing sections, if any) and then re-run this command. Don't guess the values instead. Then pick the ref to diff against: `<base-ref>` is `origin/<base>` when `git rev-parse --verify --quiet refs/remotes/origin/<base>` succeeds, else `<base>`. Comparing against the remote-tracking ref keeps a stale local base branch from counting already-merged work as this branch's. Don't fetch; use the refs as they are.
-2. **Argument provided?** If the argument parses as an integer or a `https://github.com/.../pull/N` URL, treat it as an explicit PR target. Skip to the gather-diff step with `target = pr:<N>`.
-3. **Current branch:** `git branch --show-current`. If it is the base, abort: `Refusing to evaluate from <base>. Check out the feature branch, or pass an explicit PR number.`
-4. **PR for current branch (context only):** `gh pr view --json number,url,title,body,isDraft,state,baseRefName,headRefName,additions,deletions,changedFiles`. If `gh` reports no pull request, or isn't installed or signed in, there is no PR; continue. A PR found here supplies title/body/state context for the report; it does **not** become the diff source, because the working tree may contain work the PR hasn't seen.
-5. **Working tree state:** `git log --oneline <base-ref>..HEAD` and `git status --porcelain`.
+1. **Base branch:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" get repo.baseBranch` prints `{"values": {"repo.baseBranch": "<base>"}}`. If it exits with status 2 and prints `"configured": false`, stop this command here. Relay its `message`: the repo isn't set up for agent-flows yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `/agent-flows:configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead. Then pick the ref to diff against: `<base-ref>` is `origin/<base>` when `git rev-parse --verify --quiet refs/remotes/origin/<base>` succeeds, else `<base>`. Comparing against the remote-tracking ref keeps a stale local base branch from counting already-merged work as this branch's. Don't fetch; use the refs as they are.
+2. **Source control:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" integrations sourceControl --optional` prints `{"integrations": {"sourceControl": [...]}}`: every source-control entry the repo configured (often one, possibly several, possibly none). Each entry is one configured integration, or one instance of an integration configured more than once (two repositories on one host, told apart by `instance`): its `values` and its `ops`, where each op says how that integration does the job (a command, or prose), with config values already filled in and `<N>`-style placeholders for you to fill. Use the ops as given rather than a CLI you know; a capability can have several integrations, and the skill works the same with any of them. An entry's id is its `integration`, plus `:<instance>` when it has one.
+
+   This checkout can only evaluate PRs of its own repository, since the file contents come from it. So keep the **local entries**: those whose repository (from their `values`) is one of this checkout's remotes in `git remote -v`. Counting every remote, not just `origin`, keeps fork workflows working, where the PR lives in `upstream`. None configured, or none local, means there's no PR context for the working tree.
+3. **Argument provided?** If the argument is a bare number or a pull (or merge) request URL, it's an explicit PR target:
+   - A URL belongs to the entry whose `prRef` it matches. A bare number belongs to the local entry; with several local entries, ask the user which. With entries configured but none local, stop: `No configured source-control repository is a remote of this checkout. Run /agent-flows:configure sourceControl, or run this command from a checkout of a configured repository.`
+   - If that entry isn't local, stop: `That PR is in <entry>'s repository, not this checkout. Check out that repository and re-run.`
+   - If there's no entry at all (none configured, or the URL matches none), stop: tell the user to run `/agent-flows:configure sourceControl`, then re-run this command.
+   - Otherwise skip to the gather-diff step with `target = pr:<entry>:<N>`.
+4. **Current branch:** `git branch --show-current`. If it is the base, abort: `Refusing to evaluate from <base>. Check out the feature branch, or pass an explicit PR number.`
+5. **PR for current branch (context only):** run each local entry's `currentPr` op and stop at the first open PR. If none finds one (or there are no local entries), there is no PR; continue. A PR found here supplies title/body/state context for the report; it does **not** become the diff source, because the working tree may contain work the PR hasn't seen.
+6. **Working tree state:** `git log --oneline <base-ref>..HEAD` and `git status --porcelain`.
    - If either is non-empty: `target = worktree:<branch>`, covering commits ahead of the base, uncommitted (staged and unstaged) changes, and untracked files.
-   - If both are empty and a PR exists (e.g. post-merge): fall back to `target = pr:<number>`.
+   - If both are empty and a PR exists (e.g. post-merge): fall back to `target = pr:<entry>:<number>`.
    - If both are empty and no PR exists, abort: `Nothing to evaluate: <branch> has no commits ahead of <base>, a clean working tree, and no PR. Make a change, or pass an explicit PR number.`
 
-You now have one of: `pr:<N>` (explicit argument or clean-tree fallback) or `worktree:<branch>` (with PR metadata attached if a PR exists).
+You now have one of: `pr:<entry>:<N>` (explicit argument or clean-tree fallback) or `worktree:<branch>` (with PR metadata attached if a PR exists).
 
 ## 2. Gather the diff and context
 
-Delegate the data-gathering to a subagent on a fast, cheaper model (Sonnet on Claude Code) with this prompt, substituting `<target>`, `<base>`, `<base-ref>`, and the PR metadata from the identify-target step. The subagent runs the commands and file reads against a small context; you analyze the results in the what-it-does through report steps, without re-sending the whole conversation on every file read.
+Delegate the data-gathering to a subagent on a fast, cheaper model (Sonnet on Claude Code) with this prompt, substituting `<target>`, `<base>`, `<base-ref>`, the PR metadata, and (for `pr:` targets) the target entry's `values` and `ops` as a JSON block, all from the identify-target step. The subagent runs the commands and file reads against a small context; you analyze the results in the what-it-does through report steps, without re-sending the whole conversation on every file read.
 
 ~~~~markdown
 You are a data-gathering assistant for a branch/PR evaluation. Collect the diff, file contents, and project context listed below. Run the commands, read the files, and return all results in the structured format at the end. Do not analyze, summarize, or editorialize. Just collect and return.
 
-**Target:** `<target>` (either `pr:<N>` or `worktree:<branch>`)
+**Target:** `<target>` (either `pr:<entry>:<N>` or `worktree:<branch>`)
 **Base:** branch `<base>`, compared against ref `<base-ref>`
-**PR metadata from caller (if any):** `<the gh pr view JSON from the identify-target step>`
+**PR metadata from caller (if any):** `<the PR metadata from the identify-target step>`
+**Source-control ops (`pr:` targets only):** the target entry's `values` and `ops`, pasted below as JSON. Each op says how this repository's host does the job: run it as given, with `<N>` filled in (and any condition it states, like a self-managed `host`, applied from `values`).
 
 #### What to collect
 
-**For `pr:<N>`:**
-1. **PR metadata** (skip if the caller already pasted these fields): `gh pr view <N> --json number,title,body,state,isDraft,baseRefName,headRefName,additions,deletions,changedFiles`.
-2. `gh pr diff <N>` (full unified diff)
-3. `gh pr diff <N> --name-only` (file list)
-4. `gh pr view <N> --json commits -q '.commits[].messageHeadline'` (commit subjects)
+**For `pr:<entry>:<N>`:**
+1. **PR metadata** (skip if the caller already pasted these fields): the `prMetadata` op.
+2. The `prDiff` op (full unified diff)
+3. The `prFiles` op (file list)
+4. The `prCommits` op (commit subjects)
 5. For each file in the file list, read the **full current file** (post-change state). Note deleted files as deleted, skip binary files and note them, and read only the first 5000 lines of longer files, noting the truncation.
 
 **For `worktree:<branch>`** (everything in the working tree: commits ahead of the base plus uncommitted and untracked changes):
 1. `BASE=$(git merge-base <base-ref> HEAD)`. All diffs below are against this merge base, so upstream movement on the base doesn't pollute the diff.
 2. `git diff "$BASE"` (committed + staged + unstaged changes in one view)
 3. File list: `git diff "$BASE" --name-only`, plus untracked files from `git ls-files --others --exclude-standard`, each marked `(untracked)`.
-4. `git diff "$BASE" --shortstat` (the counts for the report header; pasted PR metadata describes only what GitHub has seen)
+4. `git diff "$BASE" --shortstat` (the counts for the report header; pasted PR metadata describes only what the source-control host has seen)
 5. `git log --oneline <base-ref>..HEAD` (commit subjects; may be empty)
 6. `git status --porcelain`
 7. For each file in the combined list (including untracked files), read the full current file with the same rules as above. Untracked files aren't in the diff; their full content is their entire addition.
@@ -62,7 +70,7 @@ Return your results using exactly these section headers:
 
 ```
 === PR METADATA ===
-<number, title, body, state, isDraft, baseRefName, headRefName, additions, deletions, changedFiles; or "worktree diff, no PR">
+<number, url, title, body, state, draft, base and head branches, additions, deletions, changed files; or "worktree diff, no PR">
 
 === DIFF STATS ===
 <worktree targets: the --shortstat output plus "untracked: M file(s)"; omit for pr targets>
@@ -107,7 +115,7 @@ Parse the structured sections. Use the root agent instructions already in your c
 
 If `GATHER NOTES` mentions a large diff, say so in the report header: large diffs make every risk harder to assess, and the user should know the evaluation is coarser.
 
-For `worktree:` targets, `GIT STATUS` tells you which changes are uncommitted or untracked. Uncommitted work is part of the evaluation, not a reason to ask the user to commit. Take the header's counts from `DIFF STATS`, never from the PR metadata, which describes only what GitHub has seen.
+For `worktree:` targets, `GIT STATUS` tells you which changes are uncommitted or untracked. Uncommitted work is part of the evaluation, not a reason to ask the user to commit. Take the header's counts from `DIFF STATS`, never from the PR metadata, which describes only what the source-control host has seen.
 
 ## 3. What it does (plain English)
 
@@ -222,7 +230,7 @@ The verdict is the user's call. Phrase it as a recommendation, not a gate: they 
 
 ### Notes
 
-- This skill is read-only. If you find yourself reaching for `gh pr edit`, `git push`, or any write to a service, stop. The output is the report.
+- This skill is read-only. The source-control ops it uses only read. If you find yourself editing a PR, running `git push`, or writing to any service, stop. The output is the report.
 - "Plain English" is load-bearing. If the summary reads like a dump of section headers, rewrite it as if telling a teammate in chat.
 - **What changes for a user**: **Before** is what a person saw happen (the input, the result, whether anything was raised), not what the code said; **After** is what they see now. Cause belongs in "What it does". Say plainly which paths are unchanged. Omit the section for a diff that only adds something new, and never pad it with rows where nothing moved.
 - The risk list is not a checklist. A 3-item list on a 200-line change is more useful than 14 items padded with "no concerns."

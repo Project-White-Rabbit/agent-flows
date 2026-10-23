@@ -1,7 +1,7 @@
-import type { SectionSpec, SectionValues } from "../types.ts"
+import type { IntegrationSpec, SectionValues } from "../types.ts"
 
-export const posthog: SectionSpec = {
-  path: "services.posthog",
+export const posthog: IntegrationSpec = {
+  path: "integrations.posthog",
   name: "PostHog",
   purpose: "Product analytics, feature flags, session replay",
   fields: [
@@ -13,7 +13,9 @@ export const posthog: SectionSpec = {
     },
     { key: "host", description: "App host", example: "https://us.posthog.com" },
   ],
+  multiple: true,
   lookup: "PostHog MCP (list projects)",
+  provides: { analytics: {}, featureFlags: {} },
   detect(ctx) {
     const evidence = ctx.dependsOn(
       /^(posthog-js|posthog-node|posthog-react-native|posthog)$/,

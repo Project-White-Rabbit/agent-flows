@@ -1,7 +1,7 @@
-import type { SectionSpec, SectionValues } from "../types.ts"
+import type { IntegrationSpec, SectionValues } from "../types.ts"
 
-export const neon: SectionSpec = {
-  path: "services.neon",
+export const neon: IntegrationSpec = {
+  path: "integrations.neon",
   name: "Neon",
   purpose: "Postgres branches per worktree, migrations",
   fields: [
@@ -18,7 +18,9 @@ export const neon: SectionSpec = {
     },
     { key: "database", description: "Database name", example: "neondb" },
   ],
+  multiple: true,
   lookup: "Neon MCP (list projects), or `neonctl projects list`",
+  provides: { database: {} },
   detect(ctx) {
     const evidence = ctx.dependsOn(/^@neondatabase\//)
     const context = ctx.readJson(".neon")
