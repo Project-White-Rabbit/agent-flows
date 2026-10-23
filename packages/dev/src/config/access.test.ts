@@ -28,7 +28,13 @@ describe("probeAccess", () => {
     ).toEqual({
       mcp: { server: "GitHub" },
       cli: { bin: "gh", installed: true, ready: true, auth: "gh auth status" },
-      api: { base: "https://api.github.com", token: "GH_TOKEN", ready: true },
+      api: {
+        base: "https://api.github.com",
+        source: "env GH_TOKEN",
+        configured: false,
+        expression: "$GH_TOKEN",
+        ready: true,
+      },
     })
   })
 
@@ -37,7 +43,10 @@ describe("probeAccess", () => {
     expect(signedOut.cli).toMatchObject({ installed: true, ready: false })
     const missing = await probeAccess(github.access, fakeProbe({}))
     expect(missing.cli).toMatchObject({ installed: false, ready: false })
-    expect(missing.api).toMatchObject({ token: "GITHUB_TOKEN", ready: false })
+    expect(missing.api).toMatchObject({
+      source: "env GITHUB_TOKEN",
+      ready: false,
+    })
   })
 
   it("needs no sign-in check for a CLI without one", async () => {
@@ -87,11 +96,11 @@ describe("variant order", () => {
 })
 
 describe("fillOps", () => {
-  it("fills every variant, and the token as its variable", () => {
+  it("fills every variant, and the token as its shell expression", () => {
     const ops = fillOps(
       github.provides.sourceControl,
       { owner: "acme", repo: "web" },
-      "GH_TOKEN",
+      "$GH_TOKEN",
     )
     expect(ops.prDiff).toEqual({
       mcp: expect.stringContaining("acme/web #<N>"),

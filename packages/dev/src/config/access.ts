@@ -7,6 +7,12 @@
 import { execFile } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
+import {
+  describeSource,
+  sourceReady,
+  type TokenSource,
+  tokenExpression,
+} from "./local.ts"
 import type { AccessSpec, IntegrationSpec } from "./types.ts"
 
 export type AccessReport = {
@@ -22,8 +28,16 @@ export type AccessReport = {
   }
   api?: {
     base: string
-    /** The variable the token comes from: the first set, else the first named. */
-    token: string
+    /**
+     * Where the token comes from, never its value: the source configure
+     * recorded for this machine (`file /path`), else the first of the
+     * integration's variables that's set, else the first named.
+     */
+    source: string
+    /** True when configure recorded it; false for a guessed variable. */
+    configured: boolean
+    /** The token as a shell expression, which ops splice in as `{token}`. */
+    expression: string
     ready: boolean
   }
 }
@@ -71,6 +85,8 @@ export function systemProbe(env = process.env): Probe {
 export async function probeAccess(
   access: AccessSpec,
   probe: Probe,
+  /** Where configure recorded this integration's token, on this machine. */
+  token?: TokenSource,
 ): Promise<AccessReport> {
   const report: AccessReport = {}
   if (access.mcp) {
@@ -88,11 +104,16 @@ export async function probeAccess(
     }
   }
   if (access.api) {
-    const set = access.api.token.find((name) => probe.env[name])
+    const source: TokenSource = token ?? {
+      env:
+        access.api.token.find((name) => probe.env[name]) ?? access.api.token[0],
+    }
     report.api = {
       base: access.api.base,
-      token: set ?? access.api.token[0],
-      ready: set !== undefined,
+      source: describeSource(source),
+      configured: token !== undefined,
+      expression: tokenExpression(source),
+      ready: sourceReady(source, probe.env),
     }
   }
   return report
@@ -102,9 +123,17 @@ export async function probeAccess(
 export async function probeAll(
   specs: IntegrationSpec[],
   probe: Probe,
+  /** Recorded token sources, by integration id (`linear`). */
+  tokens: Record<string, TokenSource> = {},
 ): Promise<Record<string, AccessReport>> {
   const reports = await Promise.all(
-    specs.map((spec) => probeAccess(spec.access, probe)),
+    specs.map((spec) =>
+      probeAccess(
+        spec.access,
+        probe,
+        tokens[spec.path.split(".").at(-1) as string],
+      ),
+    ),
   )
   return Object.fromEntries(specs.map((spec, i) => [spec.path, reports[i]]))
 }

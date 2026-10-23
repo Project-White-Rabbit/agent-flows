@@ -148,7 +148,7 @@ describe("configure.ts (as a script)", () => {
       ready: true,
     })
     expect(out.access["integrations.sentry"].api).toMatchObject({
-      token: "SENTRY_AUTH_TOKEN",
+      source: "env SENTRY_AUTH_TOKEN",
       ready: true,
     })
     expect(out.access["integrations.linear"]).toEqual({
@@ -247,7 +247,9 @@ describe("configure.ts (as a script)", () => {
       },
       api: {
         base: "https://api.github.com",
-        token: "GITHUB_TOKEN",
+        source: "env GITHUB_TOKEN",
+        configured: false,
+        expression: "$GITHUB_TOKEN",
         ready: false,
       },
     })
@@ -255,7 +257,7 @@ describe("configure.ts (as a script)", () => {
       run(["integrations", "issueTracker"], undefined, { LINEAR_API_KEY: "k" }),
     ).integrations.issueTracker[0]
     expect(withToken.access.api).toMatchObject({
-      token: "LINEAR_API_KEY",
+      source: "env LINEAR_API_KEY",
       ready: true,
     })
     expect(withToken.ops.getIssue.api).toContain(

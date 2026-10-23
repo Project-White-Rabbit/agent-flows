@@ -52,7 +52,8 @@ describe("adapter.ts (as a script)", () => {
     expect(result.status).toBe(3)
     expect(JSON.parse(result.stdout)).toEqual({
       available: false,
-      reason: "Linear's adapter needs an API token: set LINEAR_API_KEY",
+      reason:
+        "Linear's adapter needs an API token, and env LINEAR_API_KEY has none. Run the agent-flows configure command to say where the token is on this machine.",
     })
   })
 
@@ -90,6 +91,66 @@ describe("adapter.ts (as a script)", () => {
     expect(Object.keys(op)).toEqual(["script", "mcp"])
     expect(op.script).toContain("(the repo's adapter)")
     expect(warnings).toEqual([expect.stringContaining("no op `notAnOp`")])
+  })
+
+  it("reads the token from where configure recorded it, kept out of the tree", () => {
+    init({ "integrations.linear": { teamKey: "ENG" } })
+    const key = path.join(
+      dir as string,
+      "..",
+      `key-${path.basename(dir as string)}`,
+    )
+    fs.writeFileSync(key, "secret\n")
+    try {
+      const saved = node("configure.ts", ["token", "linear", "--file", key])
+      expect(JSON.parse(saved.stdout)).toMatchObject({
+        written: true,
+        source: `file ${key}`,
+      })
+      // In the git dir: nothing to commit, and never the token itself.
+      expect(
+        execFileSync("git", ["-C", dir as string, "status", "--porcelain"], {
+          encoding: "utf8",
+        }),
+      ).not.toContain("local")
+      const local = fs.readFileSync(
+        path.join(dir as string, ".git/agent-flows/local.json"),
+        "utf8",
+      )
+      expect(local).not.toContain("secret")
+
+      const { integrations } = JSON.parse(
+        node("configure.ts", ["integrations", "issueTracker"], {
+          LINEAR_API_KEY: "",
+        }).stdout,
+      )
+      expect(integrations.issueTracker[0].access.api).toMatchObject({
+        source: `file ${key}`,
+        configured: true,
+        ready: true,
+      })
+      expect(integrations.issueTracker[0].ops.getIssue.api).toContain(
+        `Authorization: $(cat '${key}')`,
+      )
+
+      repoAdapter(`export const adapters = {
+  findIssue: {
+    needs: "api",
+    args: ["line"],
+    async run({ token }) { return { gotToken: token === "secret" } },
+  },
+}
+`)
+      const run = node(
+        "adapter.ts",
+        ["run", "linear", "findIssue", "--line", "x"],
+        { LINEAR_API_KEY: "" },
+      )
+      expect(JSON.parse(run.stdout)).toEqual({ gotToken: true })
+      expect(run.stdout).not.toContain("secret")
+    } finally {
+      fs.rmSync(key, { force: true })
+    }
   })
 
   it("refuses an integration that isn't configured, or not used for the op", () => {

@@ -139,9 +139,11 @@ export type AccessSpec = {
   cli?: { bin: string; auth?: string[] }
   /**
    * The HTTP API: where it lives (prose, for people), and the environment
-   * variables that can hold a token, the first set one wins. Ops write the
-   * token as `{token}`, which becomes `$<that variable>`, so its value never
-   * passes through the agent or the config.
+   * variables that usually hold a token, the first set one wins, unless
+   * configure recorded another source for this machine. Ops write the token
+   * as `{token}`, which becomes a shell expression for it (`$NAME`,
+   * `$(cat '/path')`), so its value never passes through the agent or the
+   * config.
    */
   api?: { base: string; token: string[] }
 }

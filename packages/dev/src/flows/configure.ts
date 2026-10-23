@@ -3,16 +3,18 @@ import { CAPABILITIES } from "../config/capabilities.ts"
 import { CONFIG_PATH, CONFIG_VERSION } from "../config/config.ts"
 import { providersOf } from "../config/integrations.ts"
 import { SECTIONS } from "../config/sections/index.ts"
-import type { AccessSpec } from "../config/types.ts"
+import type { AccessSpec, IntegrationSpec } from "../config/types.ts"
 import { DEV_COMMANDS, devKit } from "./kit.ts"
 
 /** "MCP (`Linear`), API (`LINEAR_API_KEY`)": the ways to reach an integration. */
-function reachOf(access: AccessSpec): string {
+function reachOf(access: AccessSpec, adapters: string[] = []): string {
   return [
     access.mcp && `MCP (\`${access.mcp.server}\`)`,
     access.cli && `CLI (\`${access.cli.bin}\`)`,
     access.api &&
-      `API (${access.api.token.map((t) => `\`${t}\``).join(" or ")})`,
+      `API (token in ${access.api.token.map((t) => `\`${t}\``).join(" or ")}, or where configure records it)`,
+    adapters.length > 0 &&
+      `adapters (${adapters.map((a) => `\`${a}\``).join(", ")})`,
   ]
     .filter(Boolean)
     .join(", ")
@@ -39,7 +41,13 @@ const sectionRows = SECTIONS.map((spec) => ({
       )
       .join("; "),
     lookup: spec.lookup ?? "ask",
-    reach: "access" in spec ? reachOf(spec.access as AccessSpec) : "",
+    reach:
+      "access" in spec
+        ? reachOf(
+            spec.access as AccessSpec,
+            Object.keys((spec as IntegrationSpec).adapters ?? {}),
+          )
+        : "",
   },
 }))
 
@@ -74,7 +82,7 @@ export const configureFlow: Flow = devKit.defineFlow({
   commands: DEV_COMMANDS.defineCommands({
     configure: {
       description:
-        "`show` the config, `detect` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, or `write` a patch read from stdin (JSON)",
+        "`show` the config, `detect` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, `write` a patch read from stdin (JSON), or `token <integration> --env|--file|--command <where>` to record where an API token is on this machine",
       args: "<subcommand>",
     },
   }),
@@ -216,6 +224,15 @@ Route on the result:
 
 **Ask what each is for.** For every integration being added, and every configured one \`plan.needs\` lists \`use\` for, {{askVerb}} what the team uses it for: one question per capability it provides, with that capability's levels from the table above plus "Not for this", and its default level recommended. A capability without levels is a yes or no. Several integrations can go in one call, up to its limit on questions. Record the answers as the entry's \`use\`, and leave out the capabilities answered "Not for this". If every capability is "Not for this", the integration isn't used: skip it instead.
 
+**Ask where each token is.** For every integration being added or already configured that has an API, ask where its API token is on this machine when \`access.api.configured\` is false and either the table lists adapters for it (they need the token) or neither its MCP server nor its CLI works here. Don't look for the token yourself (no searching the disk, no reading files or variables to see what's there); the user says where it is. {{askVerb}} with the options:
+
+- **An environment variable**: its name (the integration's usual ones, from the table, are a good default).
+- **A file**: the path of a file holding just the token.
+- **A command**: one that prints it, like a password manager's (\`op read op://<vault>/<item>/credential\`).
+- **None**: use its MCP server or CLI instead; adapters that need the token are skipped.
+
+Record each answer: \`{{command:configure}} token <integration> --env <NAME>\` (or \`--file <path>\`, \`--command '<command>'\`; \`--clear\` forgets it). It saves where the token is, never the token, in the repo's git dir: per machine, shared by the repo's worktrees, never committed, and not part of the confirm table below. Never print a token, and never pass one to the command.
+
 Then work through \`plan.changes\` and \`plan.needs\` (other than \`use\`), plus the sections picked or named. Evidence that a service is used (a dependency) is not the same as its ids, so look up each missing required field read-only, in this order:
 
 1. **The section's lookup** from the table above, through whichever way of reaching it works here: its MCP server, its signed-in CLI, or its API with the token variable (never print the token).
@@ -278,7 +295,7 @@ It validates the whole result and writes only if the content changed, in a fixed
           id: "report",
           kind: "action",
           title: "Report",
-          body: `Say what changed in \`{{configPath}}\`, or that nothing did (\`"written": false\` with no issues). Then, from \`coverage\`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from \`access\`, plus your MCP check), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (\`access.cli.auth\`), or set its token variable. That part is about this machine only and never goes in the config. If the file changed, remind the user to commit it so the team shares it.`,
+          body: `Say what changed in \`{{configPath}}\`, or that nothing did (\`"written": false\` with no issues). Then, from \`coverage\`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from \`access\`, plus your MCP check; for the API, \`access.api.source\`, which says where the token comes from, never what it is), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (\`access.cli.auth\`), or record where its token is (\`token\`). That part is about this machine only and never goes in the config. If the file changed, remind the user to commit it so the team shares it.`,
           next: null,
         },
       ],

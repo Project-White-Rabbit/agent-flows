@@ -6,6 +6,7 @@
 import { probeAccess, systemProbe } from "../config/access.ts"
 import { loadAdapters } from "../config/adapters/index.ts"
 import { getAt, INSTANCE_KEY, instancesOf } from "../config/config.ts"
+import { readLocal, readToken } from "../config/local.ts"
 import { INTEGRATIONS } from "../config/sections/index.ts"
 import { usesOf, withoutUse } from "../config/use.ts"
 import { loadConfig, NOT_CONFIGURED_EXIT, repoRoot } from "./configure.ts"
@@ -104,17 +105,25 @@ export async function main(argv: string[]): Promise<void> {
       `\`${op}\` needs ${missing.map((a) => `--${a} <${a}>`).join(" ")}`,
     )
   }
-  const report = await probeAccess(spec.access, systemProbe())
+  const recorded = readLocal(root).tokens[integration]
+  const report = await probeAccess(spec.access, systemProbe(), recorded)
   let token: string | undefined
   if (adapter.needs === "api") {
-    if (!report.api?.ready) {
+    const source = recorded ?? {
+      env:
+        spec.access.api?.token.find((name) => process.env[name]) ??
+        spec.access.api?.token[0] ??
+        "",
+    }
+    token = report.api?.ready ? readToken(source, process.env) : undefined
+    if (!token) {
       unavailable(
-        `${spec.name}'s adapter needs an API token: set ${spec.access.api?.token.join(" or ") ?? "its token variable"}`,
+        `${spec.name}'s adapter needs an API token, and ${report.api?.source ?? "its token source"} has none. Run the agent-flows configure command to say where the token is on this machine.`,
       )
       return
     }
-    token = process.env[report.api.token]
-  } else if (adapter.needs === "cli" && !report.cli?.ready) {
+  }
+  if (adapter.needs === "cli" && !report.cli?.ready) {
     unavailable(
       `${spec.name}'s adapter needs its CLI: install \`${spec.access.cli?.bin}\` and sign in${report.cli?.auth ? ` (\`${report.cli.auth}\`)` : ""}`,
     )

@@ -39,7 +39,7 @@ export function providersOf(
 /** `{field}`, `{field|default}`, and either with `:encoded`, in an op. */
 export const OP_PLACEHOLDER = /\{(\w+)(?:\|([a-z0-9.-]+))?(:encoded)?\}/g
 
-/** Where an API op puts the token: `$<variable>`, filled at resolution. */
+/** Where an API op puts the token: a shell expression, filled at resolution. */
 export const TOKEN_PLACEHOLDER = "{token}"
 
 /**
@@ -50,6 +50,7 @@ export const TOKEN_PLACEHOLDER = "{token}"
 export function fillOps(
   ops: Record<string, OpImpl>,
   values: SectionValues,
+  /** The token's shell expression (`$LINEAR_API_KEY`, `$(cat '/path')`). */
   token?: string,
 ): Record<string, OpImpl> {
   const fill = (how: string) => {
@@ -66,7 +67,7 @@ export function fillOps(
         return encoded ? encodeURIComponent(value) : value
       },
     )
-    return token ? filled.replaceAll(TOKEN_PLACEHOLDER, `$${token}`) : filled
+    return token ? filled.replaceAll(TOKEN_PLACEHOLDER, token) : filled
   }
   return Object.fromEntries(
     Object.entries(ops).map(([op, how]) => [
@@ -184,7 +185,8 @@ export function resolveCapability(
             fillOps(
               spec.provides[capability],
               values,
-              access[spec.path]?.api?.token ?? spec.access.api?.token[0],
+              access[spec.path]?.api?.expression ??
+                (spec.access.api ? `$${spec.access.api.token[0]}` : undefined),
             ),
             (op, loaded) =>
               scriptVariant(
