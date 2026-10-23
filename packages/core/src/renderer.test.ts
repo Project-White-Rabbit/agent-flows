@@ -3312,3 +3312,54 @@ describe("Renderer: Modes dispatch block", () => {
     expect(out).not.toContain("## Modes")
   })
 })
+
+describe("Renderer: ask tokens", () => {
+  const flow = makeFlow({
+    phases: [
+      {
+        id: "main",
+        title: "Main",
+        stepStyle: "headers",
+        steps: [
+          {
+            id: "a",
+            kind: "action",
+            title: "A",
+            body: "The user is asked {{askUser}}to pick. Then {{askVerb}}. {{askVerbCap}}. One {{askNoun}} per step.",
+            next: null,
+          },
+        ],
+      },
+    ],
+  })
+
+  it("names AskUserQuestion on Claude Code", () => {
+    expect(renderMarkdown(flow, TARGETS.claude)).toContain(
+      "The user is asked with `AskUserQuestion` to pick. Then use `AskUserQuestion`. Use `AskUserQuestion`. One AskUserQuestion per step.",
+    )
+  })
+
+  it("names AskQuestion on Cursor, with a plain-text fallback", () => {
+    const out = renderMarkdown(flow, TARGETS.cursor)
+    expect(out).toContain(
+      "The user is asked with `AskQuestion` (or in plain text with lettered options if it is not available) to pick.",
+    )
+    expect(out).toContain(
+      "Then use `AskQuestion` (or, if it is not available, ask in plain text with lettered options).",
+    )
+    expect(out).toContain(
+      "Use `AskQuestion` (or, if it is not available, ask in plain text with lettered options).",
+    )
+    expect(out).toContain("One AskQuestion per step.")
+    expect(out).not.toContain("AskUserQuestion")
+  })
+
+  it.each(["codex", "amp"] as const)("asks in plain prose on %s", (name) => {
+    const out = renderMarkdown(flow, TARGETS[name])
+    expect(out).toContain(
+      "The user is asked to pick. Then ask the user. Ask the user. One choice prompt per step.",
+    )
+    expect(out).not.toContain("AskUserQuestion")
+    expect(out).not.toContain("AskQuestion")
+  })
+})
