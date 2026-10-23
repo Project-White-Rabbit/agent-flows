@@ -83,7 +83,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
       updateIssue:
         "Set issue <ID>'s title to <title>, its description to <description>, and its workflow state to the one matching <state>: `todo`, `in progress`, `in review`, `done`, or `canceled`",
       prLink:
-        "How a pull request names issue <ID> so the tracker links the two",
+        "Where a pull request names issue <ID> so the tracker links the two: a closing form, which also closes the issue when the pull request merges, and a linking-only form, when the tracker tells them apart",
     },
   },
   {

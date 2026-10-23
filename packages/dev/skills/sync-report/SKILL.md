@@ -20,7 +20,7 @@ node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" finish --base <base> --pr <pr>
 
 - `<pr>`: the latest from `currentPr` (`none` in `local` mode).
 - `--remote`: in default and `remote` mode, when the remote writes updated the PR and issue, or the gate said they were already current. Never in `local` mode, and not when the remote writes stopped partway.
-- `--issue`: the issue's id, when there is one.
+- `--issue`: the issue's id, when there is one; `none` when 1a dropped a cached issue the team closed.
 - `--linked-ref`: each error ref now in the PR's `> Errors:` lines.
 
 **If this run hit the no-op gate**, print only `Already synced: nothing changed since <short lastSyncedHead>.` with the PR and issue URLs, then stop.

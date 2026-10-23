@@ -41,6 +41,8 @@ Sync owns one block of the PR body:
 > Issue: [<ID>: <issue title>](<issue URL>)   (one line per linked issue; omit with no issue tracker)
 > Errors: <short id> ([<title>](<URL>))   (one line per error ref; omit when there are none)
 
+<the issue tracker's prLink form, when it goes in the body: `Fixes <ID>` or `Part of <ID>`>
+
 ## Summary
 
 - <what this change does and why, 1-3 bullets>
@@ -55,7 +57,8 @@ Sync owns one block of the PR body:
 <lastSyncedLine>
 ```
 
-- **Links:** a `> Issue:` line for the issue, and an `> Errors:` line for each of the survey's `errorRefs`.
+- **Links:** a `> Issue:` line for the issue, and an `> Errors:` line for each of the survey's `errorRefs`. When the tracker's `prLink` op puts its link in the body, add that line too: the closing form for an entry at `track` (merging closes the issue even if sync doesn't run again), the linking-only form at `link`, which never changes the issue.
+- **The repo's PR template:** when the repo has one (`.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, or `docs/` or the root with either name), the block follows it instead of the Summary and Test plan headings: the template's sections in its order, filled in from the change. A "what and why" or summary section gets the Summary's content, a test section the Test plan's, and a checklist keeps its items, checked only for what's true and verified, with a short note where an item doesn't apply. Drop the template's HTML comments. The link lines stay on top and the last-synced line at the end.
 - **Summary:** regenerated every sync, 1-3 bullets on what the change does and why. Don't restate the issue (the link does) or add progress (that's the issue's Status).
 - **Before and after:** when the change alters behavior that already existed (a fix, or anything that changes what a person sees), add a bolded **Before** (what a person saw happen: the input, the result, whether anything was raised) and a bolded **After**. One or two changes get a short paragraph each; three or more get a table with Before and After columns, one row per change. Say which paths are unchanged. Skip it for a change that only adds something new.
 - **Test plan:** regenerated every sync, 2-5 checkboxes from what changed. A single bullet is fine for a tiny change.
@@ -68,7 +71,7 @@ node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" splice --body <dir>/pr-body.md
 
 It replaces the old block, or puts the block on top of a body that has none, and keeps everything else.
 
-The title: the issue tracker entry's `prLink` op says how to name the issue in it; the rest is a short summary of the change. Keep the existing title when it still fits.
+The title follows the repo's convention: its agent instructions first, then the shape of recent subjects on the base (`git log -20 --format=%s <baseRef>`, which are PR titles when the repo squash-merges). Put the issue id in it only when the tracker's `prLink` op says the title is the only place that links them, keeping the rest of the convention. Quote the title for the shell: single quotes, with any `'` written as `'\''`. Keep the existing title when it still fits.
 
 - **PR exists:** when the body or title changed, the `prEdit` op with `<body-file>` `<dir>/pr-new.md`.
 - **No PR, default mode:** the `prCreate` op, with `<base>` the stacking integration's `parent` when stacked, else `<base>`.

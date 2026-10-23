@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import { type Probe, probeAccess, systemProbe } from "./access.ts"
 import { fillOps } from "./integrations.ts"
 import { github } from "./sections/github.ts"
+import { linear } from "./sections/linear.ts"
 
 function fakeProbe(
   bins: Record<string, boolean>,
@@ -60,6 +61,17 @@ describe("probeAccess", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe("variant order", () => {
+  it("keeps the order an op lists its variants in", () => {
+    expect(Object.keys(linear.provides.issueTracker.findIssue)).toEqual([
+      "api",
+      "mcp",
+    ])
+    const filled = fillOps(linear.provides.issueTracker, { teamKey: "ENG" })
+    expect(Object.keys(filled.findIssue)).toEqual(["api", "mcp"])
   })
 })
 

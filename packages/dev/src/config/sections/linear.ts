@@ -72,9 +72,11 @@ export const linear: IntegrationSpec = {
         mcp: "The Linear MCP's `get_issue` with `id: <ID>`",
         api: `${GRAPHQL} \`issue(id: "<ID>") { identifier title url description archivedAt state { name type } }\``,
       },
+      // The API first: its `contains` filter is exact, where the MCP's
+      // `query` is a fuzzy, paginated search.
       findIssue: {
-        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <line>`, and `includeArchived: false`, once per open state type (`backlog`, `unstarted`, `started`); keep only issues whose description has exactly that line",
-        api: `${GRAPHQL} \`issues(filter: { team: { key: { eq: "{teamKey}" } }, state: { type: { in: ["backlog", "unstarted", "started"] } }, description: { contains: <line as a JSON string> } }) { nodes { identifier title url description updatedAt } }\`; keep only issues whose description has exactly that line`,
+        api: `${GRAPHQL} \`issues(first: 100, orderBy: updatedAt, filter: { team: { key: { eq: "{teamKey}" } }, state: { type: { in: ["backlog", "unstarted", "started"] } }, description: { contains: $line } }) { nodes { identifier title url description } }\` with the variable \`line\` set to <line>; keep only issues whose description has exactly that line`,
+        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <line>`, and `includeArchived: false`, once per open state type (`backlog`, `unstarted`, `started`), following `cursor` until `hasNextPage` is false: its `query` is a fuzzy search, so a match can be on any page. Keep only issues whose description has exactly that line",
       },
       createIssue: {
         mcp: 'The Linear MCP\'s `save_issue` with `team: {teamKey}`, `title`, `description`, and `assignee: "me"`',
@@ -85,7 +87,7 @@ export const linear: IntegrationSpec = {
         api: `${GRAPHQL} \`issueUpdate(id: "<ID>", input: { title, description, stateId })\`, with \`stateId\` the team's workflow state (\`workflowStates(filter: { team: { key: { eq: "{teamKey}" } } })\`) ${STATE_MAP}`,
       },
       prLink:
-        "Start the pull request title with `<ID>: `; Linear's source-control integration links it",
+        "Closing: a `Fixes <ID>` line in the pull request body, which also moves the issue to done when the pull request merges. Linking only: a `Part of <ID>` line in the body. Either way the title can stay as the repo writes it",
     },
   },
   detect(ctx) {

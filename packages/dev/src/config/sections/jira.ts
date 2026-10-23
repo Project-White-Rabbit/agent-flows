@@ -81,8 +81,8 @@ export const jira: IntegrationSpec = {
         api: `${REST}/issue/<ID>?fields=summary,description,status"\`; its URL is \`https://{site}/browse/<ID>\``,
       },
       findIssue: {
-        mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${JQL}; keep only issues whose description has exactly that line`,
-        api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${JQL} and \`fields: ["summary", "description", "updated"]\`; keep only issues whose description has exactly that line`,
+        mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${JQL}, following \`nextPageToken\` to the last page: \`text ~\` is a fuzzy search, so a match can be on any page. Keep only issues whose description has exactly that line`,
+        api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${JQL} and \`fields: ["summary", "description", "updated"]\`, following \`nextPageToken\` to the last page (\`text ~\` is fuzzy). Keep only issues whose description has exactly that line`,
       },
       createIssue: {
         mcp: "The Atlassian MCP's `createJiraIssue` on `{site}` in project `{projectKey}`, issue type `Task`, assigned to the current user (`atlassianUserInfo`)",
@@ -93,7 +93,7 @@ export const jira: IntegrationSpec = {
         api: `\`PUT https://{site}/rest/api/3/issue/<ID>\` (${AUTH}) with \`fields.summary\` and \`fields.description\` (Atlassian Document Format), then \`POST .../issue/<ID>/transitions\` with the transition (\`GET .../issue/<ID>/transitions\`) ${TRANSITION}`,
       },
       prLink:
-        "Start the pull request title with `<ID>: `; Jira's development panel links it",
+        "Jira's development panel reads the issue key from the pull request title, branch name, or commit messages, not the body, so when the branch name doesn't carry `<ID>`, the title must: prefix it (`<ID> `) and keep the rest of the repo's title convention. Merging doesn't close it",
     },
   },
   detect(ctx) {

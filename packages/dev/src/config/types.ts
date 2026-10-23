@@ -148,7 +148,8 @@ export type AccessSpec = {
 
 /**
  * How an integration does one op: one string when it's the same whatever the
- * access (a URL shape), else one per access kind it supports.
+ * access (a URL shape), else one per access kind it supports, in the order to
+ * try them (usually `ACCESS_KINDS` order; an op lists a more exact way first).
  */
 export type OpImpl = string | Partial<Record<AccessKind, string>>
 

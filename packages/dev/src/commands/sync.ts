@@ -378,7 +378,9 @@ function finish(args: Args): void {
     pr: prKey(pr),
   }
   const issue = flag(args, "issue")
-  if (issue) {
+  if (issue === "none") {
+    delete entry.issue
+  } else if (issue) {
     entry.issue = issue
   }
   if (args.flags.has("remote")) {
@@ -409,10 +411,10 @@ const USAGE = `Usage: sync.ts <command>
   splice --body <file> --block <file>
                   Print the pull request body with sync's block replaced (or
                   added on top), leaving the rest of the body alone.
-  finish --base <branch> --pr <pr> [--remote] [--issue <id>] [--linked-ref <ref>]...
+  finish --base <branch> --pr <pr> [--remote] [--issue <id|none>] [--linked-ref <ref>]...
                   Record this sync so the next one can skip what's unchanged.
                   --remote when the pull request and issue were written (or
-                  already current).
+                  already current). --issue none forgets the cached issue.
 
 <pr> is \`none\` or \`<number>:<open|merged|closed>:<true|false>\` (draft).
 State is kept per branch in the worktree's git dir.`

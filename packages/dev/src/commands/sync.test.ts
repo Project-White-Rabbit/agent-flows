@@ -242,6 +242,10 @@ describe("sync.ts (as a script)", () => {
       noop: true,
     })
 
+    // A dropped issue is forgotten.
+    json(["finish", "--base", "main", ...pr, "--issue", "none"])
+    expect(json(["survey", "remote", "--base", "main", ...pr]).issue).toBeNull()
+
     // The PR becoming ready is a remote change only.
     expect(
       json(["survey", "default", "--base", "main", "--pr", "5:open:false"]),
