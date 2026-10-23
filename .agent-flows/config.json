@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "repo": {
+    "baseBranch": "main"
+  },
+  "integrations": {
+    "github": {
+      "owner": "Project-White-Rabbit",
+      "repo": "agent-flows",
+      "use": {
+        "sourceControl": "write"
+      }
+    },
+    "linear": {
+      "teamKey": "HVT",
+      "use": {
+        "issueTracker": "track"
+      }
+    }
+  },
+  "skipped": [
+    "integrations.graphite",
+    "integrations.vercel",
+    "integrations.neon",
+    "integrations.sentry",
+    "integrations.posthog",
+    "integrations.slack"
+  ]
+}

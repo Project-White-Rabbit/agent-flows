@@ -14,6 +14,13 @@ export const slack: IntegrationSpec = {
   ],
   multiple: true,
   lookup: "Slack MCP (search channels), or ask",
+  access: {
+    mcp: { server: "Slack" },
+    api: {
+      base: "https://slack.com/api",
+      token: ["SLACK_BOT_TOKEN", "SLACK_TOKEN"],
+    },
+  },
   provides: { chat: {} },
   detect(ctx) {
     const evidence = ctx.dependsOn(/^@slack\//)

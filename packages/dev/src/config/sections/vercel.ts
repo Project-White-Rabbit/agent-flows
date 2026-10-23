@@ -22,6 +22,11 @@ export const vercel: IntegrationSpec = {
   ],
   multiple: true,
   lookup: "Vercel MCP, or `vercel project ls`",
+  access: {
+    mcp: { server: "Vercel" },
+    cli: { bin: "vercel", auth: ["vercel", "whoami"] },
+    api: { base: "https://api.vercel.com", token: ["VERCEL_TOKEN"] },
+  },
   provides: { deployments: {} },
   detect(ctx) {
     const evidence = ctx.dependsOn(/^(@vercel\/|vercel$)/)

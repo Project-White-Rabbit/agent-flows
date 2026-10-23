@@ -13,11 +13,14 @@ describe("configure.ts (as a script)", () => {
   })
 
   const script = path.join(import.meta.dirname, "configure.ts")
-  const run = (args: string[], input?: string) =>
-    spawnSync("node", [script, ...args], {
+  // A bare PATH and no tokens, so access probes see nothing on this machine
+  // unless a test puts it there.
+  const run = (args: string[], input?: string, env: NodeJS.ProcessEnv = {}) =>
+    spawnSync(process.execPath, [script, ...args], {
       cwd: dir,
       input,
       encoding: "utf8",
+      env: { HOME: process.env.HOME, PATH: "/usr/bin:/bin", ...env },
     })
 
   const configFile = () => path.join(dir as string, ".agent-flows/config.json")
@@ -97,7 +100,7 @@ describe("configure.ts (as a script)", () => {
       expect.objectContaining({ section: "integrations.linear", kind: "add" }),
     ])
     expect(out.plan.needs).toEqual([
-      { section: "integrations.linear", fields: ["teamKey"] },
+      { section: "integrations.linear", fields: ["teamKey", "use"] },
     ])
 
     const unknown = run(["detect", "bitbucket"])
@@ -113,6 +116,43 @@ describe("configure.ts (as a script)", () => {
     )
     const out = json(run(["detect", "issueTracker"]))
     expect(out.requested).toEqual(["integrations.linear", "integrations.jira"])
+    // Access is probed for exactly the requested integrations.
+    expect(Object.keys(out.access)).toEqual([
+      "integrations.linear",
+      "integrations.jira",
+    ])
+  })
+
+  it("reports how each integration can be reached, to offer the ones in reach", () => {
+    init()
+    const bin = path.join(dir as string, "bin")
+    fs.mkdirSync(bin)
+    // A signed-in Vercel CLI: `vercel whoami` exits 0.
+    fs.writeFileSync(path.join(bin, "vercel"), "#!/bin/sh\nexit 0\n", {
+      mode: 0o755,
+    })
+    const out = json(
+      run(["detect"], undefined, {
+        PATH: `${bin}:/usr/bin:/bin`,
+        SENTRY_AUTH_TOKEN: "t",
+      }),
+    )
+    expect(out.access["integrations.vercel"].cli).toMatchObject({
+      installed: true,
+      ready: true,
+    })
+    expect(out.access["integrations.sentry"].api).toMatchObject({
+      token: "SENTRY_AUTH_TOKEN",
+      ready: true,
+    })
+    expect(out.access["integrations.linear"]).toEqual({
+      mcp: { server: "Linear" },
+      api: expect.objectContaining({ ready: false }),
+    })
+    // Being in reach doesn't put it in the plan: configure asks first.
+    expect(out.plan.changes.map((c: { section: string }) => c.section)).toEqual(
+      ["repo"],
+    )
   })
 
   it("rejects unknown paths, so a typo in a flow fails loudly", () => {
@@ -190,6 +230,32 @@ describe("configure.ts (as a script)", () => {
     expect(integrations.sourceControl[1].ops.prRef).toContain(
       "/acme/mirror/-/merge_requests/<N>",
     )
+    // Nothing installed and no tokens: every path but MCP is unavailable.
+    expect(integrations.sourceControl[0].access).toEqual({
+      mcp: { server: "GitHub" },
+      cli: {
+        bin: "gh",
+        installed: false,
+        ready: false,
+        auth: "gh auth status",
+      },
+      api: {
+        base: "https://api.github.com",
+        token: "GITHUB_TOKEN",
+        ready: false,
+      },
+    })
+    const withToken = json(
+      run(["integrations", "issueTracker"], undefined, { LINEAR_API_KEY: "k" }),
+    ).integrations.issueTracker[0]
+    expect(withToken.access.api).toMatchObject({
+      token: "LINEAR_API_KEY",
+      ready: true,
+    })
+    expect(withToken.ops.getIssue.api).toContain(
+      "Authorization: $LINEAR_API_KEY",
+    )
+    expect(JSON.stringify(withToken)).not.toContain('"k"')
     expect(integrations.issueTracker).toEqual([
       expect.objectContaining({
         integration: "linear",
@@ -295,9 +361,9 @@ describe("configure.ts (as a script)", () => {
     const { integrations } = json(run(["integrations", "sourceControl"]))
     expect(
       integrations.sourceControl.map(
-        (i: { instance: string; ops: { prDiff: string } }) => [
+        (i: { instance: string; ops: { prDiff: { cli: string } } }) => [
           i.instance,
-          i.ops.prDiff,
+          i.ops.prDiff.cli,
         ],
       ),
     ).toEqual([
@@ -323,6 +389,67 @@ describe("configure.ts (as a script)", () => {
     expect(graphite.status).toBe(1)
     expect(json(graphite).issues).toEqual([
       "integrations.graphite must be an object (it can't be configured more than once)",
+    ])
+  })
+
+  it("records what each integration is used for, and resolves only that", () => {
+    init()
+    const write = (sections: object) =>
+      run(["write"], JSON.stringify({ sections }))
+    const bad = write({
+      repo: { baseBranch: "main" },
+      "integrations.linear": {
+        teamKey: "ENG",
+        use: { issueTracker: "everything", chat: true },
+      },
+    })
+    expect(bad.status).toBe(1)
+    expect(json(bad).issues).toEqual([
+      'integrations.linear.use.issueTracker must be one of "link", "track"',
+      "integrations.linear.use.chat: Linear doesn't provide chat (it provides issueTracker)",
+    ])
+
+    expect(
+      json(
+        write({
+          repo: { baseBranch: "main" },
+          "integrations.github": { owner: "acme", repo: "web" },
+          "integrations.linear": {
+            teamKey: "ENG",
+            use: { issueTracker: "track" },
+          },
+          "integrations.posthog": {
+            projectId: "1",
+            use: { featureFlags: true },
+          },
+        }),
+      ).written,
+    ).toBe(true)
+    const { integrations } = json(
+      run([
+        "integrations",
+        "sourceControl",
+        "issueTracker",
+        "analytics",
+        "featureFlags",
+        "--optional",
+      ]),
+    )
+    // No `use`: the capability's default level.
+    expect(integrations.sourceControl[0]).toMatchObject({ level: "write" })
+    expect(integrations.issueTracker[0]).toMatchObject({
+      level: "track",
+      values: { teamKey: "ENG" },
+    })
+    expect(integrations.issueTracker[0].values).not.toHaveProperty("use")
+    // PostHog is only used for feature flags here.
+    expect(integrations.analytics).toEqual([])
+    expect(integrations.featureFlags).toEqual([
+      expect.not.objectContaining({ level: expect.anything() }),
+    ])
+    // The plan asks for the use github doesn't state yet.
+    expect(json(run(["detect", "github"])).plan.needs).toEqual([
+      { section: "integrations.github", fields: ["use"] },
     ])
   })
 
@@ -363,13 +490,13 @@ describe("configure.ts (as a script)", () => {
     )
     const [saas, onprem] = json(run(["integrations", "sourceControl"]))
       .integrations.sourceControl
-    expect(saas.ops.prDiff).toBe(
+    expect(saas.ops.prDiff.cli).toBe(
       "`glab mr diff <N> -R https://gitlab.com/acme/web --raw`",
     )
-    expect(onprem.ops.prDiff).toBe(
+    expect(onprem.ops.prDiff.cli).toBe(
       "`glab mr diff <N> -R https://git.acme.dev:8443/platform/api --raw`",
     )
-    expect(onprem.ops.prCommits).toContain(
+    expect(onprem.ops.prCommits.cli).toContain(
       "projects/platform%2Fapi/merge_requests/<N>/commits --hostname git.acme.dev:8443",
     )
   })

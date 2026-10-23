@@ -3,10 +3,17 @@
 // it (one entry per instance, for an integration configured more than once),
 // each with its values and its ops filled in, so the flow never names a vendor.
 
+import type { AccessReport } from "./access.ts"
 import { CAPABILITIES } from "./capabilities.ts"
 import { getAt, INSTANCE_KEY, instancesOf, type RawConfig } from "./config.ts"
 import { INTEGRATIONS } from "./sections/index.ts"
-import type { CapabilitySpec, IntegrationSpec, SectionValues } from "./types.ts"
+import type {
+  CapabilitySpec,
+  IntegrationSpec,
+  OpImpl,
+  SectionValues,
+} from "./types.ts"
+import { usesOf, withoutUse } from "./use.ts"
 
 export function integrationId(spec: IntegrationSpec): string {
   return spec.path.split(".").at(-1) as string
@@ -30,27 +37,43 @@ export function providersOf(
 /** `{field}`, `{field|default}`, and either with `:encoded`, in an op. */
 export const OP_PLACEHOLDER = /\{(\w+)(?:\|([a-z0-9.-]+))?(:encoded)?\}/g
 
+/** Where an API op puts the token: `$<variable>`, filled at resolution. */
+export const TOKEN_PLACEHOLDER = "{token}"
+
 /**
  * Replace each placeholder with the configured value (or its default when the
- * field is unset), URL-encoded for `:encoded`.
+ * field is unset), URL-encoded for `:encoded`, and `{token}` with the API
+ * token's variable.
  */
 export function fillOps(
-  ops: Record<string, string>,
+  ops: Record<string, OpImpl>,
   values: SectionValues,
-): Record<string, string> {
+  token?: string,
+): Record<string, OpImpl> {
+  const fill = (how: string) => {
+    const filled = how.replace(
+      OP_PLACEHOLDER,
+      (whole, key: string, fallback?: string, encoded?: string) => {
+        if (key === "token" && !fallback && !encoded) {
+          return whole
+        }
+        const value = values[key] ?? fallback
+        if (typeof value !== "string") {
+          return whole
+        }
+        return encoded ? encodeURIComponent(value) : value
+      },
+    )
+    return token ? filled.replaceAll(TOKEN_PLACEHOLDER, `$${token}`) : filled
+  }
   return Object.fromEntries(
     Object.entries(ops).map(([op, how]) => [
       op,
-      how.replace(
-        OP_PLACEHOLDER,
-        (whole, key: string, fallback?: string, encoded?: string) => {
-          const value = values[key] ?? fallback
-          if (typeof value !== "string") {
-            return whole
-          }
-          return encoded ? encodeURIComponent(value) : value
-        },
-      ),
+      typeof how === "string"
+        ? fill(how)
+        : Object.fromEntries(
+            Object.entries(how).map(([kind, text]) => [kind, fill(text)]),
+          ),
     ]),
   )
 }
@@ -61,8 +84,12 @@ export type ResolvedIntegration = {
   instance?: string
   name: string
   path: string
+  /** How far the team lets flows go with it here, for a capability with levels. */
+  level?: string
   values: SectionValues
-  ops: Record<string, string>
+  /** How this machine can reach it, when it was probed. */
+  access?: AccessReport
+  ops: Record<string, OpImpl>
 }
 
 export type CapabilityResolution = {
@@ -78,6 +105,7 @@ export function resolveCapability(
   config: RawConfig,
   capability: string,
   integrations: IntegrationSpec[] = INTEGRATIONS,
+  access: Record<string, AccessReport> = {},
 ): CapabilityResolution {
   const skippedPaths = Array.isArray(config.skipped)
     ? (config.skipped as string[])
@@ -93,6 +121,11 @@ export function resolveCapability(
     const instances = instancesOf(entry)
     if (instances.length > 0) {
       for (const values of instances) {
+        // Configured, but the team doesn't use it for this capability.
+        const level = usesOf(spec, values)[capability]
+        if (level === undefined) {
+          continue
+        }
         out.configured.push({
           integration: id,
           ...(Array.isArray(entry)
@@ -100,8 +133,14 @@ export function resolveCapability(
             : {}),
           name: spec.name,
           path: spec.path,
-          values,
-          ops: fillOps(spec.provides[capability], values),
+          ...(typeof level === "string" ? { level } : {}),
+          values: withoutUse(values),
+          ...(access[spec.path] ? { access: access[spec.path] } : {}),
+          ops: fillOps(
+            spec.provides[capability],
+            values,
+            access[spec.path]?.api?.token ?? spec.access.api?.token[0],
+          ),
         })
       }
     } else if (skippedPaths.includes(spec.path)) {

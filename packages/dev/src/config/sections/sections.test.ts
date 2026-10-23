@@ -60,6 +60,15 @@ describe("integration registry", () => {
     }
   })
 
+  it("gives each leveled capability unique levels and a default among them", () => {
+    for (const capability of CAPABILITIES.filter((c) => c.levels)) {
+      const ids = capability.levels?.map((l) => l.id) ?? []
+      expect(ids.length, capability.id).toBeGreaterThan(1)
+      expect(new Set(ids).size).toBe(ids.length)
+      expect(ids).toContain(capability.defaultLevel)
+    }
+  })
+
   it.each(INTEGRATIONS.map((s) => [s.path, s] as const))(
     "%s lives under integrations and implements every op it provides",
     (path, spec) => {
@@ -72,26 +81,57 @@ describe("integration registry", () => {
         expect(Object.keys(ops).sort()).toEqual(
           Object.keys(capability?.ops ?? {}).sort(),
         )
-        for (const how of Object.values(ops)) {
-          for (const [, key, fallback] of how.matchAll(OP_PLACEHOLDER)) {
-            const field = spec.fields.find((f) => f.key === key)
-            expect(field, `${path} op uses unknown {${key}}`).toBeDefined()
-            // Always set, or given a default for when it isn't.
-            if (!fallback) {
-              expect(required, `${path} op uses optional {${key}}`).toContain(
-                key,
-              )
+        for (const [op, impl] of Object.entries(ops)) {
+          const variants: [string, string][] =
+            typeof impl === "string" ? [["any", impl]] : Object.entries(impl)
+          expect(
+            variants.length,
+            `${path} ${op} has no variant`,
+          ).toBeGreaterThan(0)
+          for (const [kind, how] of variants) {
+            // A variant needs its access declared, so it can be probed.
+            if (kind !== "any") {
+              expect(spec.access, `${path} ${op}.${kind}`).toHaveProperty(kind)
             }
-            // Values land in shell commands from a committed file.
-            expect(
-              field?.pattern,
-              `${path}.${key} has no pattern`,
-            ).toBeDefined()
-            for (const hostile of SHELL_HOSTILE) {
-              expect(field?.pattern?.regex.test(hostile), hostile).toBe(false)
+            // Only API variants use the token, and only through {token}.
+            if (how.includes("{token}")) {
+              expect(kind, `${path} ${op} uses {token}`).toBe("api")
             }
+            checkPlaceholders(how)
           }
         }
+      }
+
+      function checkPlaceholders(how: string): void {
+        for (const [, key, fallback] of how.matchAll(OP_PLACEHOLDER)) {
+          if (key === "token") {
+            continue
+          }
+          const field = spec.fields.find((f) => f.key === key)
+          expect(field, `${path} op uses unknown {${key}}`).toBeDefined()
+          // Always set, or given a default for when it isn't.
+          if (!fallback) {
+            expect(required, `${path} op uses optional {${key}}`).toContain(key)
+          }
+          // Values land in shell commands from a committed file.
+          expect(field?.pattern, `${path}.${key} has no pattern`).toBeDefined()
+          for (const hostile of SHELL_HOSTILE) {
+            expect(field?.pattern?.regex.test(hostile), hostile).toBe(false)
+          }
+        }
+      }
+    },
+  )
+
+  it.each(INTEGRATIONS.map((s) => [s.path, s] as const))(
+    "%s declares at least one way to reach it",
+    (_path, spec) => {
+      expect(Object.keys(spec.access).length).toBeGreaterThan(0)
+      if (spec.access.cli?.auth) {
+        expect(spec.access.cli.auth[0]).toBe(spec.access.cli.bin)
+      }
+      for (const name of spec.access.api?.token ?? []) {
+        expect(name).toMatch(/^[A-Z][A-Z0-9_]*$/)
       }
     },
   )

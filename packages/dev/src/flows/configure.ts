@@ -3,7 +3,20 @@ import { CAPABILITIES } from "../config/capabilities.ts"
 import { CONFIG_PATH, CONFIG_VERSION } from "../config/config.ts"
 import { providersOf } from "../config/integrations.ts"
 import { SECTIONS } from "../config/sections/index.ts"
+import type { AccessSpec } from "../config/types.ts"
 import { DEV_COMMANDS, devKit } from "./kit.ts"
+
+/** "MCP (`Linear`), API (`LINEAR_API_KEY`)": the ways to reach an integration. */
+function reachOf(access: AccessSpec): string {
+  return [
+    access.mcp && `MCP (\`${access.mcp.server}\`)`,
+    access.cli && `CLI (\`${access.cli.bin}\`)`,
+    access.api &&
+      `API (${access.api.token.map((t) => `\`${t}\``).join(" or ")})`,
+  ]
+    .filter(Boolean)
+    .join(", ")
+}
 
 // The skill documents whatever the registries hold, so a new section or
 // capability shows up here without touching the flow.
@@ -26,6 +39,7 @@ const sectionRows = SECTIONS.map((spec) => ({
       )
       .join("; "),
     lookup: spec.lookup ?? "ask",
+    reach: "access" in spec ? reachOf(spec.access as AccessSpec) : "",
   },
 }))
 
@@ -38,6 +52,14 @@ const capabilityRows = CAPABILITIES.map((capability) => ({
     integrations: providersOf(capability.id)
       .map((spec) => spec.name)
       .join(", "),
+    levels: capability.levels
+      ? capability.levels
+          .map(
+            (l) =>
+              `\`${l.id}\`${l.id === capability.defaultLevel ? " (default)" : ""}: ${l.description}`,
+          )
+          .join("; ")
+      : "used or not",
   },
 }))
 
@@ -64,6 +86,7 @@ export const configureFlow: Flow = devKit.defineFlow({
         provides: "Provides",
         purpose: "Used for",
         fields: "Fields",
+        reach: "Reached through",
         lookup: "Look up with",
       },
       rows: sectionRows,
@@ -74,6 +97,7 @@ export const configureFlow: Flow = devKit.defineFlow({
         name: "Name",
         purpose: "Used for",
         integrations: "Integrations",
+        levels: "Levels (`use`)",
       },
       rows: capabilityRows,
     },
@@ -87,7 +111,7 @@ export const configureFlow: Flow = devKit.defineFlow({
 
 Flows never ask for a vendor. They ask for a **capability**, and use every integration the repo configured for it:
 
-{{table:capabilities:name,purpose,integrations}}
+{{table:capabilities:name,purpose,integrations,levels}}
 
 A repo can configure any number of integrations for a capability (none, one, or several, like Linear for product work and Jira for support tickets), and flows use all of them. An integration can provide more than one capability, and most can be configured more than once (one Vercel project per app in a monorepo): the entry is then a list of instances, each with a unique \`name\`:
 
@@ -100,7 +124,7 @@ A repo can configure any number of integrations for a capability (none, one, or 
 
 The file is made of **sections**, each an object of fields at a dotted path. Every section but \`repo\` is an integration:
 
-{{table:sections:name,provides,purpose,fields,lookup}}
+{{table:sections:name,provides,purpose,fields,reach,lookup}}
 
 \`\`\`json
 {
@@ -118,10 +142,14 @@ The file is made of **sections**, each an object of fields at a dotted path. Eve
 
 To configure individual sections, name them ({{argsToken}}): \`{{cmd}}configure linear vercel\`. A name is a section path or its last part (\`integrations.linear\` or \`linear\`), or a capability (\`issueTracker\`), which stands for every integration that provides it. Only the named sections are detected, shown, and changed, even ones that were skipped or are already configured; the rest of the file stays as it is. With no names, every section above is considered.
 
+Each integration also records what the team **uses** it for, under \`use\`: per capability it provides, a level from the table above (\`"use": {"issueTracker": "track"}\`), or \`true\` for a capability without levels. A capability left out isn't used, even if the integration provides it (PostHog only for feature flags). Flows never go past the level, so this is where a team decides, say, that sync links issues but doesn't file them. Without \`use\`, flows assume each capability's default level, and configure asks.
+
+An integration can be reached in up to three ways: its **MCP server**, its **CLI**, or its **HTTP API** directly, with a token from an environment variable. Which ones work depends on the machine, not the repo, so it's never written to the config: every flow checks at run time and uses the first that works, in that order. Configure uses the same check to offer integrations this machine can already reach, even when the repo shows no sign of them.
+
 Re-running is safe: values already in the file are kept, skipped sections stay skipped, and when nothing new turns up the command says so and changes nothing.`,
   invariants: [
     "Never write a token, key, password, or connection string into the config, and never read a real `.env` file to find one. If the user pastes a secret, don't save it, and tell them it doesn't belong in this file.",
-    "Never call a service in a way that changes it. Lookups are read-only.",
+    "Never call a service in a way that changes it. Lookups are read-only, and that includes local setup: don't run a CLI command that initializes or configures the tool in this repo (some do on first use), even to read a value. Read its files instead, or ask.",
     "Only change the config through `write`; never edit the file by hand to get past the validator.",
   ],
   phases: [
@@ -150,6 +178,8 @@ The JSON has \`configPath\`, \`exists\`, the current \`config\` (when valid), it
 - With \`requested\` set, the plan covers only those sections, and proposes each even if it was skipped or nothing was detected, plus any section marked *always* that the config still lacks (the file isn't valid without it).
 - \`upToDate\`: the config exists and there is nothing to add or fill. Sections listed in \`skipped\` were deliberately left out on an earlier run and are never proposed again.
 
+\`access\` says, per integration, how this machine can reach it: \`cli\` (\`installed\`, and \`ready\` when it's also signed in), \`api\` (the token variable, and \`ready\` when it's set; never print its value), and \`mcp.server\`, which only you can check: it's available when your tools include ones from that MCP server (named for it, like \`mcp__<server>__…\`, or a connector of that name). An integration is **in reach** when it isn't configured, isn't in \`skipped\`, and one of those three works.
+
 Route on the result:
 
 {{whens}}`,
@@ -161,7 +191,7 @@ Route on the result:
               next: null,
             },
             {
-              when: "`plan.upToDate` is true and the user named no sections",
+              when: "`plan.upToDate` is true, the user named no sections, and no integration is in reach",
               description:
                 "say the config is already up to date (list its sections, any `skipped`, any `warnings`, and any `conflicts`) and stop. Change nothing. If `plan.moreInstances` isn't empty, add one line per integration naming the instances found, and that `{{cmd}}configure <integration>` adds them",
               next: null,
@@ -182,9 +212,13 @@ Route on the result:
           id: "fill",
           kind: "action",
           title: "Fill the gaps",
-          body: `Work through \`plan.changes\` and \`plan.needs\`, plus any sections the user named. Evidence that a service is used (a dependency) is not the same as its ids, so look up each missing required field read-only, in this order:
+          body: `**Offer what's in reach.** Unless the user named sections, take the integrations in reach that the plan doesn't already add, and {{askVerb}} with multiple selection: which of them should the repo use? One option per integration, saying how it's reached (\`Linear: MCP connected\`, \`Vercel: CLI signed in\`, \`Sentry: SENTRY_AUTH_TOKEN set\`). Being reachable from this machine doesn't mean the repo uses it, so recommend none by default, only ones the repo shows signs of. With more than fit in one question, ask several. The ones picked join the plan as sections to add; the rest go in the write's \`skip\` list, so the next run doesn't offer them again.
 
-1. **The section's lookup** from the table above: a connected MCP server or a signed-in CLI.
+**Ask what each is for.** For every integration being added, and every configured one \`plan.needs\` lists \`use\` for, {{askVerb}} what the team uses it for: one question per capability it provides, with that capability's levels from the table above plus "Not for this", and its default level recommended. A capability without levels is a yes or no. Several integrations can go in one call, up to its limit on questions. Record the answers as the entry's \`use\`, and leave out the capabilities answered "Not for this". If every capability is "Not for this", the integration isn't used: skip it instead.
+
+Then work through \`plan.changes\` and \`plan.needs\` (other than \`use\`), plus the sections picked or named. Evidence that a service is used (a dependency) is not the same as its ids, so look up each missing required field read-only, in this order:
+
+1. **The section's lookup** from the table above, through whichever way of reaching it works here: its MCP server, its signed-in CLI, or its API with the token variable (never print the token).
 2. **The user**, for anything still missing or ambiguous (two Vercel projects, several Linear teams).
 
 When detection finds several instances of one integration (\`detected.<path>.instances\`, like a linked Vercel project per app), the plan proposes them all as a list: confirm each, and drop the ones the team doesn't want. To add instances to an integration configured as a single object (the user asked, or accepted some of \`plan.moreInstances\`), turn its entry into a list: give the existing one a \`name\` and add the new ones. Names are unique within the list and use lowercase letters, digits, \`.\`, \`_\`, and \`-\` (\`web\`, \`apps-docs\`).
@@ -244,7 +278,7 @@ It validates the whole result and writes only if the content changed, in a fixed
           id: "report",
           kind: "action",
           title: "Report",
-          body: `Say what changed in \`{{configPath}}\`, or that nothing did (\`"written": false\` with no issues). Then, from \`coverage\`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. If the file changed, remind the user to commit it so the team shares it.`,
+          body: `Say what changed in \`{{configPath}}\`, or that nothing did (\`"written": false\` with no issues). Then, from \`coverage\`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from \`access\`, plus your MCP check), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (\`access.cli.auth\`), or set its token variable. That part is about this machine only and never goes in the config. If the file changed, remind the user to commit it so the team shares it.`,
           next: null,
         },
       ],

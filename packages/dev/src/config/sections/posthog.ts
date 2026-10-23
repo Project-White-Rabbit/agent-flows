@@ -15,6 +15,13 @@ export const posthog: IntegrationSpec = {
   ],
   multiple: true,
   lookup: "PostHog MCP (list projects)",
+  access: {
+    mcp: { server: "PostHog" },
+    api: {
+      base: "<host>/api (https://us.posthog.com unless `host` is set)",
+      token: ["POSTHOG_PERSONAL_API_KEY"],
+    },
+  },
   provides: { analytics: {}, featureFlags: {} },
   detect(ctx) {
     const evidence = ctx.dependsOn(

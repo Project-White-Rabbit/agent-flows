@@ -4,6 +4,7 @@
 
 import fs from "node:fs"
 import path from "node:path"
+import { probeAll, systemProbe } from "../config/access.ts"
 import { CAPABILITIES } from "../config/capabilities.ts"
 import {
   applyPatch,
@@ -27,7 +28,7 @@ import {
   providersOf,
   resolveCapability,
 } from "../config/integrations.ts"
-import { SECTIONS } from "../config/sections/index.ts"
+import { INTEGRATIONS, SECTIONS } from "../config/sections/index.ts"
 import { isMain, printJson, readStdin, run, runMain } from "./lib.ts"
 
 /** Exit code that tells a flow the repo isn't configured for what it needs. */
@@ -195,7 +196,7 @@ function readPath(config: RawConfig, path: string): unknown {
  * ops. A capability with none is `"configured": false` (exit 2) unless
  * `--optional`, where the flow can carry on without it and gets an empty list.
  */
-function integrations(root: string, args: string[]): void {
+async function integrations(root: string, args: string[]): Promise<void> {
   const optional = args.includes("--optional")
   const names = args.filter((a) => a !== "--optional")
   if (names.length === 0) {
@@ -213,10 +214,17 @@ function integrations(root: string, args: string[]): void {
   if (!config) {
     return
   }
-  const resolved = names.map((name) => {
-    const { id } = findCapability(name) as { id: string }
-    return [id, resolveCapability(config, id)] as const
-  })
+  // Probe only what's configured for the capabilities asked about.
+  const ids = names.map((name) => (findCapability(name) as { id: string }).id)
+  const configured = INTEGRATIONS.filter(
+    (spec) =>
+      getAt(config, spec.path) !== undefined &&
+      ids.some((id) => id in spec.provides),
+  )
+  const access = await probeAll(configured, systemProbe())
+  const resolved = ids.map(
+    (id) => [id, resolveCapability(config, id, INTEGRATIONS, access)] as const,
+  )
   const missing = resolved.filter(([, r]) => r.configured.length === 0)
   if (!optional && missing.length > 0) {
     notConfigured(
@@ -411,6 +419,12 @@ async function main(): Promise<void> {
       ...(only ? { requested: only } : {}),
       ...(loaded.config ? { coverage: coverage(loaded.config) } : {}),
       detected,
+      // How this machine can reach each integration, configured or not, so
+      // configure can offer the ones that are already within reach.
+      access: await probeAll(
+        only ? INTEGRATIONS.filter((s) => only.includes(s.path)) : INTEGRATIONS,
+        systemProbe(),
+      ),
       // A broken file has to be fixed first, so there is no plan.
       ...(loaded.exists && !loaded.config
         ? {}
@@ -423,7 +437,7 @@ async function main(): Promise<void> {
     return
   }
   if (command === "integrations") {
-    integrations(root, args)
+    await integrations(root, args)
     return
   }
   if (command === "write") {
