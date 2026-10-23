@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterAll, afterEach, describe, expect, it } from "vitest"
 
 describe("configure.ts (as a script)", () => {
   let dir: string | undefined
@@ -13,14 +13,20 @@ describe("configure.ts (as a script)", () => {
   })
 
   const script = path.join(import.meta.dirname, "configure.ts")
-  // A bare PATH and no tokens, so access probes see nothing on this machine
-  // unless a test puts it there.
+  // A PATH holding only git, and no tokens, so access probes see nothing on
+  // this machine (CI images ship gh in /usr/bin) unless a test puts it there.
+  const onlyGit = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-path-"))
+  fs.symlinkSync(
+    execFileSync("which", ["git"], { encoding: "utf8" }).trim(),
+    path.join(onlyGit, "git"),
+  )
+  afterAll(() => fs.rmSync(onlyGit, { recursive: true, force: true }))
   const run = (args: string[], input?: string, env: NodeJS.ProcessEnv = {}) =>
     spawnSync(process.execPath, [script, ...args], {
       cwd: dir,
       input,
       encoding: "utf8",
-      env: { HOME: process.env.HOME, PATH: "/usr/bin:/bin", ...env },
+      env: { HOME: process.env.HOME, PATH: onlyGit, ...env },
     })
 
   const configFile = () => path.join(dir as string, ".agent-flows/config.json")
@@ -133,7 +139,7 @@ describe("configure.ts (as a script)", () => {
     })
     const out = json(
       run(["detect"], undefined, {
-        PATH: `${bin}:/usr/bin:/bin`,
+        PATH: `${bin}:${onlyGit}`,
         SENTRY_AUTH_TOKEN: "t",
       }),
     )
