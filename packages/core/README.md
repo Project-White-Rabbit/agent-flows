@@ -98,7 +98,7 @@ Check `mcp__plugin_acme_Acme__deploy_status`, then use `AskUserQuestion`:
 Deploy to `$ARGUMENTS`.
 ```
 
-The Codex file gets a `name:` frontmatter with the usage line, `# $acme:deploy`, the tool as `mcp__Acme__deploy_status`, and "ask the user" in place of `AskUserQuestion`.
+The Codex file gets a `name:` frontmatter with the usage line, `# $acme:deploy`, the tool as `mcp__Acme__deploy_status`, and "ask the user" in place of `AskUserQuestion`. The Cursor file names Cursor's `AskQuestion` tool instead, with a fallback to asking in plain text when the tool is not available.
 
 ## Concepts
 

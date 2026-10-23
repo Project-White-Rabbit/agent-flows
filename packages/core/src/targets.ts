@@ -128,6 +128,17 @@ const ASK_USER_QUESTION_TOKENS = {
   askNoun: "AskUserQuestion",
 }
 
+// Cursor's question tool is `AskQuestion`, but not every session has it: some
+// models and modes lack it, and headless `cursor-agent -p` skips it. Each
+// token carries a plain-text fallback so the question still gets asked.
+const ASK_QUESTION_FALLBACK = "in plain text with lettered options"
+const CURSOR_ASK_QUESTION_TOKENS = {
+  askUser: `with \`AskQuestion\` (or ${ASK_QUESTION_FALLBACK} if it is not available) `,
+  askVerb: `use \`AskQuestion\` (or, if it is not available, ask ${ASK_QUESTION_FALLBACK})`,
+  askVerbCap: `Use \`AskQuestion\` (or, if it is not available, ask ${ASK_QUESTION_FALLBACK})`,
+  askNoun: "AskQuestion",
+}
+
 const PLAIN_PROMPT_TOKENS = {
   askUser: "",
   askVerb: "ask the user",
@@ -154,7 +165,7 @@ interface PresetOptions {
 /**
  * Claude Code plugin skills. Tokens: `cmd` (`/plugin:`), `editor`,
  * `pluginRoot` (`${CLAUDE_PLUGIN_ROOT}`), `pluginDirLookup` (empty), and the
- * `ask*` tokens naming `AskUserQuestion`.
+ * `ask*` tokens naming Claude Code's `AskUserQuestion` tool.
  */
 export function claudeCode(options: PresetOptions): TargetSpec {
   return {
@@ -179,7 +190,11 @@ export function claudeCode(options: PresetOptions): TargetSpec {
   }
 }
 
-/** Cursor plugin skills, named `<plugin>-<flow>` and invoked as `/<plugin>-<flow>`. */
+/**
+ * Cursor plugin skills, named `<plugin>-<flow>` and invoked as `/<plugin>-<flow>`.
+ * The `ask*` tokens name Cursor's `AskQuestion` tool, with a fallback to
+ * asking in plain text with lettered options when the tool is not available.
+ */
 export function cursor(options: PresetOptions): TargetSpec {
   const render = ({ flowId, description, argumentHint }: FrontmatterInput) => {
     const name = `${options.plugin}-${flowId}`
@@ -194,7 +209,7 @@ export function cursor(options: PresetOptions): TargetSpec {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable rendered into skill markdown
       pluginRoot: "${CURSOR_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}",
       pluginDirLookup: "",
-      ...ASK_USER_QUESTION_TOKENS,
+      ...CURSOR_ASK_QUESTION_TOKENS,
       ...options.tokens,
     },
     mcpPrefix:

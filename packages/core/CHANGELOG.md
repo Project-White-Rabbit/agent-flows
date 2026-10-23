@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.2]
+
+### Fixed
+
+- The `cursor` preset's `askUser`, `askVerb`, `askVerbCap` and `askNoun` tokens name Cursor's `AskQuestion` tool instead of Claude Code's `AskUserQuestion`, and tell the agent to ask in plain text with lettered options when `AskQuestion` is not available (some models and modes lack it, and headless `cursor-agent -p` skips it).
+
 ## [0.1.1]
 
 No code changes. First release published from CI with npm provenance, so the package can be verified as built from this repository.
@@ -19,6 +25,7 @@ First release.
 - `renderProject`, `resolveOutputPath` and `writeGeneratedFiles` (with a `check` mode for CI).
 - `renderMermaid` and `describeFlow` for diagrams and snapshot tests.
 
-[Unreleased]: https://github.com/Project-White-Rabbit/agent-flows/compare/core@0.1.1...HEAD
+[Unreleased]: https://github.com/Project-White-Rabbit/agent-flows/compare/core@0.1.2...HEAD
+[0.1.2]: https://github.com/Project-White-Rabbit/agent-flows/compare/core@0.1.1...core@0.1.2
 [0.1.1]: https://github.com/Project-White-Rabbit/agent-flows/compare/core@0.1.0...core@0.1.1
 [0.1.0]: https://github.com/Project-White-Rabbit/agent-flows/releases/tag/core@0.1.0
