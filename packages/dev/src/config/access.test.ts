@@ -3,9 +3,9 @@ import os from "node:os"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { type Probe, probeAccess, systemProbe } from "./access.ts"
-import { fillOps } from "./integrations.ts"
+import { findIssue } from "./adapters/linear.ts"
+import { fillOps, resolveCapability } from "./integrations.ts"
 import { github } from "./sections/github.ts"
-import { linear } from "./sections/linear.ts"
 
 function fakeProbe(
   bins: Record<string, boolean>,
@@ -65,13 +65,24 @@ describe("probeAccess", () => {
 })
 
 describe("variant order", () => {
-  it("keeps the order an op lists its variants in", () => {
-    expect(Object.keys(linear.provides.issueTracker.findIssue)).toEqual([
-      "api",
-      "mcp",
-    ])
-    const filled = fillOps(linear.provides.issueTracker, { teamKey: "ENG" })
-    expect(Object.keys(filled.findIssue)).toEqual(["api", "mcp"])
+  it("puts an adapter's script variant first, then the op's own order", () => {
+    const { configured } = resolveCapability(
+      { integrations: { linear: { teamKey: "ENG" } } },
+      "issueTracker",
+      undefined,
+      {},
+      {
+        "integrations.linear": {
+          findIssue: { adapter: findIssue, source: "plugin" },
+        },
+      },
+    )
+    const op = configured[0].ops.findIssue as Record<string, string>
+    expect(Object.keys(op)).toEqual(["script", "mcp"])
+    expect(op.script).toContain(
+      'adapter.ts" run linear findIssue --line <line>` (built-in adapter)',
+    )
+    expect(op.script).toContain("`access.api.ready`")
   })
 })
 

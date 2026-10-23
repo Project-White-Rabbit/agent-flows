@@ -5,6 +5,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { probeAll, systemProbe } from "../config/access.ts"
+import { type LoadedAdapter, loadAdapters } from "../config/adapters/index.ts"
 import { CAPABILITIES } from "../config/capabilities.ts"
 import {
   applyPatch,
@@ -222,8 +223,19 @@ async function integrations(root: string, args: string[]): Promise<void> {
       ids.some((id) => id in spec.provides),
   )
   const access = await probeAll(configured, systemProbe())
+  const scripts: Record<string, Record<string, LoadedAdapter>> = {}
+  const adapterIssues: string[] = []
+  for (const spec of configured) {
+    const loaded = await loadAdapters(root, spec)
+    scripts[spec.path] = loaded.adapters
+    adapterIssues.push(...loaded.issues)
+  }
   const resolved = ids.map(
-    (id) => [id, resolveCapability(config, id, INTEGRATIONS, access)] as const,
+    (id) =>
+      [
+        id,
+        resolveCapability(config, id, INTEGRATIONS, access, scripts),
+      ] as const,
   )
   const missing = resolved.filter(([, r]) => r.configured.length === 0)
   if (!optional && missing.length > 0) {
@@ -244,6 +256,9 @@ async function integrations(root: string, args: string[]): Promise<void> {
     integrations: Object.fromEntries(
       resolved.map(([id, r]) => [id, r.configured]),
     ),
+    // A broken adapter file costs only its adapters; the ops still have the
+    // other variants.
+    ...(adapterIssues.length > 0 ? { warnings: adapterIssues } : {}),
   })
 }
 

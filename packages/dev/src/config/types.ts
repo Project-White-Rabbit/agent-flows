@@ -151,7 +151,13 @@ export type AccessSpec = {
  * access (a URL shape), else one per access kind it supports, in the order to
  * try them (usually `ACCESS_KINDS` order; an op lists a more exact way first).
  */
-export type OpImpl = string | Partial<Record<AccessKind, string>>
+export type OpImpl = string | Partial<Record<VariantKind, string>>
+
+/**
+ * A way to run an op: one of the access kinds, or `script`, which resolution
+ * adds (first) for an op with an adapter.
+ */
+export type VariantKind = AccessKind | "script"
 
 /**
  * A section at `integrations.<id>` for a third-party tool. For each capability
@@ -164,6 +170,35 @@ export type OpImpl = string | Partial<Record<AccessKind, string>>
 export type IntegrationSpec = SectionSpec & {
   access: AccessSpec
   provides: Record<string, Record<string, OpImpl>>
+  /** Ops this integration can run as code: see `Adapter`. */
+  adapters?: Record<string, Adapter>
+}
+
+/** What an adapter gets: the entry's values, its arguments, and its access. */
+export type AdapterInput = {
+  values: SectionValues
+  /** `--name value` arguments, named after the op's `<name>` placeholders. */
+  args: Record<string, string>
+  /** The API token, read from the integration's token variable, when `needs` is `api`. */
+  token?: string
+  fetch: typeof fetch
+}
+
+/**
+ * An op as code instead of prose: run by `adapter.ts`, so a lookup that needs
+ * exact filtering, paging, or several calls happens in one deterministic step
+ * rather than as instructions the agent follows. Integrations ship built-in
+ * ones; a repo adds or overrides them in `.agent-flows/adapters/<integration>.ts`
+ * (`export const adapters = { findIssue: {...} }`). Runtime code: Node
+ * built-ins only.
+ */
+export type Adapter = {
+  /** What it reaches the integration through; it runs only when that works. */
+  needs?: "api" | "cli"
+  /** Argument names, each passed as `--name <value>`. */
+  args?: string[]
+  /** What it prints, as JSON. Throw to fail. */
+  run(input: AdapterInput): Promise<unknown>
 }
 
 /**

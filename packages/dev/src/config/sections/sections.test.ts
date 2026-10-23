@@ -124,6 +124,21 @@ describe("integration registry", () => {
   )
 
   it.each(INTEGRATIONS.map((s) => [s.path, s] as const))(
+    "%s has adapters only for its ops, reached through access it declares",
+    (path, spec) => {
+      const ops = Object.values(spec.provides).flatMap((o) => Object.keys(o))
+      for (const [op, adapter] of Object.entries(spec.adapters ?? {})) {
+        expect(ops, `${path} adapter ${op}`).toContain(op)
+        if (adapter.needs) {
+          expect(spec.access, `${path} adapter ${op}`).toHaveProperty(
+            adapter.needs,
+          )
+        }
+      }
+    },
+  )
+
+  it.each(INTEGRATIONS.map((s) => [s.path, s] as const))(
     "%s declares at least one way to reach it",
     (_path, spec) => {
       expect(Object.keys(spec.access).length).toBeGreaterThan(0)

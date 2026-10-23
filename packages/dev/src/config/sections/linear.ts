@@ -1,3 +1,4 @@
+import { findIssue } from "../adapters/linear.ts"
 import type { IntegrationSpec, SectionValues } from "../types.ts"
 import { jiraLinkedKeys } from "./jira.ts"
 import { ISSUE_KEY } from "./patterns.ts"
@@ -64,6 +65,7 @@ export const linear: IntegrationSpec = {
     mcp: { server: "Linear" },
     api: { base: "https://api.linear.app/graphql", token: ["LINEAR_API_KEY"] },
   },
+  adapters: { findIssue },
   provides: {
     issueTracker: {
       issueRef:
@@ -72,11 +74,11 @@ export const linear: IntegrationSpec = {
         mcp: "The Linear MCP's `get_issue` with `id: <ID>`",
         api: `${GRAPHQL} \`issue(id: "<ID>") { identifier title url description archivedAt state { name type } }\``,
       },
-      // The API first: its `contains` filter is exact, where the MCP's
-      // `query` is a fuzzy, paginated search.
+      // Also an adapter (`adapters/linear.ts`), which sync runs first: the
+      // API's `contains` filter is exact, where the MCP's `query` is a fuzzy,
+      // paginated search.
       findIssue: {
-        api: `${GRAPHQL} \`issues(first: 100, orderBy: updatedAt, filter: { team: { key: { eq: "{teamKey}" } }, state: { type: { in: ["backlog", "unstarted", "started"] } }, description: { contains: $line } }) { nodes { identifier title url description } }\` with the variable \`line\` set to <line>; keep only issues whose description has exactly that line`,
-        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <line>`, and `includeArchived: false`, once per open state type (`backlog`, `unstarted`, `started`), following `cursor` until `hasNextPage` is false: its `query` is a fuzzy search, so a match can be on any page. Keep only issues whose description has exactly that line",
+        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <line>`, `includeArchived: false`, and `limit: 250`, once per open state type (`backlog`, `unstarted`, `started`), following `cursor` until `hasNextPage` is false: its `query` is a fuzzy search, so a match can be on any page. Keep only issues whose description has exactly that line",
       },
       createIssue: {
         mcp: 'The Linear MCP\'s `save_issue` with `team: {teamKey}`, `title`, `description`, and `assignee: "me"`',

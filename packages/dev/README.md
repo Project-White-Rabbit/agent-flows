@@ -63,6 +63,24 @@ configure.ts integrations sourceControl [--optional]
   }]}}
 ```
 
+**Adapters** run an op as code instead of prose, for lookups that need exact filtering, paging, or several calls (Linear's `findIssue`: the MCP's search is fuzzy and paginated, the API's filter is exact). An adapter is TypeScript, Node built-ins only, run by `src/commands/adapter.ts`:
+
+```ts
+// .agent-flows/adapters/linear.ts in your repo: adds ops, or replaces the plugin's
+export const adapters = {
+  findIssue: {
+    needs: "api",          // runs only when the API token is set ("cli": the CLI is signed in)
+    args: ["line"],        // passed as --line <value>
+    async run({ values, args, token, fetch }) {
+      // values: the entry's config; token: from its token variable
+      return { issues: [] } // printed as JSON
+    },
+  },
+}
+```
+
+Built-in adapters live in `src/config/adapters/` and are listed on the integration's spec (`adapters: { findIssue }`); a repo's file replaces them op by op. An op with an adapter gets a `script` variant first, `node ".../adapter.ts" run <integration> <op> --<arg> <value>`, which exits 3 when it can't run on the machine (no token, no CLI) so the skill moves on to the next variant, 2 when the integration isn't configured or `use` leaves the op's capability out. A repo adapter that fails to load, or names an op its integration doesn't have, is reported as a warning and skipped.
+
 **What the team uses an integration for is in the config**, under `use`: per capability the integration provides, a level, or `true` for a capability without levels. Levels go least first, each including the ones before: `sourceControl` is `read` (evaluate) or `write` (sync pushes and edits draft PRs), `issueTracker` is `link` (link a branch's existing issue) or `track` (also file one per branch and keep it in step), `errorTracking` is `link` or `resolve` (also resolve on merge). A capability left out isn't used (`"posthog": {"projectId": "1", "use": {"featureFlags": true}}`). Flows never go past the level, and `integrations` returns it as each entry's `level`. Without `use`, flows assume each capability's `defaultLevel` (`write`, `link`, `link`), and configure asks. It's a new key, not a format change: an older plugin warns about it and keeps it.
 
 **Access is decided per machine, at run time, never in the config.** The script checks each configured integration's CLI (on `PATH`, and signed in by its `auth` command) and API token variable (set or not; it never reads the value into its output). Only the agent can see its MCP servers, so it checks those itself. For each op a skill uses the first variant that works here: MCP, then CLI, then API. When none does, it says what would fix it instead of improvising. An API variant writes the token as `{token}`, filled in as `$<variable>`, so the secret stays in the environment. `configure.ts detect` reports the same `access` for every integration, and configure offers the ones this machine can already reach (MCP connected, CLI signed in, token set), even with no sign of them in the repo; the ones you decline are skipped so they aren't offered again.

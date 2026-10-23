@@ -3,7 +3,9 @@
 // it (one entry per instance, for an integration configured more than once),
 // each with its values and its ops filled in, so the flow never names a vendor.
 
+import path from "node:path"
 import type { AccessReport } from "./access.ts"
+import type { LoadedAdapter } from "./adapters/index.ts"
 import { CAPABILITIES } from "./capabilities.ts"
 import { getAt, INSTANCE_KEY, instancesOf, type RawConfig } from "./config.ts"
 import { INTEGRATIONS } from "./sections/index.ts"
@@ -78,6 +80,29 @@ export function fillOps(
   )
 }
 
+/** The command that runs adapters. */
+export const ADAPTER_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "commands",
+  "adapter.ts",
+)
+
+/** The `script` variant of an op that has an adapter. */
+export function scriptVariant(
+  integration: string,
+  instance: string | undefined,
+  op: string,
+  { adapter, source }: LoadedAdapter,
+): string {
+  const args = (adapter.args ?? []).map((a) => ` --${a} <${a}>`).join("")
+  const target = instance ? ` --instance ${instance}` : ""
+  const needs = adapter.needs
+    ? ` It needs ${adapter.needs === "api" ? "the API token (`access.api.ready`)" : "the CLI (`access.cli.ready`)"}.`
+    : ""
+  return `\`node "${ADAPTER_SCRIPT}" run ${integration} ${op}${target}${args}\` (${source === "repo" ? "the repo's adapter" : "built-in adapter"}): prints JSON. Exit 3 means it can't run on this machine (it says why): use the next variant.${needs}`
+}
+
 export type ResolvedIntegration = {
   integration: string
   /** Which one, when the integration is configured more than once. */
@@ -90,6 +115,24 @@ export type ResolvedIntegration = {
   /** How this machine can reach it, when it was probed. */
   access?: AccessReport
   ops: Record<string, OpImpl>
+}
+
+/** Put a `script` variant first on every op that has an adapter. */
+function withScripts(
+  ops: Record<string, OpImpl>,
+  variant: (op: string, loaded: LoadedAdapter) => string,
+  adapters: Record<string, LoadedAdapter>,
+): Record<string, OpImpl> {
+  return Object.fromEntries(
+    Object.entries(ops).map(([op, impl]) => {
+      const loaded = adapters[op]
+      if (!loaded) {
+        return [op, impl]
+      }
+      const rest = typeof impl === "string" ? {} : impl
+      return [op, { script: variant(op, loaded), ...rest }]
+    }),
+  )
 }
 
 export type CapabilityResolution = {
@@ -106,6 +149,7 @@ export function resolveCapability(
   capability: string,
   integrations: IntegrationSpec[] = INTEGRATIONS,
   access: Record<string, AccessReport> = {},
+  scripts: Record<string, Record<string, LoadedAdapter>> = {},
 ): CapabilityResolution {
   const skippedPaths = Array.isArray(config.skipped)
     ? (config.skipped as string[])
@@ -136,10 +180,20 @@ export function resolveCapability(
           ...(typeof level === "string" ? { level } : {}),
           values: withoutUse(values),
           ...(access[spec.path] ? { access: access[spec.path] } : {}),
-          ops: fillOps(
-            spec.provides[capability],
-            values,
-            access[spec.path]?.api?.token ?? spec.access.api?.token[0],
+          ops: withScripts(
+            fillOps(
+              spec.provides[capability],
+              values,
+              access[spec.path]?.api?.token ?? spec.access.api?.token[0],
+            ),
+            (op, loaded) =>
+              scriptVariant(
+                id,
+                Array.isArray(entry) ? String(values[INSTANCE_KEY]) : undefined,
+                op,
+                loaded,
+              ),
+            scripts[spec.path] ?? {},
           ),
         })
       }
