@@ -8,6 +8,7 @@ import { gitlab } from "./gitlab.ts"
 import { graphite } from "./graphite.ts"
 import { jira } from "./jira.ts"
 import { linear } from "./linear.ts"
+import { lore } from "./lore.ts"
 import { neon } from "./neon.ts"
 import { posthog } from "./posthog.ts"
 import { repo } from "./repo.ts"
@@ -26,6 +27,7 @@ export const INTEGRATIONS: IntegrationSpec[] = [
   sentry,
   posthog,
   slack,
+  lore,
 ]
 
 export const SECTIONS: SectionSpec[] = [repo, ...INTEGRATIONS]

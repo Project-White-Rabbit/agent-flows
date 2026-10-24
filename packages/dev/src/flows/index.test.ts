@@ -55,6 +55,7 @@ describe("dev flows", () => {
         "stacking",
         "issueTracker",
         "errorTracking",
+        "sessions",
       ]),
     )
     for (const id of asks) {
@@ -63,22 +64,28 @@ describe("dev flows", () => {
     const vendorFree = files.filter((f) => !f.path.includes("configure"))
     for (const file of vendorFree) {
       expect(file.content, file.path).not.toMatch(
-        /\b(gh|glab|gt) |GitHub|GitLab|Graphite|Linear|Jira|Sentry/,
+        /\b(gh|glab|gt) |GitHub|GitLab|Graphite|Linear|Jira|Sentry|Lore/,
       )
     }
   })
 
   it("only calls ops the capabilities declare", () => {
     const ops = new Set(
-      ["sourceControl", "stacking", "issueTracker", "errorTracking"].flatMap(
-        (id) => Object.keys(findCapability(id)?.ops ?? {}),
-      ),
+      [
+        "sourceControl",
+        "stacking",
+        "issueTracker",
+        "errorTracking",
+        "sessions",
+      ].flatMap((id) => Object.keys(findCapability(id)?.ops ?? {})),
     )
     const sync = files.filter((f) => f.path.includes("sync"))
     const named = sync.flatMap((f) =>
       [...f.content.matchAll(/`(\w+)` op/g)].map((m) => m[1]),
     )
-    expect(named).toContain("prCreate")
+    expect(named).toEqual(
+      expect.arrayContaining(["prCreate", "searchIssues", "shareSession"]),
+    )
     for (const op of named) {
       expect(ops.has(op), op).toBe(true)
     }

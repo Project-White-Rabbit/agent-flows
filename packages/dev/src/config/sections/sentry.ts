@@ -68,7 +68,7 @@ export const sentry: IntegrationSpec = {
       issueRef:
         "A short id like `WEB-4P`, or an issue URL: `https://{org}.sentry.io/issues/<id>/`, or `<base>/organizations/{org}/issues/<id>/` on a self-hosted `url`",
       resolveIssue: {
-        mcp: "The Sentry MCP's `update_issue` for `<issue>` in organization `{org}` with `status: resolved`",
+        mcp: "The Sentry MCP's `update_issue` with `organizationSlug: {org}`, `status: resolved`, and `issueId: <issue>` for a short id or numeric id, or `issueUrl: <issue>` for a URL. It needs no CLI and no token",
         cli: "`sentry-cli issues --org {org} --project {project} resolve --id <issue>` (the numeric id; look a short id up with the API or MCP first)",
         api: '`curl -fsSL -X PUT -H "Authorization: Bearer {token}" -H "Content-Type: application/json" -d \'{"status":"resolved"}\' "https://sentry.io/api/0/organizations/{org}/issues/<issue>/"` (the base is `<url>/api/0` on a self-hosted `url`)',
       },

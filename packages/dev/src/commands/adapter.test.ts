@@ -46,7 +46,7 @@ describe("adapter.ts (as a script)", () => {
     init({ "integrations.linear": { teamKey: "ENG" } })
     const result = node(
       "adapter.ts",
-      ["run", "linear", "findIssue", "--line", "> Branch: `x`"],
+      ["run", "linear", "findIssue", "--branch", "x"],
       { LINEAR_API_KEY: "" },
     )
     expect(result.status).toBe(3)

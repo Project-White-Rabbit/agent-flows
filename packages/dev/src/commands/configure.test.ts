@@ -452,7 +452,7 @@ describe("configure.ts (as a script)", () => {
     })
     expect(integrations.issueTracker[0].values).not.toHaveProperty("use")
     expect(integrations.issueTracker[0].ops.createIssue.mcp).toContain(
-      "When `values.project` is set, put it in that project",
+      "`parentId: <parent>` when given",
     )
     // PostHog is only used for feature flags here.
     expect(integrations.analytics).toEqual([])

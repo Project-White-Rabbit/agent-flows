@@ -89,7 +89,7 @@ describe("variant order", () => {
     const op = configured[0].ops.findIssue as Record<string, string>
     expect(Object.keys(op)).toEqual(["script", "mcp"])
     expect(op.script).toContain(
-      'adapter.ts" run linear findIssue --line <line>` (built-in adapter)',
+      'adapter.ts" run linear findIssue --branch <branch>` (built-in adapter)',
     )
     expect(op.script).toContain("`access.api.ready`")
   })
