@@ -12,7 +12,7 @@ Keeps the branch, its draft pull request, and its issue in step with the work. S
 | Command | Description |
 |---------|-------------|
 | `configure.ts <subcommand>` | `get <path>...` prints configured values; `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
-| `sync.ts <subcommand>` | `survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `finish` records the sync. State lives in the worktree's git dir |
+| `sync.ts <subcommand>` | `survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `finish` records the sync. State lives in the repo's git common dir, per branch |
 
 ## Invariants
 
@@ -80,7 +80,7 @@ The issue tracks the work (a stable Description plus a regenerated Status); the 
    - **Session sharing:** the first entry, if any. With none, nothing is shared.
 3. **Pull request:** outside `local` mode, run the source-control entry's `currentPr` op. `<pr>` is `<number>:<open|merged|closed>:<true|false>` (the last part is whether it's a draft), or `none`. A merged or closed PR still counts: its state is what the issue follows. In `local` mode `<pr>` is `none`.
 4. **Error refs:** outside `local` mode, scan the triggering message, this session, and the PR body's `> ` link lines (an earlier sync tool may have written its own, named for the error tracker) for strings any error-tracking entry's `issueRef` op says name one of its issues. The conversation is the one input no fingerprint sees, so pass each as `--error-ref <ref>` (a short id, or the URL).
-5. **Survey:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" survey <mode> --base <base> --pr <pr> [--error-ref <ref>]...` fetches the base (except in `remote` mode) and prints JSON: `branch`, `baseRef` (the ref to compare against), `onBase`, `dirty`, `ahead`, `behind`, `unpushed`, `head`, `pr`, `issue` (cached for this branch, or left for it by an earlier sync tool's state in the worktree), `errorRefs` (every ref this branch has collected), `newErrorRefs` (not yet linked), `lastSyncedHead`, `format` (how the repo has sync write its lines and title, from the config's `sync` section: see 3c), and the gate: `runLocal`, `runRemote`, `noop`. If it fails because HEAD is detached, stop and tell the user to check out a branch.
+5. **Survey:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" survey <mode> --base <base> --pr <pr> [--error-ref <ref>]...` fetches the base (except in `remote` mode) and prints JSON: `branch`, `baseRef` (the ref to compare against), `onBase`, `dirty`, `ahead`, `behind`, `unpushed`, `head`, `pr`, `issue` (cached for this branch, or left for it by an earlier sync tool's state in the worktree), `errorRefs` (every ref this branch has collected), `newErrorRefs` (not yet linked), `lastSyncedHead`, `format` (how sync writes this branch's lines and title: the config's `sync` section, then the format the branch was last written in; see 3c), and the gate: `runLocal`, `runRemote`, `noop`. If it fails because HEAD is detached, stop and tell the user to check out a branch.
 
 ### Routing
 

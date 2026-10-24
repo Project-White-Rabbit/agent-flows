@@ -7,14 +7,18 @@ import {
   BLOCK_END,
   BLOCK_START,
   type BranchState,
+  branchFile,
   gate,
   lastSyncedLine,
+  migrateState,
   parsePr,
+  readBranchState,
   readLegacyState,
   spliceBlock,
   syncFormat,
   withoutLegacySync,
   workState,
+  writeBranchState,
 } from "./sync.ts"
 
 const clean = {
@@ -201,6 +205,68 @@ describe("syncFormat", () => {
       blockMarkers: false,
     }
     expect(syncFormat({ sync })).toEqual(sync)
+  })
+
+  it("keeps the format a branch was written in, under what the config sets", () => {
+    const recorded = {
+      linkLabels: "integration" as const,
+      errorVerb: "Fixes",
+      prTitle: null,
+      blockMarkers: false,
+    }
+    expect(syncFormat(undefined, recorded)).toEqual(recorded)
+    expect(
+      syncFormat(
+        { sync: { blockMarkers: true, prTitle: "{title}" } },
+        recorded,
+      ),
+    ).toEqual({ ...recorded, blockMarkers: true, prTitle: "{title}" })
+  })
+})
+
+describe("branch state files", () => {
+  let dir: string | undefined
+  afterEach(() => {
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+  const tmp = () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-state-"))
+    return dir
+  }
+
+  it("keeps one file per branch, slashes and all", () => {
+    const states = tmp()
+    writeBranchState(states, "me/fix-login", { issue: "ENG-1" }, () => true)
+    expect(fs.readdirSync(states)).toEqual(["me%2Ffix-login.json"])
+    expect(readBranchState(states, "me/fix-login")).toEqual({ issue: "ENG-1" })
+    expect(readBranchState(states, "other")).toBeUndefined()
+  })
+
+  it("forgets branches that no longer exist", () => {
+    const states = tmp()
+    writeBranchState(states, "gone", { issue: "ENG-1" }, () => true)
+    writeBranchState(states, "kept", { issue: "ENG-2" }, (b) => b === "kept")
+    expect(fs.readdirSync(states)).toEqual(["kept.json"])
+  })
+
+  it("moves the old per-worktree file in, keeping newer shared state", () => {
+    const root = tmp()
+    const old = path.join(root, "sync.json")
+    const states = path.join(root, "sync")
+    writeBranchState(states, "a", { issue: "NEW-1" }, () => true)
+    fs.writeFileSync(
+      old,
+      JSON.stringify({
+        branches: { a: { issue: "OLD-1" }, "me/b": { issue: "OLD-2" } },
+      }),
+    )
+    migrateState(old, states)
+    expect(fs.existsSync(old)).toBe(false)
+    expect(readBranchState(states, "a")).toEqual({ issue: "NEW-1" })
+    expect(readBranchState(states, "me/b")).toEqual({ issue: "OLD-2" })
+    expect(fs.existsSync(branchFile(states, "me/b"))).toBe(true)
   })
 })
 
@@ -502,6 +568,8 @@ describe("sync.ts (as a script)", () => {
       issue: "ENG-9",
       errorRefs: ["WEB-4P"],
       newErrorRefs: ["WEB-4P"],
+      // Its sync wrote this branch's PR, so sync keeps that tool's format.
+      format: { linkLabels: "integration", blockMarkers: false },
     })
     // A dropped issue stays dropped, though the old file still names it.
     json(["finish", "--base", "main", "--pr", "none", "--issue", "none"])
@@ -534,7 +602,7 @@ describe("sync.ts (as a script)", () => {
     )
   })
 
-  it("reads the repo's sync format from its config", () => {
+  it("reads the repo's sync format from its config, and records it", () => {
     init()
     const format = {
       linkLabels: "integration",
@@ -551,13 +619,52 @@ describe("sync.ts (as a script)", () => {
         sync: format,
       }),
     )
-    const survey = json(["survey", "remote", "--base", "main", "--pr", "none"])
-    expect(survey.format).toEqual(format)
+    const survey = ["survey", "remote", "--base", "main", "--pr", "none"]
+    expect(json(survey).format).toEqual(format)
+    // The branch keeps the format it was written in once the config drops it.
+    json(["finish", "--base", "main", "--pr", "none", "--remote"])
+    fs.rmSync(path.join(work(), ".agent-flows"), { recursive: true })
+    expect(json(survey).format).toEqual(format)
+  })
+
+  it("splices without markers when asked", () => {
+    init()
     const body = path.join(dir as string, "body.md")
     const block = path.join(dir as string, "block.md")
     fs.writeFileSync(body, "Human notes")
     fs.writeFileSync(block, "## Summary")
-    const result = sync(["splice", "--body", body, "--block", block])
-    expect(result.stdout).toBe("## Summary\n\nHuman notes\n")
+    const args = ["splice", "--body", body, "--block", block, "--no-markers"]
+    expect(sync(args).stdout).toBe("## Summary\n\nHuman notes\n")
+  })
+
+  it("shares a branch's state with the worktree that checks it out next", () => {
+    init()
+    json(["finish", "--base", "main", "--pr", "none", "--issue", "ENG-1"])
+    git("switch", "-q", "main")
+    const other = path.join(dir as string, "other")
+    git("worktree", "add", "-q", other, "feature")
+    const result = spawnSync(
+      "node",
+      [script, "survey", "local", "--base", "main", "--pr", "none"],
+      { cwd: other, encoding: "utf8" },
+    )
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout).issue).toBe("ENG-1")
+  })
+
+  it("moves a worktree's old state file into the shared dir", () => {
+    init()
+    const gitDir = git("rev-parse", "--absolute-git-dir").trim()
+    fs.mkdirSync(path.join(gitDir, "agent-flows"))
+    fs.writeFileSync(
+      path.join(gitDir, "agent-flows", "sync.json"),
+      JSON.stringify({ branches: { feature: { issue: "ENG-7" } } }),
+    )
+    expect(
+      json(["survey", "local", "--base", "main", "--pr", "none"]).issue,
+    ).toBe("ENG-7")
+    expect(fs.existsSync(path.join(gitDir, "agent-flows", "sync.json"))).toBe(
+      false,
+    )
   })
 })

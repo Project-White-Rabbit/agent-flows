@@ -64,7 +64,7 @@ export const syncFlow: Flow = devKit.defineFlow({
     },
     sync: {
       description:
-        "`survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `finish` records the sync. State lives in the worktree's git dir",
+        "`survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `finish` records the sync. State lives in the repo's git common dir, per branch",
       args: "<subcommand>",
     },
   }),
@@ -157,7 +157,7 @@ The issue tracks the work (a stable Description plus a regenerated Status); the 
    - **Session sharing:** the first entry, if any. With none, nothing is shared.
 3. **Pull request:** outside \`local\` mode, run the source-control entry's \`currentPr\` op. \`<pr>\` is \`<number>:<open|merged|closed>:<true|false>\` (the last part is whether it's a draft), or \`none\`. A merged or closed PR still counts: its state is what the issue follows. In \`local\` mode \`<pr>\` is \`none\`.
 4. **Error refs:** outside \`local\` mode, scan the triggering message, this session, and the PR body's \`> \` link lines (an earlier sync tool may have written its own, named for the error tracker) for strings any error-tracking entry's \`issueRef\` op says name one of its issues. The conversation is the one input no fingerprint sees, so pass each as \`--error-ref <ref>\` (a short id, or the URL).
-5. **Survey:** \`{{command:sync}} survey <mode> --base <base> --pr <pr> [--error-ref <ref>]...\` fetches the base (except in \`remote\` mode) and prints JSON: \`branch\`, \`baseRef\` (the ref to compare against), \`onBase\`, \`dirty\`, \`ahead\`, \`behind\`, \`unpushed\`, \`head\`, \`pr\`, \`issue\` (cached for this branch, or left for it by an earlier sync tool's state in the worktree), \`errorRefs\` (every ref this branch has collected), \`newErrorRefs\` (not yet linked), \`lastSyncedHead\`, \`format\` (how the repo has sync write its lines and title, from the config's \`sync\` section: see 3c), and the gate: \`runLocal\`, \`runRemote\`, \`noop\`. If it fails because HEAD is detached, stop and tell the user to check out a branch.
+5. **Survey:** \`{{command:sync}} survey <mode> --base <base> --pr <pr> [--error-ref <ref>]...\` fetches the base (except in \`remote\` mode) and prints JSON: \`branch\`, \`baseRef\` (the ref to compare against), \`onBase\`, \`dirty\`, \`ahead\`, \`behind\`, \`unpushed\`, \`head\`, \`pr\`, \`issue\` (cached for this branch, or left for it by an earlier sync tool's state in the worktree), \`errorRefs\` (every ref this branch has collected), \`newErrorRefs\` (not yet linked), \`lastSyncedHead\`, \`format\` (how sync writes this branch's lines and title: the config's \`sync\` section, then the format the branch was last written in; see 3c), and the gate: \`runLocal\`, \`runRemote\`, \`noop\`. If it fails because HEAD is detached, stop and tell the user to check out a branch.
 
 ### Routing
 
@@ -322,10 +322,10 @@ ${PR_BLOCK}
 Write the current PR body (from \`currentPr\`; empty when there's no PR) to \`<dir>/pr-body.md\` and the new block to \`<dir>/pr-block.md\`, then:
 
 \`\`\`bash
-{{command:sync}} splice --body <dir>/pr-body.md --block <dir>/pr-block.md > <dir>/pr-new.md
+{{command:sync}} splice --body <dir>/pr-body.md --block <dir>/pr-block.md [--no-markers] > <dir>/pr-new.md
 \`\`\`
 
-It replaces the old block, or puts the block on top of a body that has none, and keeps everything else. A body an earlier sync tool wrote without the block's markers (link lines on top, a Summary and Test plan, a last-synced line) has those replaced too, so it doesn't end up with two of each. When the config sets \`sync.blockMarkers\` to false, it writes the block without markers, the way that tool does, so the two can take turns on one PR.
+It replaces the old block, or puts the block on top of a body that has none, and keeps everything else. A body an earlier sync tool wrote without the block's markers (link lines on top, a Summary and Test plan, a last-synced line) has those replaced too, so it doesn't end up with two of each. Pass \`--no-markers\` when the survey's \`format.blockMarkers\` is false: it writes the block without markers, the way that tool does, so the two can take turns on one PR.
 
 With \`format.prTitle\` and an issue, the title is that template, with \`{issueId}\` and \`{title}\` the issue's id and title. Otherwise it follows the repo's convention: its agent instructions first, then the shape of recent subjects on the base (\`git log -20 --format=%s <baseRef>\`, which are PR titles when the repo squash-merges). Put the issue id in it only when the tracker's \`prLink\` op says the title is the only place that links them, keeping the rest of the convention. Keep the existing title when it still fits (with a template, only when it matches it). Quote the title for the shell: single quotes, with any \`'\` written as \`'\\''\`.
 

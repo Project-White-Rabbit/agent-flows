@@ -4,12 +4,15 @@
 // reaches it through the configured integrations' ops and passes the results
 // in here as arguments.
 //
-// State lives in the worktree's private git dir, so it never dirties the tree
-// (a dirty tree would defeat the gate it feeds) and can't be committed.
+// State lives in the repo's git common dir, one file per branch, so it never
+// dirties the tree (a dirty tree would defeat the gate it feeds), can't be
+// committed, and follows a branch to whichever worktree checks it out. A
+// branch is checked out in one worktree at a time, so each file has one writer.
 
 import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
+import { BITFAB_DEV_FORMAT } from "../config/sections/sync.ts"
 import { loadConfig } from "./configure.ts"
 import { isMain, printJson, run, runMain } from "./lib.ts"
 
@@ -22,7 +25,8 @@ export const BLOCK_END = "<!-- /agent-flows:sync -->"
 
 /**
  * How sync writes its link lines, the PR title, and its part of the PR body:
- * the config's `sync` section, with sync's own format for what it leaves out.
+ * the config's `sync` section, then the format the branch was last written in,
+ * then sync's own.
  */
 export type SyncFormat = {
   /** `> Issue:` and `> Errors:`, or each line named for its integration. */
@@ -36,11 +40,13 @@ export type SyncFormat = {
 
 export function syncFormat(
   config: Record<string, unknown> | undefined,
+  recorded?: Partial<SyncFormat>,
 ): SyncFormat {
   const section = config?.sync
-  const values = (
-    section && typeof section === "object" ? section : {}
-  ) as Partial<Record<keyof SyncFormat, unknown>>
+  const values: Partial<Record<keyof SyncFormat, unknown>> = {
+    ...recorded,
+    ...(section && typeof section === "object" ? section : {}),
+  }
   return {
     linkLabels:
       values.linkLabels === "integration" ? "integration" : "capability",
@@ -60,6 +66,8 @@ export type PrState = {
 export type BranchState = {
   issue?: string
   errorRefs?: string[]
+  /** The format the last remote sync wrote, so the next one keeps it. */
+  format?: SyncFormat
   /** Whether a legacy state file was already read for this branch. */
   legacyRead?: boolean
   /** The last sync of any mode. */
@@ -68,6 +76,7 @@ export type BranchState = {
   remote?: { head: string; pr: string; linkedRefs: string[] }
 }
 
+/** The single per-worktree file state used to live in, before 0.5. */
 export type SyncState = { branches: Record<string, BranchState> }
 
 export type WorkState =
@@ -278,18 +287,93 @@ function treeHash(): string {
   return createHash("sha256").update(status).digest("hex")
 }
 
-/** The repo's sync format; sync's own when the config is missing or invalid. */
-function readFormat(): SyncFormat {
+/** The branch's sync format, with the config's sync section over `recorded`. */
+function readFormat(recorded: SyncFormat | undefined): SyncFormat {
   const root = git(["rev-parse", "--show-toplevel"])
-  return syncFormat(root ? loadConfig(root).config : undefined)
+  return syncFormat(root ? loadConfig(root).config : undefined, recorded)
 }
 
-function statePath(): string {
-  const gitDir = git(["rev-parse", "--absolute-git-dir"])
-  if (!gitDir) {
+function gitPath(flag: string): string {
+  const dir = git(["rev-parse", "--path-format=absolute", flag])
+  if (!dir) {
     throw new Error("not inside a git repository")
   }
-  return path.join(gitDir, "agent-flows", "sync.json")
+  return dir
+}
+
+/** Where each branch's state lives, shared by the repo's worktrees. */
+function stateDir(): string {
+  const dir = path.join(gitPath("--git-common-dir"), "agent-flows", "sync")
+  migrateState(
+    path.join(gitPath("--absolute-git-dir"), "agent-flows", "sync.json"),
+    dir,
+  )
+  return dir
+}
+
+export function branchFile(dir: string, branch: string): string {
+  return path.join(dir, `${encodeURIComponent(branch)}.json`)
+}
+
+export function readBranchState(
+  dir: string,
+  branch: string,
+): BranchState | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(branchFile(dir, branch), "utf8"))
+    if (parsed && typeof parsed === "object") {
+      return parsed as BranchState
+    }
+  } catch {
+    // Missing or unreadable: start over, which only costs one full sync.
+  }
+  return undefined
+}
+
+/**
+ * Write one branch's state, through a temp file so a crash never leaves half
+ * of one, and forget branches that no longer exist, so the dir doesn't grow
+ * forever.
+ */
+export function writeBranchState(
+  dir: string,
+  branch: string,
+  state: BranchState,
+  exists: (branch: string) => boolean = (b) => refExists(`refs/heads/${b}`),
+): void {
+  fs.mkdirSync(dir, { recursive: true })
+  const file = branchFile(dir, branch)
+  const temp = `${file}.${process.pid}.tmp`
+  fs.writeFileSync(temp, `${JSON.stringify(state, null, 2)}\n`)
+  fs.renameSync(temp, file)
+  for (const name of fs.readdirSync(dir)) {
+    if (
+      name.endsWith(".json") &&
+      !exists(decodeURIComponent(name.slice(0, -5)))
+    ) {
+      fs.rmSync(path.join(dir, name), { force: true })
+    }
+  }
+}
+
+/**
+ * Move a worktree's pre-0.5 state file into the shared dir, keeping a branch's
+ * newer state there when both have it, then remove the old file.
+ */
+export function migrateState(oldFile: string, dir: string): void {
+  if (!fs.existsSync(oldFile)) {
+    return
+  }
+  for (const [branch, state] of Object.entries(readState(oldFile).branches)) {
+    if (!fs.existsSync(branchFile(dir, branch))) {
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(
+        branchFile(dir, branch),
+        `${JSON.stringify(state, null, 2)}\n`,
+      )
+    }
+  }
+  fs.rmSync(oldFile, { force: true })
 }
 
 /**
@@ -358,23 +442,12 @@ export function readState(file: string): SyncState {
   return { branches: {} }
 }
 
-function writeState(file: string, state: SyncState): void {
-  // Forget branches that no longer exist, so the file doesn't grow forever.
-  for (const branch of Object.keys(state.branches)) {
-    if (!refExists(`refs/heads/${branch}`)) {
-      delete state.branches[branch]
-    }
-  }
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`)
-}
-
 // --- arguments ---------------------------------------------------------------
 
 type Args = { positional: string[]; flags: Map<string, string[]> }
 
 /** Flags that take no value; every other flag takes the next argument. */
-const SWITCHES = new Set(["remote"])
+const SWITCHES = new Set(["remote", "no-markers"])
 
 function parseArgs(args: string[]): Args {
   const positional: string[] = []
@@ -444,9 +517,8 @@ function survey(args: Args): void {
     ? count(`origin/${branch}..HEAD`)
     : undefined
 
-  const file = statePath()
-  const state = readState(file)
-  let stored = state.branches[branch]
+  const dir = stateDir()
+  let stored = readBranchState(dir, branch)
   let changed = false
   // A branch an earlier sync tool synced keeps its issue and error refs. Read
   // once, so an issue a later sync drops doesn't come back.
@@ -462,6 +534,10 @@ function survey(args: Args): void {
           ...(legacy?.errorRefs ?? []),
         ]),
       ],
+      // Its sync wrote the PR, so keep writing it the way that tool does.
+      ...(legacy && !stored?.format
+        ? { format: syncFormat({ sync: BITFAB_DEV_FORMAT }) }
+        : {}),
       legacyRead: true,
     }
     changed = legacy !== undefined
@@ -475,8 +551,7 @@ function survey(args: Args): void {
     changed = true
   }
   if (changed) {
-    state.branches[branch] = stored
-    writeState(file, state)
+    writeBranchState(dir, branch, stored)
   }
   const current = stored
   const onBase = branch === base
@@ -507,7 +582,7 @@ function survey(args: Args): void {
     errorRefs: current?.errorRefs ?? [],
     newErrorRefs: signals.newErrorRefs,
     lastSyncedHead: current?.remote?.head ?? null,
-    format: readFormat(),
+    format: readFormat(current?.format),
     runLocal: signals.runLocal,
     runRemote: signals.runRemote,
     noop: signals.noop,
@@ -522,7 +597,7 @@ function facts(args: Args): void {
   const baseRef = baseRefOf(base)
   const head = git(["rev-parse", "HEAD"]) ?? "none"
   const ahead = baseRef ? count(`${baseRef}..HEAD`) : 0
-  const stored = readState(statePath()).branches[branch]
+  const stored = readBranchState(stateDir(), branch)
   const full = stored?.remote?.head !== head
   printJson({
     workState: workState(pr, ahead),
@@ -547,8 +622,8 @@ function splice(args: Args): void {
   } catch {
     // No body yet.
   }
-  const { blockMarkers } = readFormat()
-  process.stdout.write(spliceBlock(body, block, { markers: blockMarkers }))
+  const markers = !args.flags.has("no-markers")
+  process.stdout.write(spliceBlock(body, block, { markers }))
 }
 
 function finish(args: Args): void {
@@ -557,9 +632,8 @@ function finish(args: Args): void {
   const branch = currentBranch()
   const baseRef = baseRefOf(base)
   const head = git(["rev-parse", "HEAD"]) ?? "none"
-  const file = statePath()
-  const state = readState(file)
-  const entry: BranchState = { ...state.branches[branch] }
+  const dir = stateDir()
+  const entry: BranchState = { ...readBranchState(dir, branch) }
   entry.last = {
     head,
     tree: treeHash(),
@@ -581,9 +655,9 @@ function finish(args: Args): void {
         ...new Set([...(entry.remote?.linkedRefs ?? []), ...linked]),
       ],
     }
+    entry.format = readFormat(entry.format)
   }
-  state.branches[branch] = entry
-  writeState(file, state)
+  writeBranchState(dir, branch, entry)
   printJson({ written: true, branch, head })
 }
 
@@ -592,27 +666,30 @@ const USAGE = `Usage: sync.ts <command>
   survey <default|local|remote> --base <branch> --pr <pr> [--error-ref <ref>]...
                   Fetch the base (not in remote mode), read git state, and
                   print it with the gate: runLocal, runRemote, noop, and the
-                  repo's sync format. Error refs are remembered for the branch
-                  until a remote sync links them.
+                  branch's sync format (the config's sync section, then the
+                  format it was last written in). Error refs are remembered
+                  for the branch until a remote sync links them.
   facts --base <branch> --pr <pr>
                   For the remote writes: the issue's workState, the
                   lastSyncedLine, updateKind (full or metadata-only), and, for
                   a full update, commits and diffStat against the base.
-  splice --body <file> --block <file>
+  splice --body <file> --block <file> [--no-markers]
                   Print the pull request body with sync's block replaced (or
                   added on top, in place of the sections an earlier sync tool
-                  wrote), leaving the rest of the body alone. With the config's
-                  sync.blockMarkers false, the block has no markers, and the
-                  old one ends at its last-synced line.
+                  wrote), leaving the rest of the body alone. --no-markers
+                  writes the block without markers, the old one ending at its
+                  last-synced line.
   finish --base <branch> --pr <pr> [--remote] [--issue <id|none>] [--linked-ref <ref>]...
                   Record this sync so the next one can skip what's unchanged.
                   --remote when the pull request and issue were written (or
-                  already current). --issue none forgets the cached issue.
+                  already current), which also records the format written.
+                  --issue none forgets the cached issue.
 
 <pr> is \`none\` or \`<number>:<open|merged|closed>:<true|false>\` (draft).
-State is kept per branch in the worktree's git dir. A branch with no state yet
-starts from the issue and error refs bitfab-dev's sync left in
-.bitfab-dev/state.json, when they're for that branch.`
+State is kept per branch in the repo's git common dir, shared by its
+worktrees. A branch with no state yet starts from the issue and error refs
+bitfab-dev's sync left in .bitfab-dev/state.json, when they're for that
+branch, and from that tool's format.`
 
 const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   survey,

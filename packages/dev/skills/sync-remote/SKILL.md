@@ -82,10 +82,10 @@ Sync owns one block of the PR body:
 Write the current PR body (from `currentPr`; empty when there's no PR) to `<dir>/pr-body.md` and the new block to `<dir>/pr-block.md`, then:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" splice --body <dir>/pr-body.md --block <dir>/pr-block.md > <dir>/pr-new.md
+node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" splice --body <dir>/pr-body.md --block <dir>/pr-block.md [--no-markers] > <dir>/pr-new.md
 ```
 
-It replaces the old block, or puts the block on top of a body that has none, and keeps everything else. A body an earlier sync tool wrote without the block's markers (link lines on top, a Summary and Test plan, a last-synced line) has those replaced too, so it doesn't end up with two of each. When the config sets `sync.blockMarkers` to false, it writes the block without markers, the way that tool does, so the two can take turns on one PR.
+It replaces the old block, or puts the block on top of a body that has none, and keeps everything else. A body an earlier sync tool wrote without the block's markers (link lines on top, a Summary and Test plan, a last-synced line) has those replaced too, so it doesn't end up with two of each. Pass `--no-markers` when the survey's `format.blockMarkers` is false: it writes the block without markers, the way that tool does, so the two can take turns on one PR.
 
 With `format.prTitle` and an issue, the title is that template, with `{issueId}` and `{title}` the issue's id and title. Otherwise it follows the repo's convention: its agent instructions first, then the shape of recent subjects on the base (`git log -20 --format=%s <baseRef>`, which are PR titles when the repo squash-merges). Put the issue id in it only when the tracker's `prLink` op says the title is the only place that links them, keeping the rest of the convention. Keep the existing title when it still fits (with a template, only when it matches it). Quote the title for the shell: single quotes, with any `'` written as `'\''`.
 
