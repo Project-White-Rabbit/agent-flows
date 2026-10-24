@@ -31,11 +31,12 @@ A repo can configure any number of integrations for a capability (none, one, or 
 ]
 ```
 
-The file is made of **sections**, each an object of fields at a dotted path. Every section but `repo` is an integration:
+The file is made of **sections**, each an object of fields at a dotted path. Every section but `repo` and `sync` is an integration:
 
 | Section | Name | Provides | Used for | Fields | Reached through | Look up with |
 |---|---|---|---|---|---|---|
 | `repo` | Repository (always) |  | The branch work merges into, for diffs, reviews, and PRs | `baseBranch` (required): Branch feature work merges into |  | `git symbolic-ref --short refs/remotes/origin/HEAD`, or ask |
+| `sync` | Sync format |  | How sync writes the PR body, its title, and the issue's link lines; unset, it uses its own format | `linkLabels`: Label link lines by capability (`> Issue:`, `> Errors:`, the default) or by integration name (`> Linear:`, `> Sentry:`); `errorVerb`: Word that starts each error line (`Fixes`); `prTitle`: PR title template, with `{issueId}` and `{title}` the issue's; unset, the repo's convention; `blockMarkers` [boolean]: Wrap sync's part of the PR body in HTML comment markers (default true); false bounds it by the link lines and the last-synced line instead |  | Leave it out for sync's own format. A team that also runs bitfab-dev's sync uses its format, so the two don't duplicate each other's lines |
 | `integrations.github` | GitHub | `sourceControl` | Pull requests, CI checks, code review | `owner` (required): Org or user; `repo` (required): Repository name | MCP (`GitHub`), CLI (`gh`), API (token in `GITHUB_TOKEN` or `GH_TOKEN`, or where configure records it) | `gh repo view --json owner,name`, or the GitHub MCP's repository search |
 | `integrations.gitlab` | GitLab | `sourceControl` | Merge requests, CI pipelines, code review | `project` (required): Project path, including groups; `host`: Self-managed host name | MCP (`GitLab`), CLI (`glab`), API (token in `GITLAB_TOKEN`, or where configure records it) | `glab repo view`, or the GitLab MCP |
 | `integrations.graphite` | Graphite | `stacking` | Stacked branches and PRs | `trunk` (required): Trunk branch stacks build on | CLI (`gt`) | The `trunk` in `.graphite_repo_config` in the git common dir, else ask. Never run `gt` to look it up: on a repo Graphite hasn't set up, it initializes it |

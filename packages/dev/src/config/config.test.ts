@@ -10,6 +10,8 @@ import {
   resolveSections,
   serializeConfig,
 } from "./config.ts"
+import { SECTIONS } from "./sections/index.ts"
+import { BITFAB_DEV_FORMAT } from "./sections/sync.ts"
 import type { SectionSpec } from "./types.ts"
 
 // A small registry so these tests pin the generic behavior, not today's
@@ -606,5 +608,44 @@ describe("planConfig with only", () => {
       "repo",
       "services.beta",
     ])
+  })
+})
+
+describe("the sync section", () => {
+  const config = applyPatch(
+    undefined,
+    { sections: { repo: { baseBranch: "main" } } },
+    SECTIONS,
+  )
+  const detected = {
+    sync: { values: BITFAB_DEV_FORMAT, evidence: ["bitfab-dev"] },
+  }
+
+  it("is optional and has no required fields", () => {
+    expect(
+      checkConfig(
+        { version: CONFIG_VERSION, repo: { baseBranch: "main" } },
+        SECTIONS,
+      ).issues,
+    ).toEqual([])
+    expect(planConfig(config, {}, SECTIONS).upToDate).toBe(true)
+  })
+
+  it("is proposed with what detection found, and needs nothing more", () => {
+    const plan = planConfig(config, detected, SECTIONS)
+    expect(plan.changes).toEqual([
+      {
+        section: "sync",
+        kind: "add",
+        values: BITFAB_DEV_FORMAT,
+        evidence: ["bitfab-dev"],
+      },
+    ])
+    expect(plan.needs).toEqual([])
+  })
+
+  it("stays skipped once the team declines it", () => {
+    const skipped = applyPatch(config, { skip: ["sync"] }, SECTIONS)
+    expect(planConfig(skipped, detected, SECTIONS).upToDate).toBe(true)
   })
 })

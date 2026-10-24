@@ -3,7 +3,7 @@ import { CAPABILITIES } from "../capabilities.ts"
 import { checkConfig, exampleConfig } from "../config.ts"
 import { toInstanceName, uniqueInstanceNames } from "../instances.ts"
 import { OP_PLACEHOLDER, providersOf } from "../integrations.ts"
-import type { FieldSpec } from "../types.ts"
+import type { DetectContext, FieldSpec } from "../types.ts"
 import { parseGithubRemote } from "./github.ts"
 import { parseGitlabRemote } from "./gitlab.ts"
 import { parseGraphiteConfig } from "./graphite.ts"
@@ -11,6 +11,7 @@ import { INTEGRATIONS, SECTIONS } from "./index.ts"
 import { inferJiraProject, jiraLinkedKeys } from "./jira.ts"
 import { inferLinearTeamKey } from "./linear.ts"
 import { parseSentryConfig } from "./sentry.ts"
+import { BITFAB_DEV_FORMAT, sync } from "./sync.ts"
 
 // The contract every section must meet. A new section that breaks the shared
 // rules fails here, not in some flow later.
@@ -35,7 +36,10 @@ describe("section registry", () => {
     (_path, spec) => {
       const keys = spec.fields.map((f) => f.key)
       expect(new Set(keys).size).toBe(keys.length)
-      expect(spec.fields.some((f) => f.required)).toBe(true)
+      // Settings that all have defaults (sync's format) may leave every field out.
+      if ("provides" in spec || spec.required) {
+        expect(spec.fields.some((f) => f.required)).toBe(true)
+      }
       for (const field of spec.fields) {
         expect(field.key).toMatch(/^[a-z][a-zA-Z0-9]*$/)
         // Reserved: it names an instance when the section is a list.
@@ -170,6 +174,56 @@ const SHELL_HOSTILE = [
 function typeOf(value: FieldSpec["example"]): string {
   return Array.isArray(value) ? "string[]" : typeof value
 }
+
+describe("sync format", () => {
+  /** A checkout with these tracked files and these files on disk. */
+  const checkout = (
+    tracked: string[],
+    files: Record<string, string> = {},
+  ): DetectContext =>
+    ({ tracked, read: (file: string) => files[file] }) as DetectContext
+
+  it("proposes bitfab-dev's format where the checkout uses its sync", () => {
+    for (const ctx of [
+      checkout(["bitfab-internal/bitfab-dev/skills/sync/SKILL.md"]),
+      checkout([".gitignore"], {
+        ".gitignore": "node_modules\n.bitfab-dev/\n",
+      }),
+      checkout([], { ".bitfab-dev/state.json": "{}" }),
+    ]) {
+      expect(sync.detect?.(ctx)?.values).toEqual(BITFAB_DEV_FORMAT)
+    }
+  })
+
+  it("proposes nothing without a sign of it", () => {
+    const ctx = checkout(["src/bitfab-dev.ts", ".gitignore"], {
+      ".gitignore": ".bitfab-dev-cache/\n",
+    })
+    expect(sync.detect?.(ctx)).toBeUndefined()
+  })
+
+  it("accepts bitfab-dev's format and rejects values sync can't write", () => {
+    const base = { version: 2, repo: { baseBranch: "main" } }
+    expect(checkConfig({ ...base, sync: BITFAB_DEV_FORMAT }).issues).toEqual([])
+    expect(checkConfig({ ...base, sync: {} }).issues).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        sync: {
+          linkLabels: "vendor",
+          errorVerb: "Fixes;",
+          prTitle: "{id}: {title}",
+          blockMarkers: "no",
+        },
+      }).issues,
+    ).toEqual([
+      "sync.linkLabels must be `capability` or `integration`",
+      "sync.errorVerb must be a word or a few, letters only (`Fixes`)",
+      "sync.prTitle must be text with `{issueId}` and `{title}` placeholders (`{issueId}: {title}`)",
+      "sync.blockMarkers must be true or false",
+    ])
+  })
+})
 
 describe("parseGithubRemote", () => {
   it.each([

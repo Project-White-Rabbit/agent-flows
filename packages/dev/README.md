@@ -22,7 +22,7 @@ Claude Code doesn't auto-update plugins from this marketplace unless you turn it
 |---|---|
 | `/agent-flows:configure [section \| capability ...]` | Detects the base branch and the integrations the repo uses (GitHub, GitLab, Graphite, Linear, Jira, Vercel, Neon, Sentry, PostHog, Slack, Lore), fills in their ids from MCP servers, CLIs, or you, and writes `.agent-flows/config.json` after you confirm. Name sections or capabilities (`/agent-flows:configure linear vercel`, `/agent-flows:configure issueTracker`) to set up or change just those, including ones skipped before. Idempotent: re-running keeps existing values, remembers declined integrations, and changes nothing when nothing new turns up. |
 | `/agent-flows:evaluate [PR number or URL]` | Read-only shippability review of the current branch (committed, uncommitted, and untracked work) or a PR: what it does in plain English, prioritized risks, and a verdict. Diffs against `repo.baseBranch`, and reads PRs through whichever source-control integrations are configured. |
-| `/agent-flows:sync [local \| remote] [issue id]` | Keeps the branch, its draft PR, and its issue in step with the work. `local` commits and catches up to `repo.baseBranch` (restacking through the stacking integration when there is one, else `git merge`); `remote` refreshes the PR body and the issue (state follows the PR) and resolves linked errors once the PR merges; the default does both and pushes. Before filing an issue it searches open and recently closed ones for the same work, reusing a match or filing a sub-issue; it sets priority (once, then leaves it to people), labels, estimate, cycle, and project from the tracker's config and the repo's agent instructions. A re-run with nothing changed stops at a no-op gate, using per-branch state kept in the worktree's git dir. Needs a source-control integration outside `local` mode; stacking, issue tracking, error tracking, and session sharing (a `> Lore:` link to the session in the PR and issue) are used when configured. Takes over branches bitfab-dev's sync synced: it reads its issue and error refs from `.bitfab-dev/state.json`, finds issues by its bare `> Branch:` line, and replaces its PR body sections instead of adding a second Summary and Test plan. |
+| `/agent-flows:sync [local \| remote] [issue id]` | Keeps the branch, its draft PR, and its issue in step with the work. `local` commits and catches up to `repo.baseBranch` (restacking through the stacking integration when there is one, else `git merge`); `remote` refreshes the PR body and the issue (state follows the PR) and resolves linked errors once the PR merges; the default does both and pushes. Before filing an issue it searches open and recently closed ones for the same work, reusing a match or filing a sub-issue; it sets priority (once, then leaves it to people), labels, estimate, cycle, and project from the tracker's config and the repo's agent instructions. A re-run with nothing changed stops at a no-op gate, using per-branch state kept in the repo's git common dir, so it follows a branch from worktree to worktree. Needs a source-control integration outside `local` mode; stacking, issue tracking, error tracking, and session sharing (a `> Lore:` link to the session in the PR and issue) are used when configured. Takes over branches bitfab-dev's sync synced: it reads its issue and error refs from `.bitfab-dev/state.json`, finds issues by its bare `> Branch:` line, and replaces its PR body sections instead of adding a second Summary and Test plan. It keeps writing such a branch in bitfab-dev's format, and with the config's `sync` section set to that format, the two can take turns on any PR. |
 
 ## `.agent-flows/config.json`
 
@@ -89,12 +89,30 @@ Built-in adapters live in `src/config/adapters/` and are listed on the integrati
 
 `{field}` in an op is filled from the integration's config (`{field:encoded}` URL-encodes it), and `<N>`-style placeholders are left for the skill. Since each instance gets its own filled-in ops, an op has to name the repo or project it acts on (`gh … --repo {owner}/{repo}`, `glab … -R {project}`) rather than rely on the current directory. With no integration for a capability, it exits 2 with `{"configured": false}` and the skill sends you to `/agent-flows:configure <capability>`. With `--optional`, it returns an empty list instead, for skills that can carry on without that capability.
 
+### Sync's format
+
+The optional `sync` section changes how sync writes, for a team whose PRs another tool also syncs. Each field it sets wins; for the rest, a branch keeps the format sync last wrote it in (recorded with its state, or bitfab-dev's for a branch that tool synced), and a new branch gets sync's own. Configure proposes bitfab-dev's when the checkout shows it in use (`bitfab-internal/bitfab-dev` tracked, `.bitfab-dev/` ignored, or a `.bitfab-dev/state.json`):
+
+```json
+"sync": {
+  "linkLabels": "integration",
+  "errorVerb": "Fixes",
+  "prTitle": "{issueId}: {title}",
+  "blockMarkers": false
+}
+```
+
+- `linkLabels`: `capability` (the default: `> Issue:`, `> Errors:`) or `integration` (each line named for its integration: `> Linear:`, `> Sentry:`).
+- `errorVerb`: a word that starts each error line (`> Sentry: Fixes WEB-4P (...)`).
+- `prTitle`: a title template, with `{issueId}` and `{title}` the issue's. Unset, the title follows the repo's convention.
+- `blockMarkers`: `false` writes sync's part of the PR body without its `<!-- agent-flows:sync -->` markers, bounded instead by the link lines on top and the `_Last synced_` line, which is how bitfab-dev's sync finds its own.
+
 ### Sections
 
 The file is made of **sections**: objects of fields at a dotted path (`repo`, `integrations.github`). Every section follows the same rules:
 
 - **Configure is idempotent.** Configured values win over detected ones, `skipped` remembers sections the team declined, and writes are normalized (registry order) and skipped when nothing changed. A second run with nothing new reports "up to date" and touches nothing.
-- **Reads go through one door.** Flows read with `configure.ts get <path>...` (`get repo.baseBranch`) or `configure.ts integrations <capability>...`. When the file is missing, invalid, or doesn't set what's asked, it exits 2 with `{"configured": false}` and the skill sends you to `/agent-flows:configure` instead of guessing. An unknown path or capability is a hard error, and tests check every `get` and `integrations` call in the generated skills against the registries.
+- **Reads go through one door.** Flows read with `configure.ts get <path>...` (`get repo.baseBranch`) or `configure.ts integrations <capability>...`. When the file is missing, invalid, or doesn't set what's asked, it exits 2 with `{"configured": false}` and the skill sends you to `/agent-flows:configure` instead of guessing. An unknown path or capability is a hard error, and tests check every `get` and `integrations` call in the generated skills against the registries. The one exception is `sync`, whose fields all have defaults: `sync.ts` reads it itself, over the format recorded for the branch, and the survey prints the result as `format`.
 - **Forward compatible.** `version` is the format: older files are migrated forward on read (`MIGRATIONS` in `src/config/config.ts`), and a file from a newer plugin is rejected with "upgrade the plugin" rather than misread. Sections and fields this plugin doesn't know are warnings, never errors, and writes keep them, so teammates on different plugin versions don't break each other. The exception is a format change itself: once anyone writes the new `version`, teammates on an older plugin get "upgrade the plugin" until they update. Version 2 (`services` renamed to `integrations`, with instance lists) is one, so update the whole team to 0.2 together.
 - **Strict where it's known.** Known fields are type-checked (`string`, `boolean`, `string[]`), required fields are enforced, and a write can only touch sections in the registry.
 

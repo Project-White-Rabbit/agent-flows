@@ -7,13 +7,18 @@ import {
   BLOCK_END,
   BLOCK_START,
   type BranchState,
+  branchFile,
   gate,
   lastSyncedLine,
+  migrateState,
   parsePr,
+  readBranchState,
   readLegacyState,
   spliceBlock,
+  syncFormat,
   withoutLegacySync,
   workState,
+  writeBranchState,
 } from "./sync.ts"
 
 const clean = {
@@ -177,6 +182,211 @@ describe("spliceBlock over an earlier sync tool's body", () => {
   it("leaves a body no sync tool wrote alone", () => {
     const body = "> Note: read this first\n\n## Summary\n\nMine."
     expect(withoutLegacySync(body)).toBe(body)
+  })
+})
+
+describe("syncFormat", () => {
+  it("is sync's own format when the config leaves it out", () => {
+    const own = {
+      linkLabels: "capability",
+      errorVerb: null,
+      prTitle: null,
+      blockMarkers: true,
+    }
+    expect(syncFormat(undefined)).toEqual(own)
+    expect(syncFormat({ version: 2 })).toEqual(own)
+  })
+
+  it("reads what the config's sync section sets", () => {
+    const sync = {
+      linkLabels: "integration",
+      errorVerb: "Fixes",
+      prTitle: "{issueId}: {title}",
+      blockMarkers: false,
+    }
+    expect(syncFormat({ sync })).toEqual(sync)
+  })
+
+  it("keeps the format a branch was written in, under what the config sets", () => {
+    const recorded = {
+      linkLabels: "integration" as const,
+      errorVerb: "Fixes",
+      prTitle: null,
+      blockMarkers: false,
+    }
+    expect(syncFormat(undefined, recorded)).toEqual(recorded)
+    expect(
+      syncFormat(
+        { sync: { blockMarkers: true, prTitle: "{title}" } },
+        recorded,
+      ),
+    ).toEqual({ ...recorded, blockMarkers: true, prTitle: "{title}" })
+  })
+})
+
+describe("branch state files", () => {
+  let dir: string | undefined
+  afterEach(() => {
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+  const tmp = () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-state-"))
+    return dir
+  }
+
+  it("keeps one file per branch, slashes and all", () => {
+    const states = tmp()
+    writeBranchState(states, "me/fix-login", { issue: "ENG-1" }, () => true)
+    expect(fs.readdirSync(states)).toEqual(["me%2Ffix-login.json"])
+    expect(readBranchState(states, "me/fix-login")).toEqual({ issue: "ENG-1" })
+    expect(readBranchState(states, "other")).toBeUndefined()
+  })
+
+  it("forgets branches that no longer exist", () => {
+    const states = tmp()
+    writeBranchState(states, "gone", { issue: "ENG-1" }, () => true)
+    writeBranchState(states, "kept", { issue: "ENG-2" }, (b) => b === "kept")
+    expect(fs.readdirSync(states)).toEqual(["kept.json"])
+  })
+
+  it("moves the old per-worktree file in, keeping newer shared state", () => {
+    const root = tmp()
+    const old = path.join(root, "sync.json")
+    const states = path.join(root, "sync")
+    writeBranchState(states, "a", { issue: "NEW-1" }, () => true)
+    fs.writeFileSync(
+      old,
+      JSON.stringify({
+        branches: { a: { issue: "OLD-1" }, "me/b": { issue: "OLD-2" } },
+      }),
+    )
+    migrateState(old, states)
+    expect(fs.existsSync(old)).toBe(false)
+    expect(readBranchState(states, "a")).toEqual({ issue: "NEW-1" })
+    expect(readBranchState(states, "me/b")).toEqual({ issue: "OLD-2" })
+    expect(fs.existsSync(branchFile(states, "me/b"))).toBe(true)
+  })
+})
+
+describe("spliceBlock without markers", () => {
+  const stamp = "_Last synced: 2026-10-24 10:00 UTC (HEAD: abc1234)_"
+  // What bitfab-dev's sync writes, and what this one writes in its format.
+  const theirs = [
+    "> Linear: [ENG-1: Fix login](https://l/ENG-1)",
+    "> Sentry: Fixes WEB-4P ([WEB-4P](https://s/WEB-4P))",
+    "> Lore: [Session](https://lore/t/1)",
+    "",
+    "## Summary",
+    "",
+    "- Old summary",
+    "",
+    "## Test plan",
+    "",
+    "- [ ] Old check",
+    "",
+    "_Last synced: 2026-10-20 10:00 UTC (HEAD: 0000000)_",
+  ].join("\n")
+  const ours = [
+    "> Linear: [ENG-1: Fix login](https://l/ENG-1)",
+    "> Sentry: Fixes WEB-4P ([WEB-4P](https://s/WEB-4P))",
+    "> Lore: [Session](https://lore/t/2)",
+    "",
+    "Fixes ENG-1",
+    "",
+    "## Summary",
+    "",
+    "- New summary",
+    "",
+    "## Test plan",
+    "",
+    "- [ ] New check",
+    "",
+    stamp,
+  ].join("\n")
+  const splice = (body: string, block = ours) =>
+    spliceBlock(body, block, { markers: false })
+  /** The `> ` link lines, the way bitfab-dev's sync finds its own. */
+  const links = (body: string) =>
+    body.split("\n").filter((line) => /^> \w+:/.test(line))
+  // What bitfab-dev's sync keeps of a body when it refreshes only its links.
+  const theirStrip = (body: string) =>
+    body
+      .split("\n")
+      .filter(
+        (line) =>
+          !/^> (?:Linear|Branch|Sentry|Lore|Planning):/.test(line) &&
+          !/^_Last synced:.*_$/.test(line.trim()),
+      )
+      .join("\n")
+
+  it("writes the block on top with no markers", () => {
+    expect(splice("")).toBe(`${ours}\n`)
+    expect(splice("Notes from a human.")).toBe(
+      `${ours}\n\nNotes from a human.\n`,
+    )
+  })
+
+  it("replaces a body bitfab-dev's sync wrote, keeping a person's notes", () => {
+    const out = splice(`${theirs}\n\nThanks for reviewing!`)
+    expect(out).toBe(`${ours}\n\nThanks for reviewing!\n`)
+  })
+
+  it("replaces its own block on a re-run, nothing twice", () => {
+    const first = splice(`${theirs}\n\nThanks for reviewing!`)
+    const second = splice(first, ours.replace("New summary", "Newer summary"))
+    expect(second).toContain("Newer summary")
+    expect(second).not.toContain("- New summary")
+    expect(second.match(/Fixes ENG-1$/gm)).toHaveLength(1)
+    expect(links(second)).toEqual(links(ours))
+    expect(second.match(/_Last synced/g)).toHaveLength(1)
+    expect(second).toContain("Thanks for reviewing!")
+  })
+
+  it("takes turns with bitfab-dev's sync without duplicating lines", () => {
+    const mine = splice(theirs)
+    // bitfab-dev's link-only refresh: its lines on top, the rest kept.
+    const refreshed = `${links(theirs).join("\n")}\n\n${theirStrip(mine).trim()}\n\n${stamp}\n`
+    expect(links(refreshed)).toEqual(links(theirs))
+    const again = splice(refreshed)
+    expect(again).toBe(`${ours}\n`)
+  })
+
+  it("replaces capability-labeled lines with integration-labeled ones", () => {
+    const old = spliceBlock(
+      "",
+      "> Issue: [ENG-1: Fix login](https://l/ENG-1)\n> Errors: WEB-4P ([WEB-4P](https://s/WEB-4P))\n\n## Summary\n\n- x\n\n" +
+        stamp,
+      { markers: false },
+    )
+    const out = splice(old)
+    expect(out).toBe(`${ours}\n`)
+    expect(out).not.toMatch(/^> (Issue|Errors):/m)
+  })
+
+  it("unwraps a block written with markers before", () => {
+    const marked = spliceBlock("Thanks for reviewing!", ours)
+    const out = splice(marked)
+    expect(out).not.toContain(BLOCK_START)
+    expect(out).not.toContain(BLOCK_END)
+    expect(out).toBe(`${ours}\n\nThanks for reviewing!\n`)
+  })
+
+  it("drops a marked block bitfab-dev's sync left next to its own lines", () => {
+    const marked = spliceBlock("", ours.replace(/^> Linear:/m, "> Issue:"))
+    const refreshed = `${links(theirs).join("\n")}\n\n${theirStrip(marked).trim()}\n\n${stamp}\n`
+    expect(splice(refreshed)).toBe(`${ours}\n`)
+  })
+
+  it("replaces the sections of the repo's PR template it wrote", () => {
+    const block = `> Linear: [ENG-1: x](https://l/ENG-1)\n\n## What\n\n- a\n\n## Testing\n\n- b\n\n${stamp}`
+    const first = splice("## Screenshots\n\n![x](y)", block)
+    const second = splice(first, block.replace("- a", "- c"))
+    expect(second.match(/## What/g)).toHaveLength(1)
+    expect(second).toContain("- c")
+    expect(second).not.toContain("- a")
+    expect(second).toContain("## Screenshots\n\n![x](y)")
   })
 })
 
@@ -358,6 +568,8 @@ describe("sync.ts (as a script)", () => {
       issue: "ENG-9",
       errorRefs: ["WEB-4P"],
       newErrorRefs: ["WEB-4P"],
+      // Its sync wrote this branch's PR, so sync keeps that tool's format.
+      format: { linkLabels: "integration", blockMarkers: false },
     })
     // A dropped issue stays dropped, though the old file still names it.
     json(["finish", "--base", "main", "--pr", "none", "--issue", "none"])
@@ -387,6 +599,72 @@ describe("sync.ts (as a script)", () => {
     const result = sync(["splice", "--body", body, "--block", block])
     expect(result.stdout).toBe(
       `${BLOCK_START}\n## Summary\n${BLOCK_END}\n\nHuman notes\n`,
+    )
+  })
+
+  it("reads the repo's sync format from its config, and records it", () => {
+    init()
+    const format = {
+      linkLabels: "integration",
+      errorVerb: "Fixes",
+      prTitle: "{issueId}: {title}",
+      blockMarkers: false,
+    }
+    fs.mkdirSync(path.join(work(), ".agent-flows"))
+    fs.writeFileSync(
+      path.join(work(), ".agent-flows", "config.json"),
+      JSON.stringify({
+        version: 2,
+        repo: { baseBranch: "main" },
+        sync: format,
+      }),
+    )
+    const survey = ["survey", "remote", "--base", "main", "--pr", "none"]
+    expect(json(survey).format).toEqual(format)
+    // The branch keeps the format it was written in once the config drops it.
+    json(["finish", "--base", "main", "--pr", "none", "--remote"])
+    fs.rmSync(path.join(work(), ".agent-flows"), { recursive: true })
+    expect(json(survey).format).toEqual(format)
+  })
+
+  it("splices without markers when asked", () => {
+    init()
+    const body = path.join(dir as string, "body.md")
+    const block = path.join(dir as string, "block.md")
+    fs.writeFileSync(body, "Human notes")
+    fs.writeFileSync(block, "## Summary")
+    const args = ["splice", "--body", body, "--block", block, "--no-markers"]
+    expect(sync(args).stdout).toBe("## Summary\n\nHuman notes\n")
+  })
+
+  it("shares a branch's state with the worktree that checks it out next", () => {
+    init()
+    json(["finish", "--base", "main", "--pr", "none", "--issue", "ENG-1"])
+    git("switch", "-q", "main")
+    const other = path.join(dir as string, "other")
+    git("worktree", "add", "-q", other, "feature")
+    const result = spawnSync(
+      "node",
+      [script, "survey", "local", "--base", "main", "--pr", "none"],
+      { cwd: other, encoding: "utf8" },
+    )
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout).issue).toBe("ENG-1")
+  })
+
+  it("moves a worktree's old state file into the shared dir", () => {
+    init()
+    const gitDir = git("rev-parse", "--absolute-git-dir").trim()
+    fs.mkdirSync(path.join(gitDir, "agent-flows"))
+    fs.writeFileSync(
+      path.join(gitDir, "agent-flows", "sync.json"),
+      JSON.stringify({ branches: { feature: { issue: "ENG-7" } } }),
+    )
+    expect(
+      json(["survey", "local", "--base", "main", "--pr", "none"]).issue,
+    ).toBe("ENG-7")
+    expect(fs.existsSync(path.join(gitDir, "agent-flows", "sync.json"))).toBe(
+      false,
     )
   })
 })

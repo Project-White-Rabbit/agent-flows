@@ -73,6 +73,7 @@ Sync owns one block of the PR body:
 ```
 
 - **Links:** a `> Issue:` line for the issue, an `> Errors:` line for each of the survey's `errorRefs`, and a session line, named for the session-sharing entry (its `name`), with the URL 3a shared. When 3a didn't share one, keep the session line the body already has, from this block or one an earlier sync tool wrote. When the tracker's `prLink` op puts its link in the body, add that line too: the closing form for an entry at `track` (merging closes the issue even if sync doesn't run again), the linking-only form at `link`, which never changes the issue.
+- **The survey's `format`:** with `linkLabels` `integration`, label the issue and error lines with the `name` of the entry each links to (`> <tracker name>:` in place of `> Issue:`), in this block and in 3d. With an `errorVerb`, each error line starts with it (`> Errors: <errorVerb> <short id> ([<title>](<URL>))`). `blockMarkers` is `splice`'s to apply; write the block the same either way.
 - **The repo's PR template:** when the repo has one (`.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, or `docs/` or the root with either name), the block follows it instead of the Summary and Test plan headings: the template's sections in its order, filled in from the change. A "what and why" or summary section gets the Summary's content, a test section the Test plan's, and a checklist keeps its items, checked only for what's true and verified, with a short note where an item doesn't apply. Drop the template's HTML comments. The link lines stay on top and the last-synced line at the end.
 - **Summary:** regenerated every sync, 1-3 bullets on what the change does and why. Don't restate the issue (the link does) or add progress (that's the issue's Status).
 - **Before and after:** when the change alters behavior that already existed (a fix, or anything that changes what a person sees), add a bolded **Before** (what a person saw happen: the input, the result, whether anything was raised) and a bolded **After**. One or two changes get a short paragraph each; three or more get a table with Before and After columns, one row per change. Say which paths are unchanged. Skip it for a change that only adds something new.
@@ -81,12 +82,12 @@ Sync owns one block of the PR body:
 Write the current PR body (from `currentPr`; empty when there's no PR) to `<dir>/pr-body.md` and the new block to `<dir>/pr-block.md`, then:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" splice --body <dir>/pr-body.md --block <dir>/pr-block.md > <dir>/pr-new.md
+node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" splice --body <dir>/pr-body.md --block <dir>/pr-block.md [--no-markers] > <dir>/pr-new.md
 ```
 
-It replaces the old block, or puts the block on top of a body that has none, and keeps everything else. A body an earlier sync tool wrote without the block's markers (link lines on top, a Summary and Test plan, a last-synced line) has those replaced too, so it doesn't end up with two of each.
+It replaces the old block, or puts the block on top of a body that has none, and keeps everything else. A body an earlier sync tool wrote without the block's markers (link lines on top, a Summary and Test plan, a last-synced line) has those replaced too, so it doesn't end up with two of each. Pass `--no-markers` when the survey's `format.blockMarkers` is false: it writes the block without markers, the way that tool does, so the two can take turns on one PR.
 
-The title follows the repo's convention: its agent instructions first, then the shape of recent subjects on the base (`git log -20 --format=%s <baseRef>`, which are PR titles when the repo squash-merges). Put the issue id in it only when the tracker's `prLink` op says the title is the only place that links them, keeping the rest of the convention. Quote the title for the shell: single quotes, with any `'` written as `'\''`. Keep the existing title when it still fits.
+With `format.prTitle` and an issue, the title is that template, with `{issueId}` and `{title}` the issue's id and title. Otherwise it follows the repo's convention: its agent instructions first, then the shape of recent subjects on the base (`git log -20 --format=%s <baseRef>`, which are PR titles when the repo squash-merges). Put the issue id in it only when the tracker's `prLink` op says the title is the only place that links them, keeping the rest of the convention. Keep the existing title when it still fits (with a template, only when it matches it). Quote the title for the shell: single quotes, with any `'` written as `'\''`.
 
 - **PR exists:** when the body or title changed, the `prEdit` op with `<body-file>` `<dir>/pr-new.md`.
 - **No PR, default mode:** the `prCreate` op, with `<base>` the stacking integration's `parent` when stacked, else `<base>`.
@@ -119,6 +120,7 @@ With an issue in an entry at `track` (at `link`, leave the issue alone; the PR's
 ```
 
 - **`> Branch:` line:** always, exactly as shown (the backticks keep the tracker from turning an id in the branch name into a link), in place of a bare `> Branch:` line an earlier sync tool wrote. It's the anchor 1a's `findIssue` looks for.
+- **Error lines:** as in the PR block, labeled and worded by the survey's `format`.
 - **Session line:** as in the PR block: the URL 3a shared, else the session line the description already has.
 - **Other `> ` lines** sync doesn't write (a planning link, say): keep them, below sync's.
 - **Description:** keep the existing one. Write it only when the issue has none (a new issue, or one filed without it).

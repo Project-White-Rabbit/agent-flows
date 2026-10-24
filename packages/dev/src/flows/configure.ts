@@ -130,7 +130,7 @@ A repo can configure any number of integrations for a capability (none, one, or 
 ]
 \`\`\`
 
-The file is made of **sections**, each an object of fields at a dotted path. Every section but \`repo\` is an integration:
+The file is made of **sections**, each an object of fields at a dotted path. Every section but \`repo\` and \`sync\` is an integration:
 
 {{table:sections:name,provides,purpose,fields,reach,lookup}}
 
