@@ -16,6 +16,12 @@ export const SLUG_PATH: FieldPattern = {
   hint: "slash-separated names of letters, digits, `.`, `_`, or `-` (`group/project`)",
 }
 
+/** An issue key prefix: `ENG`, `WEB2`. */
+export const ISSUE_KEY: FieldPattern = {
+  regex: /^[A-Za-z][A-Za-z0-9_]*$/,
+  hint: "a letter, then letters, digits, or `_` (`ENG`)",
+}
+
 /** A host name with an optional port: `gitlab.acme.dev:8443`. */
 export const HOST: FieldPattern = {
   regex:

@@ -13,7 +13,7 @@ const GATHER_PROMPT = `You are a data-gathering assistant for a branch/PR evalua
 **Target:** \`<target>\` (either \`pr:<entry>:<N>\` or \`worktree:<branch>\`)
 **Base:** branch \`<base>\`, compared against ref \`<base-ref>\`
 **PR metadata from caller (if any):** \`<the PR metadata from the identify-target step>\`
-**Source-control ops (\`pr:\` targets only):** the target entry's \`values\` and \`ops\`, pasted below as JSON. Each op says how this repository's host does the job: run it as given, with \`<N>\` filled in (and any condition it states, like a self-managed \`host\`, applied from \`values\`).
+**Source-control ops (\`pr:\` targets only):** the target entry's \`values\` and, for each op, the one way to run it the caller chose, pasted below as JSON. Each says how this repository's host does the job: run it as given, with \`<N>\` filled in (and any condition it states, like a self-managed \`host\`, applied from \`values\`). Never print a token an op reads from the environment.
 
 #### What to collect
 
@@ -179,7 +179,7 @@ You now have one of: \`pr:<entry>:<N>\` (explicit argument or clean-tree fallbac
           kind: "action",
           title: "Gather the diff and context",
           refName: "gather-diff",
-          body: `Delegate the data-gathering to a subagent on a fast, cheaper model (Sonnet on Claude Code) with this prompt, substituting \`<target>\`, \`<base>\`, \`<base-ref>\`, the PR metadata, and (for \`pr:\` targets) the target entry's \`values\` and \`ops\` as a JSON block, all from the {{step-ref:run/identify-target}} step. The subagent runs the commands and file reads against a small context; you analyze the results in the {{step-ref:run/what-it-does}} through {{step-ref:run/report}} steps, without re-sending the whole conversation on every file read.
+          body: `Delegate the data-gathering to a subagent on a fast, cheaper model (Sonnet on Claude Code) with this prompt, substituting \`<target>\`, \`<base>\`, \`<base-ref>\`, the PR metadata, and (for \`pr:\` targets) the target entry's \`values\` and, for each of the \`prMetadata\`, \`prDiff\`, \`prFiles\`, and \`prCommits\` ops, the variant you chose by the rule in the {{step-ref:run/identify-target}} step, as a JSON block, all from the {{step-ref:run/identify-target}} step. The subagent runs the commands and file reads against a small context; you analyze the results in the {{step-ref:run/what-it-does}} through {{step-ref:run/report}} steps, without re-sending the whole conversation on every file read.
 
 ~~~~markdown
 ${GATHER_PROMPT}

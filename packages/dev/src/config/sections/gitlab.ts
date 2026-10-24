@@ -53,6 +53,17 @@ export function parseGitlabRemote(
 // `{host|gitlab.com}` makes the same command right for self-managed hosts.
 const REPO = "-R https://{host|gitlab.com}/{project}"
 
+// The REST API, authenticated from the token's variable. Each opens a quoted
+// URL the op closes, so a shell expansion can sit inside it.
+const API_BARE = "`https://{host|gitlab.com}/api/v4/projects/{project:encoded}"
+const API = `\`curl -fsSL -H "PRIVATE-TOKEN: {token}" "https://{host|gitlab.com}/api/v4/projects/{project:encoded}`
+
+const KEEP_DRAFT =
+  "GitLab marks drafts by a `Draft: ` title prefix, so keep it on a draft's <title>"
+
+const MERGE_STATUS =
+  "`has_conflicts` true is conflicting; a `detailed_merge_status` of `need_rebase` is behind, and `checking`, `unchecked`, or `preparing` is pending; anything else is clean"
+
 const MR_FIELDS =
   "`iid`, `web_url`, `title`, `description`, `state`, `draft`, `target_branch`, `source_branch`, `changes_count`; count additions and deletions from the diff"
 
@@ -76,18 +87,56 @@ export const gitlab: IntegrationSpec = {
     },
   ],
   multiple: true,
-  lookup: "`glab repo view`",
+  lookup: "`glab repo view`, or the GitLab MCP",
+  access: {
+    mcp: { server: "GitLab" },
+    cli: { bin: "glab", auth: ["glab", "auth", "status"] },
+    api: {
+      base: "https://<host>/api/v4 (gitlab.com unless `host` is set)",
+      token: ["GITLAB_TOKEN"],
+    },
+  },
   provides: {
     sourceControl: {
       prRef:
         "A bare number, or `https://{host|gitlab.com}/{project}/-/merge_requests/<N>`",
-      currentPr: `\`glab mr view "$(git branch --show-current)" ${REPO} --output json\`: ${MR_FIELDS}`,
-      prMetadata: `\`glab mr view <N> ${REPO} --output json\`: ${MR_FIELDS}`,
-      prDiff: `\`glab mr diff <N> ${REPO} --raw\``,
+      currentPr: {
+        mcp: `The GitLab MCP's merge request search for project \`{project}\` with source branch \`<branch>\`, the most recent: ${MR_FIELDS}`,
+        cli: `\`glab mr view "$(git branch --show-current)" ${REPO} --output json\`: ${MR_FIELDS}`,
+        api: `${API}/merge_requests?source_branch=$(git branch --show-current)&order_by=updated_at"\`, the first: ${MR_FIELDS}`,
+      },
+      prMetadata: {
+        mcp: `The GitLab MCP's merge request read tool for project \`{project}\` !<N>: ${MR_FIELDS}`,
+        cli: `\`glab mr view <N> ${REPO} --output json\`: ${MR_FIELDS}`,
+        api: `${API}/merge_requests/<N>"\`: ${MR_FIELDS}`,
+      },
+      prDiff: {
+        mcp: "The GitLab MCP's merge request diffs tool for project `{project}` !<N>",
+        cli: `\`glab mr diff <N> ${REPO} --raw\``,
+        api: `${API}/merge_requests/<N>/raw_diffs"\``,
+      },
       prFiles:
         "The `b/` paths of the `diff --git` lines in the `prDiff` output",
-      prCommits:
-        "`glab api projects/{project:encoded}/merge_requests/<N>/commits --hostname {host|gitlab.com} --paginate`, each commit's `title`",
+      prCommits: {
+        mcp: "The GitLab MCP's merge request commits tool for project `{project}` !<N>, each commit's `title`",
+        cli: "`glab api projects/{project:encoded}/merge_requests/<N>/commits --hostname {host|gitlab.com} --paginate`, each commit's `title`",
+        api: `${API}/merge_requests/<N>/commits?per_page=100"\`, each commit's \`title\``,
+      },
+      prCreate: {
+        mcp: "The GitLab MCP's create merge request tool for project `{project}`: source branch the checked-out branch, target `<base>`, title `Draft: <title>`, description the contents of <body-file>",
+        cli: `\`glab mr create ${REPO} --draft --target-branch <base> --source-branch "$(git branch --show-current)" --title <title> --description "$(cat <body-file>)" --yes\``,
+        api: `\`POST\` ${API_BARE}/merge_requests\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`source_branch\` (the checked-out branch), \`target_branch\`, \`title\` (\`Draft: <title>\`), and \`description\` (the file's contents)`,
+      },
+      prEdit: {
+        mcp: `The GitLab MCP's update merge request tool for project \`{project}\` !<N> with the title and the contents of <body-file> as description. ${KEEP_DRAFT}`,
+        cli: `\`glab mr update <N> ${REPO} --title <title> --description "$(cat <body-file>)"\`. ${KEEP_DRAFT}`,
+        api: `\`PUT\` ${API_BARE}/merge_requests/<N>\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`title\` and \`description\` (the file's contents). ${KEEP_DRAFT}`,
+      },
+      prMergeability: {
+        mcp: `The GitLab MCP's merge request read tool for project \`{project}\` !<N>: ${MERGE_STATUS}`,
+        cli: `\`glab mr view <N> ${REPO} --output json\`: ${MERGE_STATUS}`,
+        api: `${API}/merge_requests/<N>"\`: ${MERGE_STATUS}`,
+      },
     },
   },
   detect(ctx) {

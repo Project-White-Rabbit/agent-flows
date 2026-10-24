@@ -1,4 +1,13 @@
 import type { IntegrationSpec, SectionValues } from "../types.ts"
+import { HOST, ISSUE_KEY } from "./patterns.ts"
+
+// The REST API with basic auth: the account's email and an API token.
+const AUTH = 'basic auth `"$JIRA_EMAIL:{token}"`'
+const REST = '`curl -fsSL -u "$JIRA_EMAIL:{token}" "https://{site}/rest/api/3'
+const JQL =
+  '`project = {projectKey} AND statusCategory != Done AND text ~ "<line>"`'
+const TRANSITION =
+  "whose status category matches: `todo` → To Do, `in progress` and `in review` → In Progress (a status named for review when there is one), `done` and `canceled` → Done. Skip the transition when the issue is already there"
 
 const BROWSE_LINK =
   /\b([a-z0-9-]+\.atlassian\.net)\/browse\/([A-Z][A-Z0-9_]+)-\d+/g
@@ -44,17 +53,49 @@ export const jira: IntegrationSpec = {
       description: "Atlassian site host",
       example: "acme.atlassian.net",
       required: true,
+      pattern: HOST,
     },
     {
       key: "projectKey",
       description: "Issue key prefix",
       example: "ENG",
       required: true,
+      pattern: ISSUE_KEY,
     },
   ],
   multiple: true,
-  lookup: "Atlassian MCP (list projects), or ask",
-  provides: { issueTracker: {} },
+  lookup: "Atlassian MCP (list projects), the API's `project/search`, or ask",
+  access: {
+    mcp: { server: "Atlassian" },
+    api: {
+      base: "https://<site>/rest/api/3, basic auth with `JIRA_EMAIL`",
+      token: ["JIRA_API_TOKEN"],
+    },
+  },
+  provides: {
+    issueTracker: {
+      issueRef:
+        "`{projectKey}-<n>`, or `https://{site}/browse/{projectKey}-<n>`",
+      getIssue: {
+        mcp: "The Atlassian MCP's `getJiraIssue` for `<ID>` on `{site}`; its URL is `https://{site}/browse/<ID>`",
+        api: `${REST}/issue/<ID>?fields=summary,description,status"\`; its URL is \`https://{site}/browse/<ID>\``,
+      },
+      findIssue: {
+        mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${JQL}, following \`nextPageToken\` to the last page: \`text ~\` is a fuzzy search, so a match can be on any page. Keep only issues whose description has exactly that line`,
+        api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${JQL} and \`fields: ["summary", "description", "updated"]\`, following \`nextPageToken\` to the last page (\`text ~\` is fuzzy). Keep only issues whose description has exactly that line`,
+      },
+      createIssue: {
+        mcp: "The Atlassian MCP's `createJiraIssue` on `{site}` in project `{projectKey}`, issue type `Task`, assigned to the current user (`atlassianUserInfo`)",
+        api: `\`POST https://{site}/rest/api/3/issue\` (${AUTH}) with \`fields\`: \`project.key\` \`{projectKey}\`, \`issuetype.name\` \`Task\`, \`summary\`, \`description\` (Atlassian Document Format), and \`assignee.accountId\` from \`GET /rest/api/3/myself\``,
+      },
+      updateIssue: {
+        mcp: `The Atlassian MCP's \`editJiraIssue\` on \`{site}\` for the summary and description, then \`transitionJiraIssue\` to the transition (\`getTransitionsForJiraIssue\`) ${TRANSITION}`,
+        api: `\`PUT https://{site}/rest/api/3/issue/<ID>\` (${AUTH}) with \`fields.summary\` and \`fields.description\` (Atlassian Document Format), then \`POST .../issue/<ID>/transitions\` with the transition (\`GET .../issue/<ID>/transitions\`) ${TRANSITION}`,
+      },
+      prLink:
+        "Jira's development panel reads the issue key from the pull request title, branch name, or commit messages, not the body, so when the branch name doesn't carry `<ID>`, the title must: prefix it (`<ID> `) and keep the rest of the repo's title convention. Merging doesn't close it",
+    },
+  },
   detect(ctx) {
     const messages = (ctx.git(["log", "-300", "--format=%B"]) ?? "").split("\n")
     const evidence = ctx.dependsOn(/^(jira-client|jira\.js|jira)$/)

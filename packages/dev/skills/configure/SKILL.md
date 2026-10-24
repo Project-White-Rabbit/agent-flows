@@ -9,17 +9,17 @@ Record this repository's dev configuration in `.agent-flows/config.json` at the 
 
 Flows never ask for a vendor. They ask for a **capability**, and use every integration the repo configured for it:
 
-| Capability | Name | Used for | Integrations |
-|---|---|---|---|
-| `sourceControl` | Source control | The hosted repository: pull requests, CI checks, code review | GitHub, GitLab |
-| `stacking` | Stacked PRs | Stacked branches and pull requests on top of source control | Graphite |
-| `issueTracker` | Issue tracker | Tickets: link branches and PRs, file and close issues | Linear, Jira |
-| `deployments` | Deployments | Preview and production deployments, runtime logs | Vercel |
-| `database` | Database | Database branches per worktree, migrations | Neon |
-| `errorTracking` | Error tracking | Production errors behind a bug | Sentry |
-| `analytics` | Product analytics | Usage events, funnels, session replay | PostHog |
-| `featureFlags` | Feature flags | Gated rollouts and experiments | PostHog |
-| `chat` | Team chat | Where dev flows post announcements and alerts | Slack |
+| Capability | Name | Used for | Integrations | Levels (`use`) |
+|---|---|---|---|---|
+| `sourceControl` | Source control | The hosted repository: pull requests, CI checks, code review | GitHub, GitLab | `read`: Read pull requests (evaluate); `write` (default): Also push branches and open and edit draft pull requests (sync) |
+| `stacking` | Stacked PRs | Stacked branches and pull requests on top of source control | Graphite | used or not |
+| `issueTracker` | Issue tracker | Tickets: link branches and PRs, file and close issues | Linear, Jira | `link` (default): Find a branch's existing issue and link it from the PR; `track`: Also file an issue for every branch, and keep its status and state in step (sync) |
+| `deployments` | Deployments | Preview and production deployments, runtime logs | Vercel | used or not |
+| `database` | Database | Database branches per worktree, migrations | Neon | used or not |
+| `errorTracking` | Error tracking | Production errors behind a bug | Sentry | `link` (default): Link the errors a branch fixes from its PR; `resolve`: Also resolve them when the PR merges (sync) |
+| `analytics` | Product analytics | Usage events, funnels, session replay | PostHog | used or not |
+| `featureFlags` | Feature flags | Gated rollouts and experiments | PostHog | used or not |
+| `chat` | Team chat | Where dev flows post announcements and alerts | Slack | used or not |
 
 A repo can configure any number of integrations for a capability (none, one, or several, like Linear for product work and Jira for support tickets), and flows use all of them. An integration can provide more than one capability, and most can be configured more than once (one Vercel project per app in a monorepo): the entry is then a list of instances, each with a unique `name`:
 
@@ -32,19 +32,19 @@ A repo can configure any number of integrations for a capability (none, one, or 
 
 The file is made of **sections**, each an object of fields at a dotted path. Every section but `repo` is an integration:
 
-| Section | Name | Provides | Used for | Fields | Look up with |
-|---|---|---|---|---|---|
-| `repo` | Repository (always) |  | The branch work merges into, for diffs, reviews, and PRs | `baseBranch` (required): Branch feature work merges into | `git symbolic-ref --short refs/remotes/origin/HEAD`, or ask |
-| `integrations.github` | GitHub | `sourceControl` | Pull requests, CI checks, code review | `owner` (required): Org or user; `repo` (required): Repository name | `gh repo view --json owner,name` |
-| `integrations.gitlab` | GitLab | `sourceControl` | Merge requests, CI pipelines, code review | `project` (required): Project path, including groups; `host`: Self-managed host name | `glab repo view` |
-| `integrations.graphite` | Graphite | `stacking` | Stacked branches and PRs | `trunk` (required): Trunk branch stacks build on | `gt trunk` |
-| `integrations.linear` | Linear | `issueTracker` | Tickets: link branches and PRs, file and close issues | `teamKey` (required): Issue key prefix; `workspace`: URL slug in linear.app/<slug> | Linear MCP (list teams) |
-| `integrations.jira` | Jira | `issueTracker` | Tickets: link branches and PRs, file and close issues | `site` (required): Atlassian site host; `projectKey` (required): Issue key prefix | Atlassian MCP (list projects), or ask |
-| `integrations.vercel` | Vercel | `deployments` | Preview and production deployments, runtime logs | `team`: Team id or slug; `project` (required): Project id or name; `directory`: App directory it deploys, in a monorepo | Vercel MCP, or `vercel project ls` |
-| `integrations.neon` | Neon | `database` | Postgres branches per worktree, migrations | `projectId` (required): Neon project id; `parentBranch`: Branch new dev branches fork from; `database`: Database name | Neon MCP (list projects), or `neonctl projects list` |
-| `integrations.sentry` | Sentry | `errorTracking` | Production errors behind a bug | `org` (required): Organization slug; `project` (required): Project slug; `url`: Self-hosted base URL | Sentry MCP (find projects), or `sentry-cli projects list` |
-| `integrations.posthog` | PostHog | `analytics`, `featureFlags` | Product analytics, feature flags, session replay | `projectId` (required): Numeric project id; `host`: App host | PostHog MCP (list projects) |
-| `integrations.slack` | Slack | `chat` | Where dev flows post announcements and alerts | `channel` (required): Channel name or id | Slack MCP (search channels), or ask |
+| Section | Name | Provides | Used for | Fields | Reached through | Look up with |
+|---|---|---|---|---|---|---|
+| `repo` | Repository (always) |  | The branch work merges into, for diffs, reviews, and PRs | `baseBranch` (required): Branch feature work merges into |  | `git symbolic-ref --short refs/remotes/origin/HEAD`, or ask |
+| `integrations.github` | GitHub | `sourceControl` | Pull requests, CI checks, code review | `owner` (required): Org or user; `repo` (required): Repository name | MCP (`GitHub`), CLI (`gh`), API (token in `GITHUB_TOKEN` or `GH_TOKEN`, or where configure records it) | `gh repo view --json owner,name`, or the GitHub MCP's repository search |
+| `integrations.gitlab` | GitLab | `sourceControl` | Merge requests, CI pipelines, code review | `project` (required): Project path, including groups; `host`: Self-managed host name | MCP (`GitLab`), CLI (`glab`), API (token in `GITLAB_TOKEN`, or where configure records it) | `glab repo view`, or the GitLab MCP |
+| `integrations.graphite` | Graphite | `stacking` | Stacked branches and PRs | `trunk` (required): Trunk branch stacks build on | CLI (`gt`) | The `trunk` in `.graphite_repo_config` in the git common dir, else ask. Never run `gt` to look it up: on a repo Graphite hasn't set up, it initializes it |
+| `integrations.linear` | Linear | `issueTracker` | Tickets: link branches and PRs, file and close issues | `teamKey` (required): Issue key prefix; `workspace`: URL slug in linear.app/<slug>; `project`: Project new issues go in (its name) | MCP (`Linear`), API (token in `LINEAR_API_KEY`, or where configure records it), adapters (`findIssue`) | Linear MCP (`list_teams`; `list_projects` for the team's projects), or the API's `teams` and `projects` queries |
+| `integrations.jira` | Jira | `issueTracker` | Tickets: link branches and PRs, file and close issues | `site` (required): Atlassian site host; `projectKey` (required): Issue key prefix | MCP (`Atlassian`), API (token in `JIRA_API_TOKEN`, or where configure records it) | Atlassian MCP (list projects), the API's `project/search`, or ask |
+| `integrations.vercel` | Vercel | `deployments` | Preview and production deployments, runtime logs | `team`: Team id or slug; `project` (required): Project id or name; `directory`: App directory it deploys, in a monorepo | MCP (`Vercel`), CLI (`vercel`), API (token in `VERCEL_TOKEN`, or where configure records it) | Vercel MCP, or `vercel project ls` |
+| `integrations.neon` | Neon | `database` | Postgres branches per worktree, migrations | `projectId` (required): Neon project id; `parentBranch`: Branch new dev branches fork from; `database`: Database name | MCP (`Neon`), CLI (`neonctl`), API (token in `NEON_API_KEY`, or where configure records it) | Neon MCP (list projects), or `neonctl projects list` |
+| `integrations.sentry` | Sentry | `errorTracking` | Production errors behind a bug | `org` (required): Organization slug; `project` (required): Project slug; `url`: Self-hosted base URL | MCP (`Sentry`), CLI (`sentry-cli`), API (token in `SENTRY_AUTH_TOKEN`, or where configure records it) | Sentry MCP (find projects), or `sentry-cli projects list` |
+| `integrations.posthog` | PostHog | `analytics`, `featureFlags` | Product analytics, feature flags, session replay | `projectId` (required): Numeric project id; `host`: App host | MCP (`PostHog`), API (token in `POSTHOG_PERSONAL_API_KEY`, or where configure records it) | PostHog MCP (list projects) |
+| `integrations.slack` | Slack | `chat` | Where dev flows post announcements and alerts | `channel` (required): Channel name or id | MCP (`Slack`), API (token in `SLACK_BOT_TOKEN` or `SLACK_TOKEN`, or where configure records it) | Slack MCP (search channels), or ask |
 
 ```json
 {
@@ -62,18 +62,22 @@ The file is made of **sections**, each an object of fields at a dotted path. Eve
 
 To configure individual sections, name them ($ARGUMENTS): `/agent-flows:configure linear vercel`. A name is a section path or its last part (`integrations.linear` or `linear`), or a capability (`issueTracker`), which stands for every integration that provides it. Only the named sections are detected, shown, and changed, even ones that were skipped or are already configured; the rest of the file stays as it is. With no names, every section above is considered.
 
+Each integration also records what the team **uses** it for, under `use`: per capability it provides, a level from the table above (`"use": {"issueTracker": "track"}`), or `true` for a capability without levels. A capability left out isn't used, even if the integration provides it (PostHog only for feature flags). Flows never go past the level, so this is where a team decides, say, that sync links issues but doesn't file them. Without `use`, flows assume each capability's default level, and configure asks.
+
+An integration can be reached in up to three ways: its **MCP server**, its **CLI**, or its **HTTP API** directly, with a token from an environment variable. Which ones work depends on the machine, not the repo, so it's never written to the config: every flow checks at run time and uses the first that works, in that order. Configure uses the same check to offer integrations this machine can already reach, even when the repo shows no sign of them.
+
 Re-running is safe: values already in the file are kept, skipped sections stay skipped, and when nothing new turns up the command says so and changes nothing.
 
 **CLI commands** available via Bash (paths relative to `${CLAUDE_PLUGIN_ROOT}/src/commands/`):
 
 | Command | Description |
 |---------|-------------|
-| `configure.ts <subcommand>` | `show` the config, `detect` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, or `write` a patch read from stdin (JSON) |
+| `configure.ts <subcommand>` | `show` the config, `detect` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, `write` a patch read from stdin (JSON), or `token <integration> --env|--file|--command <where>` to record where an API token is on this machine |
 
 ## Invariants
 
 - Never write a token, key, password, or connection string into the config, and never read a real `.env` file to find one. If the user pastes a secret, don't save it, and tell them it doesn't belong in this file.
-- Never call a service in a way that changes it. Lookups are read-only.
+- Never call a service in a way that changes it. Lookups are read-only, and that includes local setup: don't run a CLI command that initializes or configures the tool in this repo (some do on first use), even to read a value. Read its files instead, or ask.
 - Only change the config through `write`; never edit the file by hand to get past the validator.
 
 ## 1. Detect
@@ -93,18 +97,33 @@ The JSON has `configPath`, `exists`, the current `config` (when valid), its `iss
 - With `requested` set, the plan covers only those sections, and proposes each even if it was skipped or nothing was detected, plus any section marked *always* that the config still lacks (the file isn't valid without it).
 - `upToDate`: the config exists and there is nothing to add or fill. Sections listed in `skipped` were deliberately left out on an earlier run and are never proposed again.
 
+`access` says, per integration, how this machine can reach it: `cli` (`installed`, and `ready` when it's also signed in), `api` (the token variable, and `ready` when it's set; never print its value), and `mcp.server`, which only you can check: it's available when your tools include ones from that MCP server (named for it, like `mcp__<server>__…`, or a connector of that name). An integration is **in reach** when it isn't configured, isn't in `skipped`, and one of those three works.
+
 Route on the result:
 
 - **`issues` is non-empty (the file is broken)**: show the issues and stop. For each issue, say what's wrong and the fix (a wrong type or a missing required field); with the user's OK, fix it with `write`, or by hand only when `write` refuses because the file is unreadable, then re-run this command. A version newer than the plugin means the user should upgrade the plugin instead
-- **`plan.upToDate` is true and the user named no sections**: say the config is already up to date (list its sections, any `skipped`, any `warnings`, and any `conflicts`) and stop. Change nothing. If `plan.moreInstances` isn't empty, add one line per integration naming the instances found, and that `/agent-flows:configure <integration>` adds them
+- **`plan.upToDate` is true, the user named no sections, and no integration is in reach**: say the config is already up to date (list its sections, any `skipped`, any `warnings`, and any `conflicts`) and stop. Change nothing. If `plan.moreInstances` isn't empty, add one line per integration naming the instances found, and that `/agent-flows:configure <integration>` adds them
 - **the user named sections**: go to fill for exactly the `requested` sections. For each one already configured, show its current values (and any of its `plan.moreInstances`) and ask what to change; for the rest, fill them as usual → step 2
 - **otherwise**: continue → step 2
 
 ## 2. Fill the gaps
 
-Work through `plan.changes` and `plan.needs`, plus any sections the user named. Evidence that a service is used (a dependency) is not the same as its ids, so look up each missing required field read-only, in this order:
+**Offer what's in reach.** Unless the user named sections, take the integrations in reach that the plan doesn't already add, and use `AskUserQuestion` with multiple selection: which of them should the repo use? One option per integration, saying how it's reached (`Linear: MCP connected`, `Vercel: CLI signed in`, `Sentry: SENTRY_AUTH_TOKEN set`). Being reachable from this machine doesn't mean the repo uses it, so recommend none by default, only ones the repo shows signs of. With more than fit in one question, ask several. The ones picked join the plan as sections to add; the rest go in the write's `skip` list, so the next run doesn't offer them again.
 
-1. **The section's lookup** from the table above: a connected MCP server or a signed-in CLI.
+**Ask what each is for.** For every integration being added, and every configured one `plan.needs` lists `use` for, use `AskUserQuestion` what the team uses it for: one question per capability it provides, with that capability's levels from the table above plus "Not for this", and its default level recommended. A capability without levels is a yes or no. Several integrations can go in one call, up to its limit on questions. Record the answers as the entry's `use`, and leave out the capabilities answered "Not for this". If every capability is "Not for this", the integration isn't used: skip it instead.
+
+**Ask where each token is.** For every integration being added or already configured that has an API, ask where its API token is on this machine when `access.api.configured` is false and either the table lists adapters for it (they need the token) or neither its MCP server nor its CLI works here. Don't look for the token yourself (no searching the disk, no reading files or variables to see what's there); the user says where it is. use `AskUserQuestion` with the options:
+
+- **An environment variable**: its name (the integration's usual ones, from the table, are a good default).
+- **A file**: the path of a file holding just the token.
+- **A command**: one that prints it, like a password manager's (`op read op://<vault>/<item>/credential`).
+- **None**: use its MCP server or CLI instead; adapters that need the token are skipped.
+
+Record each answer: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" token <integration> --env <NAME>` (or `--file <path>`, `--command '<command>'`; `--clear` forgets it). It saves where the token is, never the token, in the repo's git dir: per machine, shared by the repo's worktrees, never committed, and not part of the confirm table below. Never print a token, and never pass one to the command.
+
+Then work through `plan.changes` and `plan.needs` (other than `use`), plus the sections picked or named. Evidence that a service is used (a dependency) is not the same as its ids, so look up each missing required field read-only, in this order:
+
+1. **The section's lookup** from the table above, through whichever way of reaching it works here: its MCP server, its signed-in CLI, or its API with the token variable (never print the token).
 2. **The user**, for anything still missing or ambiguous (two Vercel projects, several Linear teams).
 
 When detection finds several instances of one integration (`detected.<path>.instances`, like a linked Vercel project per app), the plan proposes them all as a list: confirm each, and drop the ones the team doesn't want. To add instances to an integration configured as a single object (the user asked, or accepted some of `plan.moreInstances`), turn its entry into a list: give the existing one a `name` and add the new ones. Names are unique within the list and use lowercase letters, digits, `.`, `_`, and `-` (`web`, `apps-docs`).
@@ -141,4 +160,4 @@ It validates the whole result and writes only if the content changed, in a fixed
 
 ## 5. Report
 
-Say what changed in `.agent-flows/config.json`, or that nothing did (`"written": false` with no issues). Then, from `coverage`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. If the file changed, remind the user to commit it so the team shares it.
+Say what changed in `.agent-flows/config.json`, or that nothing did (`"written": false` with no issues). Then, from `coverage`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from `access`, plus your MCP check; for the API, `access.api.source`, which says where the token comes from, never what it is), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (`access.cli.auth`), or record where its token is (`token`). That part is about this machine only and never goes in the config. If the file changed, remind the user to commit it so the team shares it.

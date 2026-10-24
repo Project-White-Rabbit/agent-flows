@@ -20,6 +20,7 @@ import type {
   SectionSpec,
   SectionValues,
 } from "./types.ts"
+import { checkUse, USE_KEY } from "./use.ts"
 
 export const CONFIG_PATH = ".agent-flows/config.json"
 
@@ -169,6 +170,10 @@ function checkEntry(
   const fields = new Map(spec.fields.map((f) => [f.key, f]))
   for (const [key, fieldValue] of Object.entries(entry)) {
     if (instance && key === INSTANCE_KEY) {
+      continue
+    }
+    if (key === USE_KEY && "provides" in spec) {
+      issues.push(...checkUse(spec, fieldValue, `${where}.${key}`))
       continue
     }
     const field = fields.get(key)
@@ -371,7 +376,7 @@ export function normalize(
   const out = structuredClone(config)
   for (const spec of registry) {
     const value = getAt(out, spec.path)
-    const keys = spec.fields.map((f) => f.key)
+    const keys = [...spec.fields.map((f) => f.key), USE_KEY]
     if (isRecord(value)) {
       setAt(out, spec.path, ordered(value, keys))
     } else if (Array.isArray(value)) {
@@ -672,6 +677,10 @@ export function planConfig(
       const missing = spec.fields
         .filter((f) => f.required && values[f.key] === undefined)
         .map((f) => f.key)
+      // An integration says what the team uses it for; configure asks.
+      if ("provides" in spec && values[USE_KEY] === undefined) {
+        missing.push(USE_KEY)
+      }
       if (missing.length > 0) {
         needs.push({
           section: spec.path,

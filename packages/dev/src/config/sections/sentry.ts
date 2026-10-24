@@ -1,4 +1,5 @@
 import type { IntegrationSpec, SectionValues } from "../types.ts"
+import { SLUG } from "./patterns.ts"
 
 /** `defaults.org=acme` (sentry.properties) or `[defaults]\norg=acme` (.sentryclirc). */
 export function parseSentryConfig(text: string): SectionValues {
@@ -37,12 +38,14 @@ export const sentry: IntegrationSpec = {
       description: "Organization slug",
       example: "acme",
       required: true,
+      pattern: SLUG,
     },
     {
       key: "project",
       description: "Project slug",
       example: "web",
       required: true,
+      pattern: SLUG,
     },
     {
       key: "url",
@@ -52,7 +55,25 @@ export const sentry: IntegrationSpec = {
   ],
   multiple: true,
   lookup: "Sentry MCP (find projects), or `sentry-cli projects list`",
-  provides: { errorTracking: {} },
+  access: {
+    mcp: { server: "Sentry" },
+    cli: { bin: "sentry-cli", auth: ["sentry-cli", "info"] },
+    api: {
+      base: "https://sentry.io/api/0 (or `<url>/api/0` on a self-hosted `url`)",
+      token: ["SENTRY_AUTH_TOKEN"],
+    },
+  },
+  provides: {
+    errorTracking: {
+      issueRef:
+        "A short id like `WEB-4P`, or an issue URL: `https://{org}.sentry.io/issues/<id>/`, or `<base>/organizations/{org}/issues/<id>/` on a self-hosted `url`",
+      resolveIssue: {
+        mcp: "The Sentry MCP's `update_issue` for `<issue>` in organization `{org}` with `status: resolved`",
+        cli: "`sentry-cli issues --org {org} --project {project} resolve --id <issue>` (the numeric id; look a short id up with the API or MCP first)",
+        api: '`curl -fsSL -X PUT -H "Authorization: Bearer {token}" -H "Content-Type: application/json" -d \'{"status":"resolved"}\' "https://sentry.io/api/0/organizations/{org}/issues/<issue>/"` (the base is `<url>/api/0` on a self-hosted `url`)',
+      },
+    },
+  },
   detect(ctx) {
     const evidence: string[] = []
     let values: SectionValues = {}

@@ -4,6 +4,7 @@ import { findCapability } from "../config/integrations.ts"
 import { configureFlow } from "./configure.ts"
 import { renderAllSkills } from "./index.ts"
 import { devKit } from "./kit.ts"
+import { syncFlow } from "./sync.ts"
 
 describe("dev flows", () => {
   const files = renderAllSkills()
@@ -13,6 +14,10 @@ describe("dev flows", () => {
       "skills/configure/SKILL.md",
       "skills/evaluate/SKILL.md",
       "skills/evaluate-run/SKILL.md",
+      "skills/sync/SKILL.md",
+      "skills/sync-local/SKILL.md",
+      "skills/sync-remote/SKILL.md",
+      "skills/sync-report/SKILL.md",
     ])
   })
 
@@ -44,14 +49,81 @@ describe("dev flows", () => {
         ...f.content.matchAll(/configure\.ts" integrations ((?:\w+ ?)+)/g),
       ].flatMap((m) => m[1].trim().split(" ")),
     )
-    expect(asks).toContain("sourceControl")
+    expect(asks).toEqual(
+      expect.arrayContaining([
+        "sourceControl",
+        "stacking",
+        "issueTracker",
+        "errorTracking",
+      ]),
+    )
     for (const id of asks) {
       expect(findCapability(id), id).toBeDefined()
     }
-    const evaluate = files.filter((f) => f.path.includes("evaluate"))
-    for (const file of evaluate) {
-      expect(file.content).not.toMatch(/\bgh |\bglab |GitHub|GitLab/)
+    const vendorFree = files.filter((f) => !f.path.includes("configure"))
+    for (const file of vendorFree) {
+      expect(file.content, file.path).not.toMatch(
+        /\b(gh|glab|gt) |GitHub|GitLab|Graphite|Linear|Jira|Sentry/,
+      )
     }
+  })
+
+  it("only calls ops the capabilities declare", () => {
+    const ops = new Set(
+      ["sourceControl", "stacking", "issueTracker", "errorTracking"].flatMap(
+        (id) => Object.keys(findCapability(id)?.ops ?? {}),
+      ),
+    )
+    const sync = files.filter((f) => f.path.includes("sync"))
+    const named = sync.flatMap((f) =>
+      [...f.content.matchAll(/`(\w+)` op/g)].map((m) => m[1]),
+    )
+    expect(named).toContain("prCreate")
+    for (const op of named) {
+      expect(ops.has(op), op).toBe(true)
+    }
+  })
+
+  it("routes sync through the survey's gate to the report", () => {
+    expect(devKit.describeFlow(syncFlow)).toMatchInlineSnapshot(`
+      "Flow: sync ({{cmd}}sync)
+      Default mode: default
+      Entries:
+        default → main/survey
+        local → main/survey
+        remote → main/survey
+        help → main/help
+
+      Phase: main
+        main/help [action]
+          default → <end>
+          local → <end>
+          remote → <end>
+          help → <end>
+        main/survey [action]
+          default → local/local-git
+          local → local/local-git
+          remote → remote/remote-writes
+          help → <end>
+      Phase: local
+        local/local-git [action]
+          default → remote/remote-writes
+          local → report/report
+          remote → <end>
+          help → <end>
+      Phase: remote
+        remote/remote-writes [action]
+          default → report/report
+          local → report/report
+          remote → report/report
+          help → report/report
+      Phase: report
+        report/report [action]
+          default → <end>
+          local → <end>
+          remote → <end>
+          help → <end>"
+    `)
   })
 
   it("routes configure through confirm before writing", () => {

@@ -111,7 +111,55 @@ export type CapabilitySpec = {
    * integration providing this capability implements. Only ops a flow uses.
    */
   ops: Record<string, string>
+  /**
+   * How far a team lets flows go with an integration for this capability,
+   * least first, each including the ones before it. An integration's `use`
+   * picks one; without levels, it's just used or not.
+   */
+  levels?: { id: string; description: string }[]
+  /** The level of an integration whose `use` doesn't say. */
+  defaultLevel?: string
 }
+
+/**
+ * The ways an agent can reach an integration, in the order flows prefer them:
+ * its MCP server, its CLI, or its HTTP API directly.
+ */
+export const ACCESS_KINDS = ["mcp", "cli", "api"] as const
+
+export type AccessKind = (typeof ACCESS_KINDS)[number]
+
+export type AccessSpec = {
+  /** An MCP server, by the name its tools show up under (`Linear`). */
+  mcp?: { server: string }
+  /**
+   * A CLI on PATH, and a command that exits 0 only when it's signed in (none
+   * when it has no sign-in of its own).
+   */
+  cli?: { bin: string; auth?: string[] }
+  /**
+   * The HTTP API: where it lives (prose, for people), and the environment
+   * variables that usually hold a token, the first set one wins, unless
+   * configure recorded another source for this machine. Ops write the token
+   * as `{token}`, which becomes a shell expression for it (`$NAME`,
+   * `$(cat '/path')`), so its value never passes through the agent or the
+   * config.
+   */
+  api?: { base: string; token: string[] }
+}
+
+/**
+ * How an integration does one op: one string when it's the same whatever the
+ * access (a URL shape), else one per access kind it supports, in the order to
+ * try them (usually `ACCESS_KINDS` order; an op lists a more exact way first).
+ */
+export type OpImpl = string | Partial<Record<VariantKind, string>>
+
+/**
+ * A way to run an op: one of the access kinds, or `script`, which resolution
+ * adds (first) for an op with an adapter.
+ */
+export type VariantKind = AccessKind | "script"
 
 /**
  * A section at `integrations.<id>` for a third-party tool. For each capability
@@ -122,7 +170,37 @@ export type CapabilitySpec = {
  * once per instance, so each op must name the instance it acts on.
  */
 export type IntegrationSpec = SectionSpec & {
-  provides: Record<string, Record<string, string>>
+  access: AccessSpec
+  provides: Record<string, Record<string, OpImpl>>
+  /** Ops this integration can run as code: see `Adapter`. */
+  adapters?: Record<string, Adapter>
+}
+
+/** What an adapter gets: the entry's values, its arguments, and its access. */
+export type AdapterInput = {
+  values: SectionValues
+  /** `--name value` arguments, named after the op's `<name>` placeholders. */
+  args: Record<string, string>
+  /** The API token, read from the integration's token variable, when `needs` is `api`. */
+  token?: string
+  fetch: typeof fetch
+}
+
+/**
+ * An op as code instead of prose: run by `adapter.ts`, so a lookup that needs
+ * exact filtering, paging, or several calls happens in one deterministic step
+ * rather than as instructions the agent follows. Integrations ship built-in
+ * ones; a repo adds or overrides them in `.agent-flows/adapters/<integration>.ts`
+ * (`export const adapters = { findIssue: {...} }`). Runtime code: Node
+ * built-ins only.
+ */
+export type Adapter = {
+  /** What it reaches the integration through; it runs only when that works. */
+  needs?: "api" | "cli"
+  /** Argument names, each passed as `--name <value>`. */
+  args?: string[]
+  /** What it prints, as JSON. Throw to fail. */
+  run(input: AdapterInput): Promise<unknown>
 }
 
 /**

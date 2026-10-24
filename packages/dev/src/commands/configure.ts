@@ -4,6 +4,8 @@
 
 import fs from "node:fs"
 import path from "node:path"
+import { probeAll, systemProbe } from "../config/access.ts"
+import { type LoadedAdapter, loadAdapters } from "../config/adapters/index.ts"
 import { CAPABILITIES } from "../config/capabilities.ts"
 import {
   applyPatch,
@@ -27,7 +29,14 @@ import {
   providersOf,
   resolveCapability,
 } from "../config/integrations.ts"
-import { SECTIONS } from "../config/sections/index.ts"
+import {
+  checkSource,
+  describeSource,
+  readLocal,
+  type TokenSource,
+  writeLocal,
+} from "../config/local.ts"
+import { INTEGRATIONS, SECTIONS } from "../config/sections/index.ts"
 import { isMain, printJson, readStdin, run, runMain } from "./lib.ts"
 
 /** Exit code that tells a flow the repo isn't configured for what it needs. */
@@ -195,7 +204,7 @@ function readPath(config: RawConfig, path: string): unknown {
  * ops. A capability with none is `"configured": false` (exit 2) unless
  * `--optional`, where the flow can carry on without it and gets an empty list.
  */
-function integrations(root: string, args: string[]): void {
+async function integrations(root: string, args: string[]): Promise<void> {
   const optional = args.includes("--optional")
   const names = args.filter((a) => a !== "--optional")
   if (names.length === 0) {
@@ -213,10 +222,32 @@ function integrations(root: string, args: string[]): void {
   if (!config) {
     return
   }
-  const resolved = names.map((name) => {
-    const { id } = findCapability(name) as { id: string }
-    return [id, resolveCapability(config, id)] as const
-  })
+  // Probe only what's configured for the capabilities asked about.
+  const ids = names.map((name) => (findCapability(name) as { id: string }).id)
+  const configured = INTEGRATIONS.filter(
+    (spec) =>
+      getAt(config, spec.path) !== undefined &&
+      ids.some((id) => id in spec.provides),
+  )
+  const access = await probeAll(
+    configured,
+    systemProbe(),
+    readLocal(root).tokens,
+  )
+  const scripts: Record<string, Record<string, LoadedAdapter>> = {}
+  const adapterIssues: string[] = []
+  for (const spec of configured) {
+    const loaded = await loadAdapters(root, spec)
+    scripts[spec.path] = loaded.adapters
+    adapterIssues.push(...loaded.issues)
+  }
+  const resolved = ids.map(
+    (id) =>
+      [
+        id,
+        resolveCapability(config, id, INTEGRATIONS, access, scripts),
+      ] as const,
+  )
   const missing = resolved.filter(([, r]) => r.configured.length === 0)
   if (!optional && missing.length > 0) {
     notConfigured(
@@ -236,6 +267,65 @@ function integrations(root: string, args: string[]): void {
     integrations: Object.fromEntries(
       resolved.map(([id, r]) => [id, r.configured]),
     ),
+    // A broken adapter file costs only its adapters; the ops still have the
+    // other variants.
+    ...(adapterIssues.length > 0 ? { warnings: adapterIssues } : {}),
+  })
+}
+
+/**
+ * Record where an integration's API token is on this machine, in the repo's
+ * git dir: never the token, and never in the committed config.
+ */
+function token(root: string, args: string[]): void {
+  const [name, kind, value] = args
+  const spec = INTEGRATIONS.find(
+    (s) => s.path === `integrations.${name}` || s.path === name,
+  )
+  if (!spec?.access.api) {
+    throw new Error(
+      `token needs an integration with an API: ${INTEGRATIONS.filter(
+        (s) => s.access.api,
+      )
+        .map((s) => s.path.split(".").at(-1))
+        .join(", ")}`,
+    )
+  }
+  const id = spec.path.split(".").at(-1) as string
+  const local = readLocal(root)
+  if (kind === "--clear") {
+    delete local.tokens[id]
+    writeLocal(root, local)
+    printJson({ written: true, integration: id, source: null })
+    return
+  }
+  let source: TokenSource
+  if (kind === "--env" && value) {
+    source = { env: value }
+  } else if (kind === "--file" && value) {
+    source = {
+      file: path.resolve(value.replace(/^~(?=$|\/)/, process.env.HOME ?? "~")),
+    }
+  } else if (kind === "--command" && value) {
+    source = { command: value }
+  } else {
+    throw new Error(
+      "token <integration> --env <NAME> | --file <path> | --command <command> | --clear",
+    )
+  }
+  const issues = checkSource(source)
+  if (issues.length > 0) {
+    printJson({ written: false, issues })
+    process.exitCode = 1
+    return
+  }
+  local.tokens[id] = source
+  const file = writeLocal(root, local)
+  printJson({
+    written: true,
+    integration: id,
+    source: describeSource(source),
+    file,
   })
 }
 
@@ -360,6 +450,12 @@ const HELP = `Usage: configure.ts <command>
                   per instance. Exits ${NOT_CONFIGURED_EXIT} with
                   {"configured": false} when the config is missing, invalid, or
                   doesn't set a path.
+  token <integration> --env <NAME> | --file <path> | --command <cmd> | --clear
+                  Record where the integration's API token is on this machine
+                  (an env variable, a file holding it, or a command printing
+                  it), in the repo's git dir: shared by its worktrees, never
+                  committed. Never the token itself. Flows and adapters read
+                  the token from there.
   integrations <capability>... [--optional]
                   Print {"integrations": {"<capability>": [...]}}: every
                   configured integration providing it (one per instance), with
@@ -411,6 +507,13 @@ async function main(): Promise<void> {
       ...(only ? { requested: only } : {}),
       ...(loaded.config ? { coverage: coverage(loaded.config) } : {}),
       detected,
+      // How this machine can reach each integration, configured or not, so
+      // configure can offer the ones that are already within reach.
+      access: await probeAll(
+        only ? INTEGRATIONS.filter((s) => only.includes(s.path)) : INTEGRATIONS,
+        systemProbe(),
+        readLocal(root).tokens,
+      ),
       // A broken file has to be fixed first, so there is no plan.
       ...(loaded.exists && !loaded.config
         ? {}
@@ -423,7 +526,11 @@ async function main(): Promise<void> {
     return
   }
   if (command === "integrations") {
-    integrations(root, args)
+    await integrations(root, args)
+    return
+  }
+  if (command === "token") {
+    token(root, args)
     return
   }
   if (command === "write") {

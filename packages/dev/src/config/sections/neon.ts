@@ -20,6 +20,11 @@ export const neon: IntegrationSpec = {
   ],
   multiple: true,
   lookup: "Neon MCP (list projects), or `neonctl projects list`",
+  access: {
+    mcp: { server: "Neon" },
+    cli: { bin: "neonctl", auth: ["neonctl", "me"] },
+    api: { base: "https://console.neon.tech/api/v2", token: ["NEON_API_KEY"] },
+  },
   provides: { database: {} },
   detect(ctx) {
     const evidence = ctx.dependsOn(/^@neondatabase\//)
