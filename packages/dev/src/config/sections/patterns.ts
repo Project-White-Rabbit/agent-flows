@@ -28,3 +28,9 @@ export const HOST: FieldPattern = {
     /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d{1,5})?$/,
   hint: "a lowercase host name, with an optional `:port` (`gitlab.acme.dev`)",
 }
+
+/** Who can open a shared link: `private`, `workspace`, or `public`. */
+export const VISIBILITY: FieldPattern = {
+  regex: /^(private|workspace|public)$/,
+  hint: "`private`, `workspace`, or `public`",
+}

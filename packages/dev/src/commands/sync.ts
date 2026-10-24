@@ -29,6 +29,8 @@ export type PrState = {
 export type BranchState = {
   issue?: string
   errorRefs?: string[]
+  /** Whether a legacy state file was already read for this branch. */
+  legacyRead?: boolean
   /** The last sync of any mode. */
   last?: { head: string; tree: string; baseHead: string; pr: string }
   /** The last sync that wrote the pull request and issue. */
@@ -125,9 +127,51 @@ export function workState(pr: PrState | undefined, ahead: number): WorkState {
   return pr?.state === "open" && !pr.draft ? "in review" : "in progress"
 }
 
+const LAST_SYNCED = /^_Last synced: .*_$/
+
+/** Sections an earlier sync tool regenerated, which the block now holds. */
+const LEGACY_SECTIONS = new Set(["Summary", "Test plan"])
+
+/**
+ * A body without what an earlier sync tool (bitfab-dev's, which this one
+ * replaces) wrote there without markers: the `> Name:` link lines on top, its
+ * Summary and Test plan sections, and its last-synced line. Only a body with
+ * that last-synced line is touched, so a person's own Summary survives.
+ */
+export function withoutLegacySync(body: string): string {
+  const lines = body.split("\n")
+  if (!lines.some((line) => LAST_SYNCED.test(line.trim()))) {
+    return body
+  }
+  const kept: string[] = []
+  let top = true
+  let skipping = false
+  for (const line of lines) {
+    const text = line.trim()
+    if (top && (text === "" || /^> [A-Z][\w ]*:/.test(text))) {
+      continue
+    }
+    top = false
+    const heading = text.match(/^## (.+)$/)
+    if (heading) {
+      skipping = LEGACY_SECTIONS.has(heading[1].trim())
+    }
+    if (LAST_SYNCED.test(text)) {
+      // It ended the generated part; anything after it is a person's.
+      skipping = false
+      continue
+    }
+    if (!skipping && !text.startsWith("<!-- bitfab-sync:")) {
+      kept.push(line)
+    }
+  }
+  return kept.join("\n")
+}
+
 /**
  * The pull request body with sync's block replaced, or put on top when the
- * body has none yet. Everything outside the block is someone else's and stays.
+ * body has none yet, in place of what an earlier sync tool generated there.
+ * Everything else is someone else's and stays.
  */
 export function spliceBlock(body: string, block: string): string {
   const inner = block.replace(BLOCK_START, "").replace(BLOCK_END, "").trim()
@@ -137,7 +181,7 @@ export function spliceBlock(body: string, block: string): string {
   if (start !== -1 && end !== -1) {
     return body.slice(0, start) + wrapped + body.slice(end + BLOCK_END.length)
   }
-  const rest = body.trim()
+  const rest = withoutLegacySync(body).trim()
   return rest ? `${wrapped}\n\n${rest}\n` : `${wrapped}\n`
 }
 
@@ -180,6 +224,60 @@ function statePath(): string {
     throw new Error("not inside a git repository")
   }
   return path.join(gitDir, "agent-flows", "sync.json")
+}
+
+/**
+ * Where an earlier sync tool (bitfab-dev's) kept a branch's issue and error
+ * refs, relative to the worktree root, newest first.
+ */
+export const LEGACY_STATE_FILES = [
+  ".bitfab-dev/state.json",
+  ".bitfab-sync/state.json",
+]
+
+/**
+ * The issue and error refs a legacy state file holds for `branch`. It keeps
+ * one branch, so a file written on another branch says nothing about this one.
+ */
+export function readLegacyState(
+  root: string,
+  branch: string,
+): { issue?: string; errorRefs: string[] } | undefined {
+  for (const file of LEGACY_STATE_FILES) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(fs.readFileSync(path.join(root, file), "utf8"))
+    } catch {
+      continue
+    }
+    const state = parsed as {
+      branch?: unknown
+      linearId?: unknown
+      sentryRefs?: unknown
+    }
+    if (typeof state !== "object" || state === null) {
+      continue
+    }
+    if (state.branch !== branch) {
+      return undefined
+    }
+    const refs = Array.isArray(state.sentryRefs) ? state.sentryRefs : []
+    return {
+      ...(typeof state.linearId === "string" && state.linearId
+        ? { issue: state.linearId }
+        : {}),
+      errorRefs: refs
+        .map((ref: { id?: unknown; url?: unknown }) =>
+          typeof ref?.id === "string" && ref.id
+            ? ref.id
+            : typeof ref?.url === "string"
+              ? ref.url
+              : undefined,
+        )
+        .filter((ref): ref is string => Boolean(ref)),
+    }
+  }
+  return undefined
 }
 
 export function readState(file: string): SyncState {
@@ -282,16 +380,39 @@ function survey(args: Args): void {
 
   const file = statePath()
   const state = readState(file)
-  const stored = state.branches[branch]
+  let stored = state.branches[branch]
+  let changed = false
+  // A branch an earlier sync tool synced keeps its issue and error refs. Read
+  // once, so an issue a later sync drops doesn't come back.
+  if (!stored?.legacyRead) {
+    const root = git(["rev-parse", "--show-toplevel"])
+    const legacy = root ? readLegacyState(root, branch) : undefined
+    stored = {
+      ...stored,
+      ...(legacy?.issue && !stored?.issue ? { issue: legacy.issue } : {}),
+      errorRefs: [
+        ...new Set([
+          ...(stored?.errorRefs ?? []),
+          ...(legacy?.errorRefs ?? []),
+        ]),
+      ],
+      legacyRead: true,
+    }
+    changed = legacy !== undefined
+  }
   const passedRefs = args.flags.get("error-ref") ?? []
   if (passedRefs.length > 0 && mode !== "local") {
-    const errorRefs = [
-      ...new Set([...(stored?.errorRefs ?? []), ...passedRefs]),
-    ]
-    state.branches[branch] = { ...stored, errorRefs }
+    stored = {
+      ...stored,
+      errorRefs: [...new Set([...(stored?.errorRefs ?? []), ...passedRefs])],
+    }
+    changed = true
+  }
+  if (changed) {
+    state.branches[branch] = stored
     writeState(file, state)
   }
-  const current = state.branches[branch]
+  const current = stored
   const onBase = branch === base
   const signals = gate({
     mode,
@@ -410,14 +531,17 @@ const USAGE = `Usage: sync.ts <command>
                   a full update, commits and diffStat against the base.
   splice --body <file> --block <file>
                   Print the pull request body with sync's block replaced (or
-                  added on top), leaving the rest of the body alone.
+                  added on top, in place of the sections an earlier sync tool
+                  wrote), leaving the rest of the body alone.
   finish --base <branch> --pr <pr> [--remote] [--issue <id|none>] [--linked-ref <ref>]...
                   Record this sync so the next one can skip what's unchanged.
                   --remote when the pull request and issue were written (or
                   already current). --issue none forgets the cached issue.
 
 <pr> is \`none\` or \`<number>:<open|merged|closed>:<true|false>\` (draft).
-State is kept per branch in the worktree's git dir.`
+State is kept per branch in the worktree's git dir. A branch with no state yet
+starts from the issue and error refs bitfab-dev's sync left in
+.bitfab-dev/state.json, when they're for that branch.`
 
 const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   survey,

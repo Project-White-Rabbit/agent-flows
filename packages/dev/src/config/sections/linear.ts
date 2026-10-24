@@ -1,4 +1,4 @@
-import { findIssue } from "../adapters/linear.ts"
+import { findIssue, searchIssues } from "../adapters/linear.ts"
 import type { IntegrationSpec, SectionValues } from "../types.ts"
 import { jiraLinkedKeys } from "./jira.ts"
 import { ISSUE_KEY } from "./patterns.ts"
@@ -8,8 +8,14 @@ import { ISSUE_KEY } from "./patterns.ts"
 const GRAPHQL =
   "`POST https://api.linear.app/graphql` (headers `Authorization: {token}`, `Content-Type: application/json`):"
 
-// Only when the repo set one; Linear issues need no project.
-const IN_PROJECT = "When `values.project` is set, put it in that project"
+// The fields sync sets beyond title and description, as the MCP's
+// `save_issue` takes them.
+const MCP_FIELDS =
+  "`<fields>` as `priority` (`urgent` 1, `high` 2, `medium` 3, `low` 4), `estimate` (a number), `labels` (names), `cycle` (the current one's number, from `list_cycles` with `type: current`), and `project` (a name)"
+
+// The same through the API, which takes ids.
+const API_FIELDS =
+  "`<fields>` as `priority` (`urgent` 1, `high` 2, `medium` 3, `low` 4), `estimate`, `labelIds` (from `issueLabels(filter: { name: { in: <names> } })`), `cycleId` (the team's `activeCycle { id }`), and `projectId` (from `projects(filter: { name: { eq: <project> } })`)"
 
 const STATE_MAP =
   "whose type matches: `todo` → `unstarted`, `in progress` → `started`, `in review` → a `started` state named for review when the team has one (else `started`), `done` → `completed`, `canceled` → `canceled`"
@@ -66,6 +72,31 @@ export const linear: IntegrationSpec = {
       description: "Project new issues go in (its name)",
       example: "Web app",
     },
+    {
+      key: "priority",
+      description:
+        "Priority for new issues (urgent, high, medium, low), unless the repo's agent instructions rank work otherwise",
+      example: "medium",
+    },
+    {
+      key: "labels",
+      type: "string[]",
+      description:
+        "Labels sync picks one of for each issue, by the kind of work",
+      example: ["Feature", "Bug", "Improvement"],
+    },
+    {
+      key: "estimate",
+      type: "boolean",
+      description: "Estimate each issue on the team's scale",
+      example: true,
+    },
+    {
+      key: "cycle",
+      type: "boolean",
+      description: "Put new issues in the current cycle",
+      example: true,
+    },
   ],
   multiple: true,
   lookup:
@@ -74,28 +105,32 @@ export const linear: IntegrationSpec = {
     mcp: { server: "Linear" },
     api: { base: "https://api.linear.app/graphql", token: ["LINEAR_API_KEY"] },
   },
-  adapters: { findIssue },
+  adapters: { findIssue, searchIssues },
   provides: {
     issueTracker: {
       issueRef:
         "`{teamKey}-<n>` in any case, or a `https://linear.app/<workspace>/issue/{teamKey}-<n>` URL",
       getIssue: {
-        mcp: "The Linear MCP's `get_issue` with `id: <ID>`",
-        api: `${GRAPHQL} \`issue(id: "<ID>") { identifier title url description archivedAt state { name type } }\``,
+        mcp: "The Linear MCP's `get_issue` with `id: <ID>` and `fields` including `priority`, `estimate`, `labels`, `cycleId`, `project`, `parentId`, and `attachments` (a pull request is one whose URL is a pull request's)",
+        api: `${GRAPHQL} \`issue(id: "<ID>") { identifier title url description archivedAt state { name type } priority estimate labels { nodes { name } } cycle { number } project { name } parent { identifier } attachments { nodes { url } } }\``,
       },
       // Also an adapter (`adapters/linear.ts`), which sync runs first: the
       // API's `contains` filter is exact, where the MCP's `query` is a fuzzy,
       // paginated search.
       findIssue: {
-        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <line>`, `includeArchived: false`, and `limit: 250`, once per open state type (`backlog`, `unstarted`, `started`), following `cursor` until `hasNextPage` is false: its `query` is a fuzzy search, so a match can be on any page. Keep only issues whose description has exactly that line",
+        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <branch>`, `includeArchived: false`, and `limit: 250`, once per open state type (`triage`, `backlog`, `unstarted`, `started`), following `cursor` until `hasNextPage` is false: its `query` is a fuzzy search, so a match can be on any page. Keep only issues whose description has a `> Branch:` line that is `<branch>` once backticks are dropped and any `[text](url)` or `<issue>` link is read as its text, ignoring the case of issue ids",
+      },
+      // Also an adapter, which ranks with the API's semantic search.
+      searchIssues: {
+        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <text>`, and `limit: 10`: once with no state (open issues), once with `state: completed` and once with `state: canceled`, each with `updatedAt: -P90D`. Ask for `fields` `title`, `url`, `status`, `statusType`, `description`, and `parentId`; load a candidate with `get_issue` to see whether a pull request is attached. Then try two or three shorter queries from the text's key words, since `query` matches words, not meaning",
       },
       createIssue: {
-        mcp: `The Linear MCP's \`save_issue\` with \`team: {teamKey}\`, \`title\`, \`description\`, and \`assignee: "me"\`. ${IN_PROJECT}: \`project\` set to it`,
-        api: `${GRAPHQL} \`issueCreate(input: { teamId, title, description, assigneeId, projectId })\`, with \`teamId\` from \`teams(filter: { key: { eq: "{teamKey}" } })\` and \`assigneeId\` from \`viewer { id }\`; it returns \`issue { identifier url }\`. ${IN_PROJECT}: \`projectId\` from \`projects(filter: { name: { eq: <project> } })\`, else leave it out`,
+        mcp: `The Linear MCP's \`save_issue\` with \`team: {teamKey}\`, \`title\`, \`description\`, \`assignee: "me"\`, \`parentId: <parent>\` when given, and ${MCP_FIELDS}`,
+        api: `${GRAPHQL} \`issueCreate(input: { teamId, title, description, assigneeId, parentId })\` with ${API_FIELDS}; \`teamId\` from \`teams(filter: { key: { eq: "{teamKey}" } })\`, \`assigneeId\` from \`viewer { id }\`, and \`parentId\` the id of \`issue(id: "<parent>")\` when given. It returns \`issue { identifier url }\``,
       },
       updateIssue: {
-        mcp: `The Linear MCP's \`save_issue\` with \`id\`, \`title\`, \`description\`, and \`state\`: the team's workflow state (\`list_issue_statuses\`) ${STATE_MAP}`,
-        api: `${GRAPHQL} \`issueUpdate(id: "<ID>", input: { title, description, stateId })\`, with \`stateId\` the team's workflow state (\`workflowStates(filter: { team: { key: { eq: "{teamKey}" } } })\`) ${STATE_MAP}`,
+        mcp: `The Linear MCP's \`save_issue\` with \`id\`, \`title\`, \`description\`, \`state\`: the team's workflow state (\`list_issue_statuses\`) ${STATE_MAP}, and ${MCP_FIELDS}`,
+        api: `${GRAPHQL} \`issueUpdate(id: "<ID>", input: { title, description, stateId })\` with ${API_FIELDS}, and \`stateId\` the team's workflow state (\`workflowStates(filter: { team: { key: { eq: "{teamKey}" } } })\`) ${STATE_MAP}`,
       },
       prLink:
         "Closing: a `Fixes <ID>` line in the pull request body, which also moves the issue to done when the pull request merges. Linking only: a `Part of <ID>` line in the body. Either way the title can stay as the repo writes it",

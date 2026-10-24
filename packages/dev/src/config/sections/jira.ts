@@ -5,7 +5,17 @@ import { HOST, ISSUE_KEY } from "./patterns.ts"
 const AUTH = 'basic auth `"$JIRA_EMAIL:{token}"`'
 const REST = '`curl -fsSL -u "$JIRA_EMAIL:{token}" "https://{site}/rest/api/3'
 const JQL =
-  '`project = {projectKey} AND statusCategory != Done AND text ~ "<line>"`'
+  '`project = {projectKey} AND statusCategory != Done AND text ~ "<branch>"`'
+const SEARCH_JQL =
+  '`project = {projectKey} AND text ~ "<text>" AND (statusCategory != Done OR resolved >= -90d) ORDER BY relevance`'
+// Keep only issues anchored to the branch, however the line was written.
+const BRANCH_MATCH =
+  "Keep only issues whose description has a `> Branch:` line that is `<branch>` once backticks are dropped and any link is read as its text"
+// The fields sync sets beyond summary and description.
+const FIELDS =
+  "`<fields>` as `priority.name` (`Highest` for urgent, `High`, `Medium`, `Low`), `labels`, the story points field for `estimate` when the project has one, and the board's active sprint for `cycle` when it has one (Jira Software). `project` doesn't apply: the project is `{projectKey}`"
+const FIELD_NAMES =
+  "`priority`, `labels`, `parent`, `issuelinks`, the story points field, and the sprint field"
 const TRANSITION =
   "whose status category matches: `todo` → To Do, `in progress` and `in review` → In Progress (a status named for review when there is one), `done` and `canceled` → Done. Skip the transition when the issue is already there"
 
@@ -62,6 +72,31 @@ export const jira: IntegrationSpec = {
       required: true,
       pattern: ISSUE_KEY,
     },
+    {
+      key: "priority",
+      description:
+        "Priority for new issues (urgent, high, medium, low), unless the repo's agent instructions rank work otherwise",
+      example: "medium",
+    },
+    {
+      key: "labels",
+      type: "string[]",
+      description:
+        "Labels sync picks one of for each issue, by the kind of work",
+      example: ["feature", "bug", "improvement"],
+    },
+    {
+      key: "estimate",
+      type: "boolean",
+      description: "Estimate each issue in story points",
+      example: true,
+    },
+    {
+      key: "cycle",
+      type: "boolean",
+      description: "Put new issues in the board's active sprint",
+      example: true,
+    },
   ],
   multiple: true,
   lookup: "Atlassian MCP (list projects), the API's `project/search`, or ask",
@@ -77,20 +112,24 @@ export const jira: IntegrationSpec = {
       issueRef:
         "`{projectKey}-<n>`, or `https://{site}/browse/{projectKey}-<n>`",
       getIssue: {
-        mcp: "The Atlassian MCP's `getJiraIssue` for `<ID>` on `{site}`; its URL is `https://{site}/browse/<ID>`",
-        api: `${REST}/issue/<ID>?fields=summary,description,status"\`; its URL is \`https://{site}/browse/<ID>\``,
+        mcp: `The Atlassian MCP's \`getJiraIssue\` for \`<ID>\` on \`{site}\`, with ${FIELD_NAMES}; its URL is \`https://{site}/browse/<ID>\`, and a pull request shows in its development panel`,
+        api: `${REST}/issue/<ID>?fields=summary,description,status,priority,labels,parent,issuelinks,*navigable"\`; its URL is \`https://{site}/browse/<ID>\`, and a pull request shows in \`GET /rest/dev-status/latest/issue/summary?issueId=<numeric id>\``,
       },
       findIssue: {
-        mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${JQL}, following \`nextPageToken\` to the last page: \`text ~\` is a fuzzy search, so a match can be on any page. Keep only issues whose description has exactly that line`,
-        api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${JQL} and \`fields: ["summary", "description", "updated"]\`, following \`nextPageToken\` to the last page (\`text ~\` is fuzzy). Keep only issues whose description has exactly that line`,
+        mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${JQL}, following \`nextPageToken\` to the last page: \`text ~\` is a fuzzy search, so a match can be on any page. ${BRANCH_MATCH}`,
+        api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${JQL} and \`fields: ["summary", "description", "updated"]\`, following \`nextPageToken\` to the last page (\`text ~\` is fuzzy). ${BRANCH_MATCH}`,
+      },
+      searchIssues: {
+        mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${SEARCH_JQL}, \`maxResults: 10\`, and fields \`summary\`, \`status\`, \`description\`, and \`parent\`. Then try two or three shorter queries from the text's key words, since \`text ~\` matches words, not meaning`,
+        api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${SEARCH_JQL}, \`maxResults: 10\`, and \`fields: ["summary", "status", "description", "parent"]\`. Then try two or three shorter queries from the text's key words`,
       },
       createIssue: {
-        mcp: "The Atlassian MCP's `createJiraIssue` on `{site}` in project `{projectKey}`, issue type `Task`, assigned to the current user (`atlassianUserInfo`)",
-        api: `\`POST https://{site}/rest/api/3/issue\` (${AUTH}) with \`fields\`: \`project.key\` \`{projectKey}\`, \`issuetype.name\` \`Task\`, \`summary\`, \`description\` (Atlassian Document Format), and \`assignee.accountId\` from \`GET /rest/api/3/myself\``,
+        mcp: `The Atlassian MCP's \`createJiraIssue\` on \`{site}\` in project \`{projectKey}\`, issue type \`Task\` (\`Subtask\` with \`parent\` set to \`<parent>\`, when given), assigned to the current user (\`atlassianUserInfo\`), with ${FIELDS}`,
+        api: `\`POST https://{site}/rest/api/3/issue\` (${AUTH}) with \`fields\`: \`project.key\` \`{projectKey}\`, \`issuetype.name\` \`Task\` (\`Subtask\`, with \`parent.key\` \`<parent>\`, when given), \`summary\`, \`description\` (Atlassian Document Format), \`assignee.accountId\` from \`GET /rest/api/3/myself\`, and ${FIELDS}`,
       },
       updateIssue: {
-        mcp: `The Atlassian MCP's \`editJiraIssue\` on \`{site}\` for the summary and description, then \`transitionJiraIssue\` to the transition (\`getTransitionsForJiraIssue\`) ${TRANSITION}`,
-        api: `\`PUT https://{site}/rest/api/3/issue/<ID>\` (${AUTH}) with \`fields.summary\` and \`fields.description\` (Atlassian Document Format), then \`POST .../issue/<ID>/transitions\` with the transition (\`GET .../issue/<ID>/transitions\`) ${TRANSITION}`,
+        mcp: `The Atlassian MCP's \`editJiraIssue\` on \`{site}\` for the summary, the description, and ${FIELDS}, then \`transitionJiraIssue\` to the transition (\`getTransitionsForJiraIssue\`) ${TRANSITION}`,
+        api: `\`PUT https://{site}/rest/api/3/issue/<ID>\` (${AUTH}) with \`fields.summary\`, \`fields.description\` (Atlassian Document Format), and ${FIELDS}, then \`POST .../issue/<ID>/transitions\` with the transition (\`GET .../issue/<ID>/transitions\`) ${TRANSITION}`,
       },
       prLink:
         "Jira's development panel reads the issue key from the pull request title, branch name, or commit messages, not the body, so when the branch name doesn't carry `<ID>`, the title must: prefix it (`<ID> `) and keep the rest of the repo's title convention. Merging doesn't close it",

@@ -6,6 +6,11 @@
 
 import type { CapabilitySpec } from "./types.ts"
 
+// The fields sync sets on an issue beyond its title and description. Each
+// tracker maps them to its own: a cycle is a sprint elsewhere.
+const ISSUE_FIELDS =
+  "priority (`urgent`, `high`, `medium`, `low`), estimate (on the team's scale), labels (names), cycle (`current`: the one in progress), and project (a name)"
+
 const PR_FIELDS =
   "number, url, title, body, state, whether it's a draft, base and head branches, additions, deletions, and changed-file count"
 
@@ -74,14 +79,13 @@ export const CAPABILITIES: CapabilitySpec[] = [
     ops: {
       issueRef:
         "Which strings name one of this tracker's issues: an issue id, or the tracker's URL for one",
-      getIssue:
-        "Issue <ID>: its id, title, URL, workflow state, and description. Not found, or archived, means there is none",
+      getIssue: `Issue <ID>: its id, title, URL, workflow state, description, ${ISSUE_FIELDS}, parent issue, and whether a pull request is attached. Not found, or archived, means there is none`,
       findIssue:
-        "Open issues whose description contains the exact line <line>, any assignee",
-      createIssue:
-        "File an issue titled <title> with the description <description>, assigned to the current user; prints its id and URL",
-      updateIssue:
-        "Set issue <ID>'s title to <title>, its description to <description>, and its workflow state to the one matching <state>: `todo`, `in progress`, `in review`, `done`, or `canceled`",
+        "Open issues anchored to branch <branch>, any assignee: their description has a `> Branch:` line naming it, in backticks or bare (as older tools wrote it), reading an issue id in it that the tracker turned into a link as plain text",
+      searchIssues:
+        "Issues that may already describe the work in <text>, any assignee: open ones, and ones closed in the last 90 days, ranked by the tracker's own search, each with its id, title, URL, workflow state, description, parent issue, and whether a pull request is attached",
+      createIssue: `File an issue titled <title> with the description <description>, assigned to the current user, as a sub-issue of <parent> when one is given, with <fields>: whichever of ${ISSUE_FIELDS} the flow sets, leaving out the rest. Prints its id and URL`,
+      updateIssue: `Set issue <ID>'s title to <title>, its description to <description>, its workflow state to the one matching <state> (\`todo\`, \`in progress\`, \`in review\`, \`done\`, or \`canceled\`), and <fields> as for createIssue. Fields left out stay as they are`,
       prLink:
         "Where a pull request names issue <ID> so the tracker links the two: a closing form, which also closes the issue when the pull request merges, and a linking-only form, when the tracker tells them apart",
     },
@@ -114,6 +118,16 @@ export const CAPABILITIES: CapabilitySpec[] = [
       issueRef:
         "Which strings name one of this project's error issues: a short id, or the tracker's URL for one",
       resolveIssue: "Mark error issue <issue> resolved",
+    },
+  },
+  {
+    id: "sessions",
+    name: "Session sharing",
+    purpose:
+      "Share the agent session behind a change, linked from its PR and issue",
+    ops: {
+      shareSession:
+        "Share the agent session this flow runs in with the team and print its URL. Sharing the same session again updates the same link",
     },
   },
   {

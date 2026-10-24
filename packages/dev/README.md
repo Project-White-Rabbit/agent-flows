@@ -20,9 +20,9 @@ Claude Code doesn't auto-update plugins from this marketplace unless you turn it
 
 | Command | What it does |
 |---|---|
-| `/agent-flows:configure [section \| capability ...]` | Detects the base branch and the integrations the repo uses (GitHub, GitLab, Graphite, Linear, Jira, Vercel, Neon, Sentry, PostHog, Slack), fills in their ids from MCP servers, CLIs, or you, and writes `.agent-flows/config.json` after you confirm. Name sections or capabilities (`/agent-flows:configure linear vercel`, `/agent-flows:configure issueTracker`) to set up or change just those, including ones skipped before. Idempotent: re-running keeps existing values, remembers declined integrations, and changes nothing when nothing new turns up. |
+| `/agent-flows:configure [section \| capability ...]` | Detects the base branch and the integrations the repo uses (GitHub, GitLab, Graphite, Linear, Jira, Vercel, Neon, Sentry, PostHog, Slack, Lore), fills in their ids from MCP servers, CLIs, or you, and writes `.agent-flows/config.json` after you confirm. Name sections or capabilities (`/agent-flows:configure linear vercel`, `/agent-flows:configure issueTracker`) to set up or change just those, including ones skipped before. Idempotent: re-running keeps existing values, remembers declined integrations, and changes nothing when nothing new turns up. |
 | `/agent-flows:evaluate [PR number or URL]` | Read-only shippability review of the current branch (committed, uncommitted, and untracked work) or a PR: what it does in plain English, prioritized risks, and a verdict. Diffs against `repo.baseBranch`, and reads PRs through whichever source-control integrations are configured. |
-| `/agent-flows:sync [local \| remote] [issue id]` | Keeps the branch, its draft PR, and its issue in step with the work. `local` commits and catches up to `repo.baseBranch` (restacking through the stacking integration when there is one, else `git merge`); `remote` refreshes the PR body and the issue (state follows the PR) and resolves linked errors once the PR merges; the default does both and pushes. A re-run with nothing changed stops at a no-op gate, using per-branch state kept in the worktree's git dir. Needs a source-control integration outside `local` mode; stacking, issue tracking, and error tracking are used when configured. |
+| `/agent-flows:sync [local \| remote] [issue id]` | Keeps the branch, its draft PR, and its issue in step with the work. `local` commits and catches up to `repo.baseBranch` (restacking through the stacking integration when there is one, else `git merge`); `remote` refreshes the PR body and the issue (state follows the PR) and resolves linked errors once the PR merges; the default does both and pushes. Before filing an issue it searches open and recently closed ones for the same work, reusing a match or filing a sub-issue; it sets priority (once, then leaves it to people), labels, estimate, cycle, and project from the tracker's config and the repo's agent instructions. A re-run with nothing changed stops at a no-op gate, using per-branch state kept in the worktree's git dir. Needs a source-control integration outside `local` mode; stacking, issue tracking, error tracking, and session sharing (a `> Lore:` link to the session in the PR and issue) are used when configured. Takes over branches bitfab-dev's sync synced: it reads its issue and error refs from `.bitfab-dev/state.json`, finds issues by its bare `> Branch:` line, and replaces its PR body sections instead of adding a second Summary and Test plan. |
 
 ## `.agent-flows/config.json`
 
@@ -48,7 +48,7 @@ The repo's shared dev configuration, committed so the whole team uses the same v
 
 ### Capabilities and integrations
 
-Skills never name a vendor. They ask for a **capability** (`sourceControl`, `issueTracker`, `deployments`, `database`, `errorTracking`, `analytics`, `featureFlags`, `chat`, `stacking`; see [`src/config/capabilities.ts`](src/config/capabilities.ts)) and use **every** integration the repo configured for it. A repo can have none, one, or several (Linear and Jira above are both issue trackers), and an integration can provide more than one capability (PostHog provides `analytics` and `featureFlags`).
+Skills never name a vendor. They ask for a **capability** (`sourceControl`, `issueTracker`, `deployments`, `database`, `errorTracking`, `analytics`, `featureFlags`, `chat`, `stacking`, `sessions`; see [`src/config/capabilities.ts`](src/config/capabilities.ts)) and use **every** integration the repo configured for it. A repo can have none, one, or several (Linear and Jira above are both issue trackers), and an integration can provide more than one capability (PostHog provides `analytics` and `featureFlags`).
 
 Most integrations can also be configured **more than once**, like one Vercel project per app in a monorepo (`multiple: true` on the spec). The entry is then a list of instances, each with a unique `name`. Skills see one entry per instance, and `get integrations.vercel.directory` reads as one `{name, value}` per instance. Detection proposes a list when it finds several (one linked `.vercel/` per app). For an integration already configured, it fills only the instance it matches by required fields (a different project id is another instance, not a conflict), offers the rest as `plan.moreInstances`, and never edits a list. Instance names use lowercase letters, digits, `.`, `_`, and `-`.
 
@@ -63,14 +63,14 @@ configure.ts integrations sourceControl [--optional]
   }]}}
 ```
 
-**Adapters** run an op as code instead of prose, for lookups that need exact filtering, paging, or several calls (Linear's `findIssue`: the MCP's search is fuzzy and paginated, the API's filter is exact). An adapter is TypeScript, Node built-ins only, run by `src/commands/adapter.ts`:
+**Adapters** run an op as code instead of prose, for lookups that need exact filtering, paging, or several calls (Linear's `findIssue`: the MCP's search is fuzzy and paginated, the API's filter is exact; its `searchIssues` ranks with the API's own search). An adapter is TypeScript, Node built-ins only, run by `src/commands/adapter.ts`:
 
 ```ts
 // .agent-flows/adapters/linear.ts in your repo: adds ops, or replaces the plugin's
 export const adapters = {
   findIssue: {
     needs: "api",          // runs only when the API token is set ("cli": the CLI is signed in)
-    args: ["line"],        // passed as --line <value>
+    args: ["branch"],      // passed as --branch <value>
     async run({ values, args, token, fetch }) {
       // values: the entry's config; token: from its token variable
       return { issues: [] } // printed as JSON

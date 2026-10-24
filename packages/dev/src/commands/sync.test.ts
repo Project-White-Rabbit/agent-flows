@@ -10,7 +10,9 @@ import {
   gate,
   lastSyncedLine,
   parsePr,
+  readLegacyState,
   spliceBlock,
+  withoutLegacySync,
   workState,
 } from "./sync.ts"
 
@@ -139,6 +141,93 @@ describe("spliceBlock", () => {
   })
 })
 
+describe("spliceBlock over an earlier sync tool's body", () => {
+  const legacy = [
+    "> Linear: [ENG-1: Fix login](https://l/ENG-1)",
+    "> Sentry: Fixes WEB-4P ([WEB-4P](https://s/WEB-4P))",
+    "> Lore: [Session](https://lore/t/1)",
+    "",
+    "## Summary",
+    "",
+    "- Fixes login",
+    "",
+    "**Before:** it failed. **After:** it works.",
+    "",
+    "## Test plan",
+    "",
+    "- [ ] Log in",
+    "",
+    "_Last synced: 2026-10-20 10:00 UTC (HEAD: abc1234)_",
+  ].join("\n")
+
+  it("replaces its link lines, Summary, Test plan, and last-synced line", () => {
+    const out = spliceBlock(legacy, "## Summary\n\n- new")
+    expect(out).toBe(`${BLOCK_START}\n## Summary\n\n- new\n${BLOCK_END}\n`)
+  })
+
+  it("keeps what a person added around them", () => {
+    const body = `${legacy}\n\nThanks for reviewing!\n\n## Screenshots\n\n![x](y)`
+    const out = withoutLegacySync(body)
+    expect(out).toContain("Thanks for reviewing!")
+    expect(out).toContain("## Screenshots\n\n![x](y)")
+    expect(out).not.toContain("Summary")
+    expect(out).not.toContain("> Lore:")
+  })
+
+  it("leaves a body no sync tool wrote alone", () => {
+    const body = "> Note: read this first\n\n## Summary\n\nMine."
+    expect(withoutLegacySync(body)).toBe(body)
+  })
+})
+
+describe("readLegacyState", () => {
+  let root: string | undefined
+  afterEach(() => {
+    if (root) {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  function write(file: string, value: unknown): string {
+    root ??= fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-legacy-"))
+    fs.mkdirSync(path.join(root, path.dirname(file)), { recursive: true })
+    fs.writeFileSync(path.join(root, file), JSON.stringify(value))
+    return root
+  }
+
+  it("reads the issue and error refs left for this branch", () => {
+    const dir = write(".bitfab-dev/state.json", {
+      linearId: "ENG-9",
+      branch: "feature",
+      sentryRefs: [
+        { id: "WEB-4P", title: "WEB-4P", url: "https://s/WEB-4P" },
+        { title: "x", url: "https://s/issues/123" },
+      ],
+    })
+    expect(readLegacyState(dir, "feature")).toEqual({
+      issue: "ENG-9",
+      errorRefs: ["WEB-4P", "https://s/issues/123"],
+    })
+    expect(readLegacyState(dir, "other")).toBeUndefined()
+  })
+
+  it("falls back to the older file, and tolerates junk", () => {
+    const dir = write(".bitfab-sync/state.json", {
+      linearId: "ENG-3",
+      branch: "feature",
+    })
+    expect(readLegacyState(dir, "feature")).toEqual({
+      issue: "ENG-3",
+      errorRefs: [],
+    })
+    write(".bitfab-dev/state.json", "not an object")
+    expect(readLegacyState(dir, "feature")).toEqual({
+      issue: "ENG-3",
+      errorRefs: [],
+    })
+  })
+})
+
 describe("lastSyncedLine", () => {
   it("stamps the time and the short HEAD", () => {
     expect(
@@ -250,6 +339,29 @@ describe("sync.ts (as a script)", () => {
     expect(
       json(["survey", "default", "--base", "main", "--pr", "5:open:false"]),
     ).toMatchObject({ runLocal: false, runRemote: true })
+  })
+
+  it("starts a branch from an earlier sync tool's state, once", () => {
+    init()
+    fs.mkdirSync(path.join(work(), ".bitfab-dev"))
+    fs.writeFileSync(
+      path.join(work(), ".bitfab-dev", "state.json"),
+      JSON.stringify({
+        linearId: "ENG-9",
+        branch: "feature",
+        sentryRefs: [{ id: "WEB-4P", url: "https://s/WEB-4P" }],
+      }),
+    )
+    git("commit", "-q", "--allow-empty", "-m", "Work")
+    const survey = ["survey", "remote", "--base", "main", "--pr", "none"]
+    expect(json(survey)).toMatchObject({
+      issue: "ENG-9",
+      errorRefs: ["WEB-4P"],
+      newErrorRefs: ["WEB-4P"],
+    })
+    // A dropped issue stays dropped, though the old file still names it.
+    json(["finish", "--base", "main", "--pr", "none", "--issue", "none"])
+    expect(json(survey).issue).toBeNull()
   })
 
   it("keeps its state out of the working tree", () => {
