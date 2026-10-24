@@ -14,6 +14,7 @@ import { posthog } from "./posthog.ts"
 import { repo } from "./repo.ts"
 import { sentry } from "./sentry.ts"
 import { slack } from "./slack.ts"
+import { sync } from "./sync.ts"
 import { vercel } from "./vercel.ts"
 
 export const INTEGRATIONS: IntegrationSpec[] = [
@@ -30,4 +31,4 @@ export const INTEGRATIONS: IntegrationSpec[] = [
   lore,
 ]
 
-export const SECTIONS: SectionSpec[] = [repo, ...INTEGRATIONS]
+export const SECTIONS: SectionSpec[] = [repo, sync, ...INTEGRATIONS]

@@ -12,6 +12,7 @@ import {
   parsePr,
   readLegacyState,
   spliceBlock,
+  syncFormat,
   withoutLegacySync,
   workState,
 } from "./sync.ts"
@@ -177,6 +178,149 @@ describe("spliceBlock over an earlier sync tool's body", () => {
   it("leaves a body no sync tool wrote alone", () => {
     const body = "> Note: read this first\n\n## Summary\n\nMine."
     expect(withoutLegacySync(body)).toBe(body)
+  })
+})
+
+describe("syncFormat", () => {
+  it("is sync's own format when the config leaves it out", () => {
+    const own = {
+      linkLabels: "capability",
+      errorVerb: null,
+      prTitle: null,
+      blockMarkers: true,
+    }
+    expect(syncFormat(undefined)).toEqual(own)
+    expect(syncFormat({ version: 2 })).toEqual(own)
+  })
+
+  it("reads what the config's sync section sets", () => {
+    const sync = {
+      linkLabels: "integration",
+      errorVerb: "Fixes",
+      prTitle: "{issueId}: {title}",
+      blockMarkers: false,
+    }
+    expect(syncFormat({ sync })).toEqual(sync)
+  })
+})
+
+describe("spliceBlock without markers", () => {
+  const stamp = "_Last synced: 2026-10-24 10:00 UTC (HEAD: abc1234)_"
+  // What bitfab-dev's sync writes, and what this one writes in its format.
+  const theirs = [
+    "> Linear: [ENG-1: Fix login](https://l/ENG-1)",
+    "> Sentry: Fixes WEB-4P ([WEB-4P](https://s/WEB-4P))",
+    "> Lore: [Session](https://lore/t/1)",
+    "",
+    "## Summary",
+    "",
+    "- Old summary",
+    "",
+    "## Test plan",
+    "",
+    "- [ ] Old check",
+    "",
+    "_Last synced: 2026-10-20 10:00 UTC (HEAD: 0000000)_",
+  ].join("\n")
+  const ours = [
+    "> Linear: [ENG-1: Fix login](https://l/ENG-1)",
+    "> Sentry: Fixes WEB-4P ([WEB-4P](https://s/WEB-4P))",
+    "> Lore: [Session](https://lore/t/2)",
+    "",
+    "Fixes ENG-1",
+    "",
+    "## Summary",
+    "",
+    "- New summary",
+    "",
+    "## Test plan",
+    "",
+    "- [ ] New check",
+    "",
+    stamp,
+  ].join("\n")
+  const splice = (body: string, block = ours) =>
+    spliceBlock(body, block, { markers: false })
+  /** The `> ` link lines, the way bitfab-dev's sync finds its own. */
+  const links = (body: string) =>
+    body.split("\n").filter((line) => /^> \w+:/.test(line))
+  // What bitfab-dev's sync keeps of a body when it refreshes only its links.
+  const theirStrip = (body: string) =>
+    body
+      .split("\n")
+      .filter(
+        (line) =>
+          !/^> (?:Linear|Branch|Sentry|Lore|Planning):/.test(line) &&
+          !/^_Last synced:.*_$/.test(line.trim()),
+      )
+      .join("\n")
+
+  it("writes the block on top with no markers", () => {
+    expect(splice("")).toBe(`${ours}\n`)
+    expect(splice("Notes from a human.")).toBe(
+      `${ours}\n\nNotes from a human.\n`,
+    )
+  })
+
+  it("replaces a body bitfab-dev's sync wrote, keeping a person's notes", () => {
+    const out = splice(`${theirs}\n\nThanks for reviewing!`)
+    expect(out).toBe(`${ours}\n\nThanks for reviewing!\n`)
+  })
+
+  it("replaces its own block on a re-run, nothing twice", () => {
+    const first = splice(`${theirs}\n\nThanks for reviewing!`)
+    const second = splice(first, ours.replace("New summary", "Newer summary"))
+    expect(second).toContain("Newer summary")
+    expect(second).not.toContain("- New summary")
+    expect(second.match(/Fixes ENG-1$/gm)).toHaveLength(1)
+    expect(links(second)).toEqual(links(ours))
+    expect(second.match(/_Last synced/g)).toHaveLength(1)
+    expect(second).toContain("Thanks for reviewing!")
+  })
+
+  it("takes turns with bitfab-dev's sync without duplicating lines", () => {
+    const mine = splice(theirs)
+    // bitfab-dev's link-only refresh: its lines on top, the rest kept.
+    const refreshed = `${links(theirs).join("\n")}\n\n${theirStrip(mine).trim()}\n\n${stamp}\n`
+    expect(links(refreshed)).toEqual(links(theirs))
+    const again = splice(refreshed)
+    expect(again).toBe(`${ours}\n`)
+  })
+
+  it("replaces capability-labeled lines with integration-labeled ones", () => {
+    const old = spliceBlock(
+      "",
+      "> Issue: [ENG-1: Fix login](https://l/ENG-1)\n> Errors: WEB-4P ([WEB-4P](https://s/WEB-4P))\n\n## Summary\n\n- x\n\n" +
+        stamp,
+      { markers: false },
+    )
+    const out = splice(old)
+    expect(out).toBe(`${ours}\n`)
+    expect(out).not.toMatch(/^> (Issue|Errors):/m)
+  })
+
+  it("unwraps a block written with markers before", () => {
+    const marked = spliceBlock("Thanks for reviewing!", ours)
+    const out = splice(marked)
+    expect(out).not.toContain(BLOCK_START)
+    expect(out).not.toContain(BLOCK_END)
+    expect(out).toBe(`${ours}\n\nThanks for reviewing!\n`)
+  })
+
+  it("drops a marked block bitfab-dev's sync left next to its own lines", () => {
+    const marked = spliceBlock("", ours.replace(/^> Linear:/m, "> Issue:"))
+    const refreshed = `${links(theirs).join("\n")}\n\n${theirStrip(marked).trim()}\n\n${stamp}\n`
+    expect(splice(refreshed)).toBe(`${ours}\n`)
+  })
+
+  it("replaces the sections of the repo's PR template it wrote", () => {
+    const block = `> Linear: [ENG-1: x](https://l/ENG-1)\n\n## What\n\n- a\n\n## Testing\n\n- b\n\n${stamp}`
+    const first = splice("## Screenshots\n\n![x](y)", block)
+    const second = splice(first, block.replace("- a", "- c"))
+    expect(second.match(/## What/g)).toHaveLength(1)
+    expect(second).toContain("- c")
+    expect(second).not.toContain("- a")
+    expect(second).toContain("## Screenshots\n\n![x](y)")
   })
 })
 
@@ -388,5 +532,32 @@ describe("sync.ts (as a script)", () => {
     expect(result.stdout).toBe(
       `${BLOCK_START}\n## Summary\n${BLOCK_END}\n\nHuman notes\n`,
     )
+  })
+
+  it("reads the repo's sync format from its config", () => {
+    init()
+    const format = {
+      linkLabels: "integration",
+      errorVerb: "Fixes",
+      prTitle: "{issueId}: {title}",
+      blockMarkers: false,
+    }
+    fs.mkdirSync(path.join(work(), ".agent-flows"))
+    fs.writeFileSync(
+      path.join(work(), ".agent-flows", "config.json"),
+      JSON.stringify({
+        version: 2,
+        repo: { baseBranch: "main" },
+        sync: format,
+      }),
+    )
+    const survey = json(["survey", "remote", "--base", "main", "--pr", "none"])
+    expect(survey.format).toEqual(format)
+    const body = path.join(dir as string, "body.md")
+    const block = path.join(dir as string, "block.md")
+    fs.writeFileSync(body, "Human notes")
+    fs.writeFileSync(block, "## Summary")
+    const result = sync(["splice", "--body", body, "--block", block])
+    expect(result.stdout).toBe("## Summary\n\nHuman notes\n")
   })
 })

@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
+import { loadConfig } from "./configure.ts"
 import { isMain, printJson, run, runMain } from "./lib.ts"
 
 export const MODES = ["default", "local", "remote"] as const
@@ -18,6 +19,36 @@ export type Mode = (typeof MODES)[number]
 /** Wraps the part of a pull request body that sync owns. */
 export const BLOCK_START = "<!-- agent-flows:sync -->"
 export const BLOCK_END = "<!-- /agent-flows:sync -->"
+
+/**
+ * How sync writes its link lines, the PR title, and its part of the PR body:
+ * the config's `sync` section, with sync's own format for what it leaves out.
+ */
+export type SyncFormat = {
+  /** `> Issue:` and `> Errors:`, or each line named for its integration. */
+  linkLabels: "capability" | "integration"
+  /** A word that starts each error line, like bitfab-dev's `Fixes`. */
+  errorVerb: string | null
+  /** A title template with `{issueId}` and `{title}`; null follows the repo. */
+  prTitle: string | null
+  blockMarkers: boolean
+}
+
+export function syncFormat(
+  config: Record<string, unknown> | undefined,
+): SyncFormat {
+  const section = config?.sync
+  const values = (
+    section && typeof section === "object" ? section : {}
+  ) as Partial<Record<keyof SyncFormat, unknown>>
+  return {
+    linkLabels:
+      values.linkLabels === "integration" ? "integration" : "capability",
+    errorVerb: typeof values.errorVerb === "string" ? values.errorVerb : null,
+    prTitle: typeof values.prTitle === "string" ? values.prTitle : null,
+    blockMarkers: values.blockMarkers !== false,
+  }
+}
 
 /** A pull request as the flow sees it: `none`, or `<number>:<state>:<draft>`. */
 export type PrState = {
@@ -137,24 +168,35 @@ const LEGACY_SECTIONS = new Set(["Summary", "Test plan"])
  * replaces) wrote there without markers: the `> Name:` link lines on top, its
  * Summary and Test plan sections, and its last-synced line. Only a body with
  * that last-synced line is touched, so a person's own Summary survives.
+ *
+ * With `ownSections`, the body is one sync wrote without markers itself: those
+ * sections are its too, and so is everything above the first heading.
  */
-export function withoutLegacySync(body: string): string {
+export function withoutLegacySync(
+  body: string,
+  ownSections?: string[],
+): string {
   const lines = body.split("\n")
   if (!lines.some((line) => LAST_SYNCED.test(line.trim()))) {
     return body
   }
+  const generated = new Set([...LEGACY_SECTIONS, ...(ownSections ?? [])])
   const kept: string[] = []
   let top = true
   let skipping = false
   for (const line of lines) {
     const text = line.trim()
-    if (top && (text === "" || /^> [A-Z][\w ]*:/.test(text))) {
+    const preamble =
+      ownSections !== undefined &&
+      !text.startsWith("## ") &&
+      !LAST_SYNCED.test(text)
+    if (top && (text === "" || /^> [A-Z][\w ]*:/.test(text) || preamble)) {
       continue
     }
     top = false
     const heading = text.match(/^## (.+)$/)
     if (heading) {
-      skipping = LEGACY_SECTIONS.has(heading[1].trim())
+      skipping = generated.has(heading[1].trim())
     }
     if (LAST_SYNCED.test(text)) {
       // It ended the generated part; anything after it is a person's.
@@ -172,12 +214,30 @@ export function withoutLegacySync(body: string): string {
  * The pull request body with sync's block replaced, or put on top when the
  * body has none yet, in place of what an earlier sync tool generated there.
  * Everything else is someone else's and stays.
+ *
+ * Without markers, the block goes on top unwrapped, as bitfab-dev's sync
+ * writes it, and the old one is found the way that tool's is: the link lines
+ * on top through the last-synced line. A block written with markers before is
+ * replaced too.
  */
-export function spliceBlock(body: string, block: string): string {
+export function spliceBlock(
+  body: string,
+  block: string,
+  { markers = true }: { markers?: boolean } = {},
+): string {
   const inner = block.replace(BLOCK_START, "").replace(BLOCK_END, "").trim()
   const wrapped = `${BLOCK_START}\n${inner}\n${BLOCK_END}`
   const start = body.indexOf(BLOCK_START)
   const end = body.indexOf(BLOCK_END, start)
+  if (!markers) {
+    const unmarked =
+      start !== -1 && end !== -1
+        ? body.slice(0, start) + body.slice(end + BLOCK_END.length)
+        : body
+    const sections = [...inner.matchAll(/^## (.+)$/gm)].map((m) => m[1].trim())
+    const rest = withoutLegacySync(unmarked, sections).trim()
+    return rest ? `${inner}\n\n${rest}\n` : `${inner}\n`
+  }
   if (start !== -1 && end !== -1) {
     return body.slice(0, start) + wrapped + body.slice(end + BLOCK_END.length)
   }
@@ -216,6 +276,12 @@ function baseRefOf(base: string): string | undefined {
 function treeHash(): string {
   const status = git(["status", "--porcelain"]) ?? ""
   return createHash("sha256").update(status).digest("hex")
+}
+
+/** The repo's sync format; sync's own when the config is missing or invalid. */
+function readFormat(): SyncFormat {
+  const root = git(["rev-parse", "--show-toplevel"])
+  return syncFormat(root ? loadConfig(root).config : undefined)
 }
 
 function statePath(): string {
@@ -441,6 +507,7 @@ function survey(args: Args): void {
     errorRefs: current?.errorRefs ?? [],
     newErrorRefs: signals.newErrorRefs,
     lastSyncedHead: current?.remote?.head ?? null,
+    format: readFormat(),
     runLocal: signals.runLocal,
     runRemote: signals.runRemote,
     noop: signals.noop,
@@ -480,7 +547,8 @@ function splice(args: Args): void {
   } catch {
     // No body yet.
   }
-  process.stdout.write(spliceBlock(body, block))
+  const { blockMarkers } = readFormat()
+  process.stdout.write(spliceBlock(body, block, { markers: blockMarkers }))
 }
 
 function finish(args: Args): void {
@@ -523,8 +591,9 @@ const USAGE = `Usage: sync.ts <command>
 
   survey <default|local|remote> --base <branch> --pr <pr> [--error-ref <ref>]...
                   Fetch the base (not in remote mode), read git state, and
-                  print it with the gate: runLocal, runRemote, noop. Error refs
-                  are remembered for the branch until a remote sync links them.
+                  print it with the gate: runLocal, runRemote, noop, and the
+                  repo's sync format. Error refs are remembered for the branch
+                  until a remote sync links them.
   facts --base <branch> --pr <pr>
                   For the remote writes: the issue's workState, the
                   lastSyncedLine, updateKind (full or metadata-only), and, for
@@ -532,7 +601,9 @@ const USAGE = `Usage: sync.ts <command>
   splice --body <file> --block <file>
                   Print the pull request body with sync's block replaced (or
                   added on top, in place of the sections an earlier sync tool
-                  wrote), leaving the rest of the body alone.
+                  wrote), leaving the rest of the body alone. With the config's
+                  sync.blockMarkers false, the block has no markers, and the
+                  old one ends at its last-synced line.
   finish --base <branch> --pr <pr> [--remote] [--issue <id|none>] [--linked-ref <ref>]...
                   Record this sync so the next one can skip what's unchanged.
                   --remote when the pull request and issue were written (or
