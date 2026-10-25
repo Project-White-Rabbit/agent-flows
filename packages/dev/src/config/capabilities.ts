@@ -6,10 +6,10 @@
 
 import type { CapabilitySpec } from "./types.ts"
 
-// The fields sync sets on an issue beyond its title and description. Each
-// tracker maps them to its own: a cycle is a sprint elsewhere.
+// The fields sync and create-tickets set on an issue beyond its title and
+// description. Each tracker maps them to its own: a cycle is a sprint elsewhere.
 const ISSUE_FIELDS =
-  "priority (`urgent`, `high`, `medium`, `low`), estimate (on the team's scale), labels (names), cycle (`current`: the one in progress), and project (a name)"
+  "priority (`urgent`, `high`, `medium`, `low`), estimate (on the team's scale), labels (names), cycle (`current`: the one in progress, `next`: the one after it, or a `YYYY-MM-DD` date inside one), project (a name), assignee (a person's name or email), and due date (`YYYY-MM-DD`, or `null` to clear it)"
 
 const PR_FIELDS =
   "number, url, title, body, state, whether it's a draft, base and head branches, additions, deletions, and changed-file count"
@@ -84,8 +84,10 @@ export const CAPABILITIES: CapabilitySpec[] = [
         "Open issues anchored to branch <branch>, any assignee: their description has a `> Branch:` line naming it, in backticks or bare (as older tools wrote it), reading an issue id in it that the tracker turned into a link as plain text",
       searchIssues:
         "Issues that may already describe the work in <text>, any assignee: open ones, and ones closed in the last 90 days, ranked by the tracker's own search, each with its id, title, URL, workflow state, description, parent issue, and whether a pull request is attached",
-      createIssue: `File an issue titled <title> with the description <description>, assigned to the current user, as a sub-issue of <parent> when one is given, with <fields>: whichever of ${ISSUE_FIELDS} the flow sets, leaving out the rest. Prints its id and URL`,
-      updateIssue: `Set issue <ID>'s title to <title>, its description to <description>, its workflow state to the one matching <state> (\`todo\`, \`in progress\`, \`in review\`, \`done\`, or \`canceled\`), and <fields> as for createIssue. Fields left out stay as they are`,
+      createIssue: `File an issue titled <title> with the description <description>, assigned to the current user unless <fields> names an assignee, as a sub-issue of <parent> when one is given, with <fields>: whichever of ${ISSUE_FIELDS} the flow sets, leaving out the rest. Prints its id and URL`,
+      updateIssue: `Set issue <ID>'s title to <title>, its description to <description>, its workflow state to the one matching <state> (\`todo\`, \`in progress\`, \`in review\`, \`done\`, or \`canceled\`), and <fields> as for createIssue. Anything left out (the title, the description, the state, or a field) stays as it is`,
+      linkBlocked:
+        "Record that issue <ID> is blocked by issue <blocker>, keeping the relations it already has. Linking a pair that's already linked changes nothing",
       prLink:
         "Where a pull request names issue <ID> so the tracker links the two: a closing form, which also closes the issue when the pull request merges, and a linking-only form, when the tracker tells them apart",
     },

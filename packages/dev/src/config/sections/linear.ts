@@ -8,14 +8,14 @@ import { ISSUE_KEY } from "./patterns.ts"
 const GRAPHQL =
   "`POST https://api.linear.app/graphql` (headers `Authorization: {token}`, `Content-Type: application/json`):"
 
-// The fields sync sets beyond title and description, as the MCP's
-// `save_issue` takes them.
+// The fields sync and create-tickets set beyond title and description, as the
+// MCP's `save_issue` takes them.
 const MCP_FIELDS =
-  "`<fields>` as `priority` (`urgent` 1, `high` 2, `medium` 3, `low` 4), `estimate` (a number), `labels` (names), `cycle` (the current one's number, from `list_cycles` with `type: current`), and `project` (a name)"
+  "`<fields>` as `priority` (`urgent` 1, `high` 2, `medium` 3, `low` 4), `estimate` (a number), `labels` (names), `cycle` (a number: from `list_cycles` with `type: current` for `current` and `type: next` for `next`, and for a date the cycle whose `startsAt` to `endsAt` holds it), `project` (a name), `assignee` (a name or email), and `dueDate` (`YYYY-MM-DD`, or `null`)"
 
 // The same through the API, which takes ids.
 const API_FIELDS =
-  "`<fields>` as `priority` (`urgent` 1, `high` 2, `medium` 3, `low` 4), `estimate`, `labelIds` (from `issueLabels(filter: { name: { in: <names> } })`), `cycleId` (the team's `activeCycle { id }`), and `projectId` (from `projects(filter: { name: { eq: <project> } })`)"
+  "`<fields>` as `priority` (`urgent` 1, `high` 2, `medium` 3, `low` 4), `estimate`, `labelIds` (from `issueLabels(filter: { name: { in: <names> } })`), `cycleId` (the team's `activeCycle { id }` for `current`, else from the team's `cycles { nodes { id startsAt endsAt } }`: the first to start after the active one for `next`, the one holding a date), `projectId` (from `projects(filter: { name: { eq: <project> } })`), `assigneeId` (from `users(filter: { or: [{ name: { eqIgnoreCase: <assignee> } }, { displayName: { eqIgnoreCase: <assignee> } }, { email: { eq: <assignee> } }] })`), and `dueDate`"
 
 const STATE_MAP =
   "whose type matches: `todo` → `unstarted`, `in progress` → `started`, `in review` → a `started` state named for review when the team has one (else `started`), `done` → `completed`, `canceled` → `canceled`"
@@ -111,8 +111,8 @@ export const linear: IntegrationSpec = {
       issueRef:
         "`{teamKey}-<n>` in any case, or a `https://linear.app/<workspace>/issue/{teamKey}-<n>` URL",
       getIssue: {
-        mcp: "The Linear MCP's `get_issue` with `id: <ID>` and `fields` including `priority`, `estimate`, `labels`, `cycleId`, `project`, `parentId`, and `attachments` (a pull request is one whose URL is a pull request's)",
-        api: `${GRAPHQL} \`issue(id: "<ID>") { identifier title url description archivedAt state { name type } priority estimate labels { nodes { name } } cycle { number } project { name } parent { identifier } attachments { nodes { url } } }\``,
+        mcp: "The Linear MCP's `get_issue` with `id: <ID>` and `fields` including `priority`, `estimate`, `labels`, `cycleId`, `project`, `assignee`, `dueDate`, `parentId`, and `attachments` (a pull request is one whose URL is a pull request's)",
+        api: `${GRAPHQL} \`issue(id: "<ID>") { identifier title url description archivedAt state { name type } priority estimate labels { nodes { name } } cycle { number } project { name } assignee { name } dueDate parent { identifier } attachments { nodes { url } } }\``,
       },
       // Also an adapter (`adapters/linear.ts`), which sync runs first: the
       // API's `contains` filter is exact, where the MCP's `query` is a fuzzy,
@@ -125,12 +125,16 @@ export const linear: IntegrationSpec = {
         mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <text>`, and `limit: 10`: once with no state (open issues), once with `state: completed` and once with `state: canceled`, each with `updatedAt: -P90D`. Ask for `fields` `title`, `url`, `status`, `statusType`, `description`, and `parentId`; load a candidate with `get_issue` to see whether a pull request is attached. Then try two or three shorter queries from the text's key words, since `query` matches words, not meaning",
       },
       createIssue: {
-        mcp: `The Linear MCP's \`save_issue\` with \`team: {teamKey}\`, \`title\`, \`description\`, \`assignee: "me"\`, \`parentId: <parent>\` when given, and ${MCP_FIELDS}`,
-        api: `${GRAPHQL} \`issueCreate(input: { teamId, title, description, assigneeId, parentId })\` with ${API_FIELDS}; \`teamId\` from \`teams(filter: { key: { eq: "{teamKey}" } })\`, \`assigneeId\` from \`viewer { id }\`, and \`parentId\` the id of \`issue(id: "<parent>")\` when given. It returns \`issue { identifier url }\``,
+        mcp: `The Linear MCP's \`save_issue\` with \`team: {teamKey}\`, \`title\`, \`description\`, \`assignee: "me"\` (unless \`<fields>\` names one), \`parentId: <parent>\` when given, and ${MCP_FIELDS}`,
+        api: `${GRAPHQL} \`issueCreate(input: { teamId, title, description, assigneeId, parentId })\` with ${API_FIELDS}; \`teamId\` from \`teams(filter: { key: { eq: "{teamKey}" } })\`, \`assigneeId\` from \`viewer { id }\` (unless \`<fields>\` names an assignee), and \`parentId\` the id of \`issue(id: "<parent>")\` when given. It returns \`issue { identifier url }\``,
       },
       updateIssue: {
-        mcp: `The Linear MCP's \`save_issue\` with \`id\`, \`title\`, \`description\`, \`state\`: the team's workflow state (\`list_issue_statuses\`) ${STATE_MAP}, and ${MCP_FIELDS}`,
-        api: `${GRAPHQL} \`issueUpdate(id: "<ID>", input: { title, description, stateId })\` with ${API_FIELDS}, and \`stateId\` the team's workflow state (\`workflowStates(filter: { team: { key: { eq: "{teamKey}" } } })\`) ${STATE_MAP}`,
+        mcp: `The Linear MCP's \`save_issue\` with \`id\`, \`title\`, \`description\`, \`state\`: the team's workflow state (\`list_issue_statuses\`) ${STATE_MAP}, and ${MCP_FIELDS}. For a label change, pass \`addLabels\` with the new label and \`removeLabels\` with the one it replaces, never \`labels\`, which replaces every label the issue has`,
+        api: `${GRAPHQL} \`issueUpdate(id: "<ID>", input: { title, description, stateId })\` with ${API_FIELDS}, and \`stateId\` the team's workflow state (\`workflowStates(filter: { team: { key: { eq: "{teamKey}" } } })\`) ${STATE_MAP}. For a label change, pass \`addedLabelIds\` with the new label and \`removedLabelIds\` with the one it replaces, never \`labelIds\`, which replaces every label the issue has`,
+      },
+      linkBlocked: {
+        mcp: "The Linear MCP's `save_issue` with `id: <ID>` and `blockedBy: [<blocker>]`, which adds to the relations the issue already has",
+        api: `${GRAPHQL} \`issueRelationCreate(input: { issueId, relatedIssueId, type: blocks })\` with \`issueId\` the id of \`issue(id: "<blocker>")\` and \`relatedIssueId\` the id of \`issue(id: "<ID>")\`. Skip it when \`issue(id: "<ID>") { inverseRelations { nodes { type issue { identifier } } } }\` already has a \`blocks\` relation from \`<blocker>\``,
       },
       prLink:
         "Closing: a `Fixes <ID>` line in the pull request body, which also moves the issue to done when the pull request merges. Linking only: a `Part of <ID>` line in the body. Either way the title can stay as the repo writes it",

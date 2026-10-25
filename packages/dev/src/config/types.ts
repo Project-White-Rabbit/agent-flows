@@ -172,6 +172,12 @@ export type VariantKind = AccessKind | "script"
 export type IntegrationSpec = SectionSpec & {
   access: AccessSpec
   provides: Record<string, Record<string, OpImpl>>
+  /**
+   * Capabilities it provides that are used only when an entry's `use` names
+   * them, for ones most repos on the integration get elsewhere (GitHub's
+   * issues, next to Linear or Jira). Without `use`, flows leave them out.
+   */
+  optIn?: string[]
   /** Ops this integration can run as code: see `Adapter`. */
   adapters?: Record<string, Adapter>
 }

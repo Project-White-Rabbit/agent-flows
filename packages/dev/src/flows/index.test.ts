@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { knownPaths } from "../commands/configure.ts"
 import { findCapability } from "../config/integrations.ts"
 import { configureFlow } from "./configure.ts"
+import { createTicketsFlow } from "./create-tickets.ts"
 import { renderAllSkills } from "./index.ts"
 import { devKit } from "./kit.ts"
 import { syncFlow } from "./sync.ts"
@@ -12,6 +13,9 @@ describe("dev flows", () => {
   it("renders each flow's Claude Code skills", () => {
     expect(files.map((f) => f.path)).toEqual([
       "skills/configure/SKILL.md",
+      "skills/create-tickets/SKILL.md",
+      "skills/create-tickets-confirm/SKILL.md",
+      "skills/create-tickets-apply/SKILL.md",
       "skills/evaluate/SKILL.md",
       "skills/evaluate-run/SKILL.md",
       "skills/sync/SKILL.md",
@@ -79,12 +83,18 @@ describe("dev flows", () => {
         "sessions",
       ].flatMap((id) => Object.keys(findCapability(id)?.ops ?? {})),
     )
-    const sync = files.filter((f) => f.path.includes("sync"))
-    const named = sync.flatMap((f) =>
+    const flows = files.filter((f) => !f.path.includes("configure"))
+    const named = flows.flatMap((f) =>
       [...f.content.matchAll(/`(\w+)` op/g)].map((m) => m[1]),
     )
     expect(named).toEqual(
-      expect.arrayContaining(["prCreate", "searchIssues", "shareSession"]),
+      expect.arrayContaining([
+        "prCreate",
+        "searchIssues",
+        "shareSession",
+        "createIssue",
+        "linkBlocked",
+      ]),
     )
     for (const op of named) {
       expect(ops.has(op), op).toBe(true)
@@ -131,6 +141,65 @@ describe("dev flows", () => {
           remote → <end>
           help → <end>"
     `)
+  })
+
+  it("stops create-tickets' match mode before it can confirm or file", () => {
+    expect(devKit.describeFlow(createTicketsFlow)).toMatchInlineSnapshot(`
+      "Flow: create-tickets ({{cmd}}create-tickets)
+      Default mode: default
+      Entries:
+        default → main/read
+        match → main/read
+        help → main/help
+
+      Phase: main
+        main/help [action]
+          default → <end>
+          match → <end>
+          help → <end>
+        main/read [action]
+          default → main/draft
+          match → main/draft
+          help → main/draft
+        main/draft [action]
+          default → main/match
+          match → main/match
+          help → main/match
+        main/match [action]
+          default → confirm/confirm
+          match → <end>
+          help → <end>
+      Phase: confirm
+        confirm/confirm [action]
+          default → apply/apply
+          match → apply/apply
+          help → apply/apply
+      Phase: apply
+        apply/apply [action]
+          default → <end>
+          match → <end>
+          help → <end>"
+    `)
+  })
+
+  it("finds sync's issue through create-tickets' match mode", () => {
+    const sync = files.find((f) => f.path === "skills/sync/SKILL.md")
+    expect(sync?.content).toContain(
+      "run the `/agent-flows:create-tickets` skill with `match --branch <branch>",
+    )
+    const matched = files.find(
+      (f) => f.path === "skills/create-tickets/SKILL.md",
+    )
+    for (const line of [
+      "match <ID>",
+      "sub-issue of <ID>",
+      "new",
+      "closed:",
+      "also tracked:",
+      "search skipped",
+    ]) {
+      expect(matched?.content).toContain(line)
+    }
   })
 
   it("routes configure through confirm before writing", () => {

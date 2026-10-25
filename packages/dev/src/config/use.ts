@@ -67,9 +67,15 @@ function levelExample(id: string, capabilities: CapabilitySpec[]): string {
   return levels ? `"${levels[0].id}"` : "true"
 }
 
+/** Capabilities the integration provides only when `use` names them. */
+export function optInOf(spec: SectionSpec): string[] {
+  return "optIn" in spec ? (spec.optIn as string[]) : []
+}
+
 /**
  * What an entry is used for: its `use`, or, when it doesn't say, every
- * capability it provides at that capability's default level.
+ * capability it provides at that capability's default level, except the
+ * ones it provides only on opt-in.
  */
 export function usesOf(
   spec: SectionSpec,
@@ -80,16 +86,19 @@ export function usesOf(
   if (typeof declared === "object" && declared !== null) {
     return declared as Use
   }
+  const optIn = optInOf(spec)
   return Object.fromEntries(
-    provided(spec).map((id) => {
-      const capability = capabilityOf(id, capabilities)
-      return [
-        id,
-        capability?.levels
-          ? (capability.defaultLevel ?? capability.levels[0].id)
-          : true,
-      ]
-    }),
+    provided(spec)
+      .filter((id) => !optIn.includes(id))
+      .map((id) => {
+        const capability = capabilityOf(id, capabilities)
+        return [
+          id,
+          capability?.levels
+            ? (capability.defaultLevel ?? capability.levels[0].id)
+            : true,
+        ]
+      }),
   )
 }
 
