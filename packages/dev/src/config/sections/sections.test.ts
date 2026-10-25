@@ -154,6 +154,17 @@ describe("integration registry", () => {
       }
     },
   )
+
+  it.each(INTEGRATIONS.map((s) => [s.path, s] as const))(
+    "%s opts in only to capabilities it provides, keeping one by default",
+    (path, spec) => {
+      const provided = Object.keys(spec.provides)
+      for (const id of spec.optIn ?? []) {
+        expect(provided, `${path} optIn ${id}`).toContain(id)
+      }
+      expect(provided.some((id) => !spec.optIn?.includes(id))).toBe(true)
+    },
+  )
 })
 
 const SHELL_HOSTILE = [

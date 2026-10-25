@@ -121,12 +121,15 @@ describe("configure.ts (as a script)", () => {
       JSON.stringify({ sections: { repo: { baseBranch: "main" } } }),
     )
     const out = json(run(["detect", "issueTracker"]))
-    expect(out.requested).toEqual(["integrations.linear", "integrations.jira"])
-    // Access is probed for exactly the requested integrations.
-    expect(Object.keys(out.access)).toEqual([
+    // GitHub too: its issues are opt-in, but asking for the capability offers it.
+    const trackers = [
+      "integrations.github",
       "integrations.linear",
       "integrations.jira",
-    ])
+    ]
+    expect(out.requested).toEqual(trackers)
+    // Access is probed for exactly the requested integrations.
+    expect(Object.keys(out.access)).toEqual(trackers)
   })
 
   it("reports how each integration can be reached, to offer the ones in reach", () => {
@@ -444,8 +447,13 @@ describe("configure.ts (as a script)", () => {
         "--optional",
       ]),
     )
-    // No `use`: the capability's default level.
+    // No `use`: the capability's default level, except GitHub's opt-in issues.
     expect(integrations.sourceControl[0]).toMatchObject({ level: "write" })
+    expect(
+      integrations.issueTracker.map(
+        (i: { integration: string }) => i.integration,
+      ),
+    ).toEqual(["linear"])
     expect(integrations.issueTracker[0]).toMatchObject({
       level: "track",
       values: { teamKey: "ENG", project: "Web app" },
@@ -463,6 +471,30 @@ describe("configure.ts (as a script)", () => {
     expect(json(run(["detect", "github"])).plan.needs).toEqual([
       { section: "integrations.github", fields: ["use"] },
     ])
+
+    // Named in `use`, GitHub tracks issues too, after Linear's entry.
+    write({
+      repo: { baseBranch: "main" },
+      "integrations.github": {
+        owner: "acme",
+        repo: "web",
+        use: { sourceControl: "write", issueTracker: "track" },
+      },
+    })
+    const tracked = json(run(["integrations", "issueTracker"])).integrations
+      .issueTracker
+    expect(
+      tracked.map((i: { integration: string; level: string }) => [
+        i.integration,
+        i.level,
+      ]),
+    ).toEqual([
+      ["github", "track"],
+      ["linear", "track"],
+    ])
+    expect(tracked[0].ops.updateIssue.cli).toContain(
+      "`gh issue edit <N> --repo acme/web",
+    )
   })
 
   it("refuses values that would inject into the commands ops build", () => {

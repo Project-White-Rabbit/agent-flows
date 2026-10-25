@@ -22,6 +22,7 @@ export const devKit = createFlowKit({
 export const DEV_COMMANDS = defineCommandCatalog({
   configure: { file: "configure.ts" },
   sync: { file: "sync.ts" },
+  tickets: { file: "tickets.ts" },
 })
 
 export type DevTargetName = (typeof devKit.targetNames)[number]

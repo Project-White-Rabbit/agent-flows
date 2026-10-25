@@ -4,6 +4,7 @@ import { CONFIG_PATH, CONFIG_VERSION } from "../config/config.ts"
 import { providersOf } from "../config/integrations.ts"
 import { SECTIONS } from "../config/sections/index.ts"
 import type { AccessSpec, IntegrationSpec } from "../config/types.ts"
+import { optInOf } from "../config/use.ts"
 import { DEV_COMMANDS, devKit } from "./kit.ts"
 
 /** "MCP (`Linear`), API (`LINEAR_API_KEY`)": the ways to reach an integration. */
@@ -30,7 +31,10 @@ const sectionRows = SECTIONS.map((spec) => ({
     provides:
       "provides" in spec
         ? Object.keys(spec.provides as object)
-            .map((id) => `\`${id}\``)
+            .map(
+              (id) =>
+                `\`${id}\`${optInOf(spec).includes(id) ? " (opt-in)" : ""}`,
+            )
             .join(", ")
         : "",
     purpose: spec.purpose,
@@ -222,7 +226,7 @@ Route on the result:
           title: "Fill the gaps",
           body: `**Offer what's in reach.** Unless the user named sections, take the integrations in reach that the plan doesn't already add, and {{askVerb}} with multiple selection: which of them should the repo use? One option per integration, saying how it's reached (\`Linear: MCP connected\`, \`Vercel: CLI signed in\`, \`Sentry: SENTRY_AUTH_TOKEN set\`). Being reachable from this machine doesn't mean the repo uses it, so recommend none by default, only ones the repo shows signs of. With more than fit in one question, ask several. The ones picked join the plan as sections to add; the rest go in the write's \`skip\` list, so the next run doesn't offer them again.
 
-**Ask what each is for.** For every integration being added, and every configured one \`plan.needs\` lists \`use\` for, {{askVerb}} what the team uses it for: one question per capability it provides, with that capability's levels from the table above plus "Not for this", and its default level recommended. A capability without levels is a yes or no. Several integrations can go in one call, up to its limit on questions. Record the answers as the entry's \`use\`, and leave out the capabilities answered "Not for this". If every capability is "Not for this", the integration isn't used: skip it instead.
+**Ask what each is for.** For every integration being added, and every configured one \`plan.needs\` lists \`use\` for, {{askVerb}} what the team uses it for: one question per capability it provides, with that capability's levels from the table above plus "Not for this", and its default level recommended. For a capability the sections table marks \`(opt-in)\`, recommend "Not for this" unless the repo shows it uses the integration for it (no other integration covers the capability, and the agent instructions or recent PRs point to it), since without \`use\` flows leave it out. A capability without levels is a yes or no. Several integrations can go in one call, up to its limit on questions. Record the answers as the entry's \`use\`, and leave out the capabilities answered "Not for this". If every capability is "Not for this", the integration isn't used: skip it instead.
 
 **Ask where each token is.** For every integration being added or already configured that has an API, ask where its API token is on this machine when \`access.api.configured\` is false and either the table lists adapters for it (they need the token) or neither its MCP server nor its CLI works here. Don't look for the token yourself (no searching the disk, no reading files or variables to see what's there); the user says where it is. {{askVerb}} with the options:
 

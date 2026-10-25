@@ -11,11 +11,14 @@ const SEARCH_JQL =
 // Keep only issues anchored to the branch, however the line was written.
 const BRANCH_MATCH =
   "Keep only issues whose description has a `> Branch:` line that is `<branch>` once backticks are dropped and any link is read as its text"
-// The fields sync sets beyond summary and description.
+// The fields sync and create-tickets set beyond summary and description.
 const FIELDS =
-  "`<fields>` as `priority.name` (`Highest` for urgent, `High`, `Medium`, `Low`), `labels`, the story points field for `estimate` when the project has one, and the board's active sprint for `cycle` when it has one (Jira Software). `project` doesn't apply: the project is `{projectKey}`"
+  "`<fields>` as `priority.name` (`Highest` for urgent, `High`, `Medium`, `Low`), `labels`, the story points field for `estimate` when the project has one, the board's sprint for `cycle` when it has one (Jira Software: the active sprint for `current`, the next future one for `next`, the one whose dates hold a date), `assignee.accountId` for `assignee` (from the user search for the name or email), and `duedate`. `project` doesn't apply: the project is `{projectKey}`"
 const FIELD_NAMES =
-  "`priority`, `labels`, `parent`, `issuelinks`, the story points field, and the sprint field"
+  "`priority`, `labels`, `assignee`, `duedate`, `parent`, `issuelinks`, the story points field, and the sprint field"
+// Setting `labels` replaces them all, so a label change adds and removes.
+const LABEL_UPDATE =
+  'for a label change, leave `labels` out and pass `update.labels` as `[{ "add": <new> }, { "remove": <old> }]`, so the issue keeps its other labels'
 const TRANSITION =
   "whose status category matches: `todo` → To Do, `in progress` and `in review` → In Progress (a status named for review when there is one), `done` and `canceled` → Done. Skip the transition when the issue is already there"
 
@@ -113,7 +116,7 @@ export const jira: IntegrationSpec = {
         "`{projectKey}-<n>`, or `https://{site}/browse/{projectKey}-<n>`",
       getIssue: {
         mcp: `The Atlassian MCP's \`getJiraIssue\` for \`<ID>\` on \`{site}\`, with ${FIELD_NAMES}; its URL is \`https://{site}/browse/<ID>\`, and a pull request shows in its development panel`,
-        api: `${REST}/issue/<ID>?fields=summary,description,status,priority,labels,parent,issuelinks,*navigable"\`; its URL is \`https://{site}/browse/<ID>\`, and a pull request shows in \`GET /rest/dev-status/latest/issue/summary?issueId=<numeric id>\``,
+        api: `${REST}/issue/<ID>?fields=summary,description,status,priority,labels,assignee,duedate,parent,issuelinks,*navigable"\`; its URL is \`https://{site}/browse/<ID>\`, and a pull request shows in \`GET /rest/dev-status/latest/issue/summary?issueId=<numeric id>\``,
       },
       findIssue: {
         mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${JQL}, following \`nextPageToken\` to the last page: \`text ~\` is a fuzzy search, so a match can be on any page. ${BRANCH_MATCH}`,
@@ -124,12 +127,17 @@ export const jira: IntegrationSpec = {
         api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${SEARCH_JQL}, \`maxResults: 10\`, and \`fields: ["summary", "status", "description", "parent"]\`. Then try two or three shorter queries from the text's key words`,
       },
       createIssue: {
-        mcp: `The Atlassian MCP's \`createJiraIssue\` on \`{site}\` in project \`{projectKey}\`, issue type \`Task\` (\`Subtask\` with \`parent\` set to \`<parent>\`, when given), assigned to the current user (\`atlassianUserInfo\`), with ${FIELDS}`,
-        api: `\`POST https://{site}/rest/api/3/issue\` (${AUTH}) with \`fields\`: \`project.key\` \`{projectKey}\`, \`issuetype.name\` \`Task\` (\`Subtask\`, with \`parent.key\` \`<parent>\`, when given), \`summary\`, \`description\` (Atlassian Document Format), \`assignee.accountId\` from \`GET /rest/api/3/myself\`, and ${FIELDS}`,
+        mcp: `The Atlassian MCP's \`createJiraIssue\` on \`{site}\` in project \`{projectKey}\`, issue type \`Task\` (\`Subtask\` with \`parent\` set to \`<parent>\`, when given), assigned to the current user (\`atlassianUserInfo\`) unless \`<fields>\` names an assignee, with ${FIELDS}`,
+        api: `\`POST https://{site}/rest/api/3/issue\` (${AUTH}) with \`fields\`: \`project.key\` \`{projectKey}\`, \`issuetype.name\` \`Task\` (\`Subtask\`, with \`parent.key\` \`<parent>\`, when given), \`summary\`, \`description\` (Atlassian Document Format), \`assignee.accountId\` from \`GET /rest/api/3/myself\` unless \`<fields>\` names an assignee, and ${FIELDS}`,
       },
       updateIssue: {
-        mcp: `The Atlassian MCP's \`editJiraIssue\` on \`{site}\` for the summary, the description, and ${FIELDS}, then \`transitionJiraIssue\` to the transition (\`getTransitionsForJiraIssue\`) ${TRANSITION}`,
-        api: `\`PUT https://{site}/rest/api/3/issue/<ID>\` (${AUTH}) with \`fields.summary\`, \`fields.description\` (Atlassian Document Format), and ${FIELDS}, then \`POST .../issue/<ID>/transitions\` with the transition (\`GET .../issue/<ID>/transitions\`) ${TRANSITION}`,
+        mcp: `The Atlassian MCP's \`editJiraIssue\` on \`{site}\` for the summary, the description, and ${FIELDS} (${LABEL_UPDATE}), then \`transitionJiraIssue\` to the transition (\`getTransitionsForJiraIssue\`) ${TRANSITION}`,
+        api: `\`PUT https://{site}/rest/api/3/issue/<ID>\` (${AUTH}) with \`fields.summary\`, \`fields.description\` (Atlassian Document Format), and ${FIELDS} (${LABEL_UPDATE}), then \`POST .../issue/<ID>/transitions\` with the transition (\`GET .../issue/<ID>/transitions\`) ${TRANSITION}`,
+      },
+      // Jira reads a Blocks link's inwardIssue as the one that blocks.
+      linkBlocked: {
+        mcp: "The Atlassian MCP's `createIssueLink` on `{site}` with type `Blocks`, `inwardIssue` `<blocker>`, and `outwardIssue` `<ID>`, unless `<ID>`'s `issuelinks` already say it is blocked by `<blocker>`. Afterwards `<ID>` must read \"is blocked by <blocker>\"; when it reads the other way, delete the link and swap the two",
+        api: `\`POST https://{site}/rest/api/3/issueLink\` (${AUTH}) with JSON \`{"type": {"name": "Blocks"}, "inwardIssue": {"key": "<blocker>"}, "outwardIssue": {"key": "<ID>"}}\`, unless \`<ID>\`'s \`issuelinks\` already say it is blocked by \`<blocker>\`. Afterwards \`<ID>\` must read "is blocked by <blocker>"; when it reads the other way, delete the link and swap the two`,
       },
       prLink:
         "Jira's development panel reads the issue key from the pull request title, branch name, or commit messages, not the body, so when the branch name doesn't carry `<ID>`, the title must: prefix it (`<ID> `) and keep the rest of the repo's title convention. Merging doesn't close it",

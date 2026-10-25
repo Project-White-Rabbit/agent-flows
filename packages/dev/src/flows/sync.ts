@@ -1,4 +1,5 @@
 import type { Flow } from "@agent-flows/core"
+import { ISSUE_FIELD_RULES } from "./issues.ts"
 import {
   DEV_COMMANDS,
   devKit,
@@ -129,7 +130,7 @@ export const syncFlow: Flow = devKit.defineFlow({
 >
 > It uses the integrations in \`.agent-flows/config.json\`: source control for the PR (required outside \`local\` mode), and, when configured, stacking for restack and push, an issue tracker for the issue, error tracking to link and resolve the errors the work fixes, and session sharing to link the session behind the work. Set them up with \`{{cmd}}configure\`.
 >
-> Before filing an issue, it searches open and recently closed ones for the same work, and reuses a match or files a sub-issue under a larger one. The PR's Summary and Test plan and the issue's Status are regenerated each sync. The issue's Description is written once; the issue's state follows the PR (todo, in progress, in review, done, canceled). Its priority is set once and then left to people; its labels, estimate, cycle, and project follow the config and the repo's agent instructions.`,
+> Before filing an issue, it searches open and recently closed ones for the same work (with \`{{cmd}}create-tickets match\`), and reuses a match or files a sub-issue under a larger one. The PR's Summary and Test plan and the issue's Status are regenerated each sync. The issue's Description is written once; the issue's state follows the PR (todo, in progress, in review, done, canceled). Its priority is set once and then left to people; its labels, estimate, cycle, and project follow the config and the repo's agent instructions.`,
           next: null,
         },
         {
@@ -179,13 +180,12 @@ These signals are the authority and **override the \`**Next:**\` block below**, 
 5. The PR body's \`> Issue:\` line, or the issue link an earlier sync tool put at the top of the body (a \`> \` line named for the tracker, linking \`<ID>: <title>\`).
 6. Each entry's \`findIssue\` op with \`<branch>\` this branch: it finds the \`> Branch:\` anchor line sync writes into every issue it files or refreshes, and the bare one earlier sync tools wrote. Several matches is an anomaly: take the most recently updated one, and say so in the report.
 7. A ref in recent user messages that is clearly about this work, not a passing mention.
-8. **The same work, filed by someone else.** Only with an entry at \`track\`, which is where a new issue would go. Many issues for a branch's work were filed from planning notes, by someone else, or long ago, and carry no \`> Branch:\` line. Draft the new issue first: a 5-10 word title and a 1-3 sentence description of the work, from the PR title and body, then the session, then the commits (if all three are empty, ask: "What are you working on?"). Run that entry's \`searchIssues\` op with the title, then with the description, and judge each candidate against the branch's work (the session, the commits, the draft), not the title alone. Decide without asking:
-   - **The same work, open, with no pull request attached:** that's this branch's issue. 3d adds the \`> Branch:\` line, so the next sync finds it directly. Take it only when it's clearly this work; a loose overlap isn't a match.
-   - **Part of a larger open issue, or the same work but that issue already has its own pull request:** plan a new issue as a sub-issue of it (\`<parent>\`), so each pull request has its own issue.
-   - **Closed:** never this branch's issue; its work is finished. When one is the same work, name it in the report.
-   - **Nothing fits:** plan a new issue from the draft.
+8. **The same work, filed by someone else.** Only with an entry at \`track\`, which is where a new issue would go. Many issues for a branch's work were filed from planning notes (by \`{{cmd}}create-tickets\`, say), by someone else, or long ago, and carry no \`> Branch:\` line. Draft the new issue first: a 5-10 word title and a 1-3 sentence description of the work, from the PR title and body, then the session, then the commits (if all three are empty, ask: "What are you working on?"). Then run the \`{{cmd}}create-tickets\` skill with \`match --branch <branch> <title>. <description>\`: it searches every issue-tracker entry the way create-tickets does before filing, judges each candidate against this branch's work, and files and changes nothing. Its line for the item decides:
+   - **\`match <ID>\`:** the same work, open, with no pull request attached: that's this branch's issue. 3d adds the \`> Branch:\` line, so the next sync finds it directly.
+   - **\`sub-issue of <ID>\`:** part of a larger open issue, or the same work under another pull request: plan a new issue as a sub-issue of it (\`<parent>\`), so each pull request has its own issue.
+   - **\`new\`:** plan a new issue from the draft.
 
-   When no variant of \`searchIssues\` works here, plan a new issue and say in the report that the search was skipped.
+   Name each \`closed:\` issue it lists in the report (never this branch's issue: its work is finished), and each \`also tracked:\` one. On \`search skipped\`, plan a new issue and say in the report that the search was skipped.
 
 Nothing found, and an entry at \`track\`: the new issue planned in 8 is filed by the remote writes. With entries only at \`link\`, there's no issue; carry on without one. File it whatever the change is, a small or internal one included; an issue for every branch is the lockstep this command keeps.`,
           next: {
@@ -296,13 +296,9 @@ With an issue tracker and a new issue planned in 1a: file it with that entry's \
 
 #### Issue fields
 
-For an entry at \`track\`, on filing and on every full update. Take each field from, in order: the user or this session, the repo's agent instructions (\`AGENTS.md\`, \`CLAUDE.md\`, and the docs they point to for ranking or filing work), then the entry's \`values\` of the same name. With none of those, leave the field out. Pass as \`<fields>\` only the fields that change.
+For an entry at \`track\`, on filing and on every full update; the same rules \`{{cmd}}create-tickets\` files by. Take each field from, in order: the user or this session, the repo's agent instructions (\`AGENTS.md\`, \`CLAUDE.md\`, and the docs they point to for ranking or filing work), then the entry's \`values\` of the same name. With none of those, leave the field out. Pass as \`<fields>\` only the fields that change.
 
-- **Priority:** set it when filing, and on an update only when the issue has none. Never change a priority the issue already has, since a person may have set it, unless the user asks to in this session.
-- **Labels:** when there's a set to pick from (the agent instructions' or \`values.labels\`), exactly one of it that fits the kind of work. Judge it again on each full update: keep the current one unless another fits strictly better, and never add or remove labels outside the set.
-- **Estimate:** when the agent instructions or \`values.estimate\` ask for one, the size of the work on the team's scale, judged again on each full update.
-- **Cycle:** when the agent instructions or \`values.cycle\` ask for it, \`current\`: when filing, or on an update when the issue has no cycle and isn't done or canceled. Never move an issue out of a cycle it's in.
-- **Project:** the one the session or the agent instructions name, else \`values.project\`: when filing, or on an update when the issue has none. Never move an issue out of a project it's in.
+${ISSUE_FIELD_RULES}
 
 ### 3c. Pull request
 

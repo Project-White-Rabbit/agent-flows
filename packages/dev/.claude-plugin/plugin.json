@@ -1,7 +1,7 @@
 {
   "name": "agent-flows",
-  "description": "Dev workflow commands for any repository: configure the repo's integrations, evaluate a branch or PR for shippability, sync a branch with its PR and issue.",
-  "version": "0.5.0",
+  "description": "Dev workflow commands for any repository: configure the repo's integrations, file issues from planning notes, evaluate a branch or PR for shippability, sync a branch with its PR and issue.",
+  "version": "0.6.0",
   "author": {
     "name": "Bitfab"
   },
