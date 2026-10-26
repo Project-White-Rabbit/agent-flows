@@ -8,6 +8,10 @@ const JQL =
   '`project = {projectKey} AND statusCategory != Done AND text ~ "<branch>"`'
 const SEARCH_JQL =
   '`project = {projectKey} AND text ~ "<text>" AND (statusCategory != Done OR resolved >= -90d) ORDER BY relevance`'
+const ASSIGNED_JQL =
+  "`project = {projectKey} AND assignee = currentUser() AND statusCategory != Done`"
+const ASSIGNED_FIELDS =
+  "`summary`, `status`, `description`, `priority`, `duedate`, `subtasks`, and `issuelinks` (it blocks another issue through a `Blocks` link whose outward issue isn't done)"
 // Keep only issues anchored to the branch, however the line was written.
 const BRANCH_MATCH =
   "Keep only issues whose description has a `> Branch:` line that is `<branch>` once backticks are dropped and any link is read as its text"
@@ -125,6 +129,10 @@ export const jira: IntegrationSpec = {
       searchIssues: {
         mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${SEARCH_JQL}, \`maxResults: 10\`, and fields \`summary\`, \`status\`, \`description\`, and \`parent\`. Then try two or three shorter queries from the text's key words, since \`text ~\` matches words, not meaning`,
         api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${SEARCH_JQL}, \`maxResults: 10\`, and \`fields: ["summary", "status", "description", "parent"]\`. Then try two or three shorter queries from the text's key words`,
+      },
+      assignedIssues: {
+        mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${ASSIGNED_JQL} and fields ${ASSIGNED_FIELDS}, following \`nextPageToken\` to the last page. Its URL is \`https://{site}/browse/<ID>\`, an open sub-issue is a subtask whose status isn't done, and a pull request shows in its development panel`,
+        api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${ASSIGNED_JQL} and \`fields\` ${ASSIGNED_FIELDS}, following \`nextPageToken\` to the last page. Its URL is \`https://{site}/browse/<ID>\`, an open sub-issue is a subtask whose status isn't done, and a pull request shows in \`GET /rest/dev-status/latest/issue/summary?issueId=<numeric id>\``,
       },
       createIssue: {
         mcp: `The Atlassian MCP's \`createJiraIssue\` on \`{site}\` in project \`{projectKey}\`, issue type \`Task\` (\`Subtask\` with \`parent\` set to \`<parent>\`, when given), assigned to the current user (\`atlassianUserInfo\`) unless \`<fields>\` names an assignee, with ${FIELDS}`,

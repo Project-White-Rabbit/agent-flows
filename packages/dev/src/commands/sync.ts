@@ -14,7 +14,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { BITFAB_DEV_FORMAT } from "../config/sections/sync.ts"
 import { loadConfig } from "./configure.ts"
-import { isMain, printJson, run, runMain } from "./lib.ts"
+import { isMain, printJson, run, runMain, runSubcommand } from "./lib.ts"
 
 export const MODES = ["default", "local", "remote"] as const
 export type Mode = (typeof MODES)[number]
@@ -699,14 +699,7 @@ const SUBCOMMANDS: Record<string, (args: Args) => void> = {
 }
 
 export function main(argv: string[]): void {
-  const [command, ...rest] = argv
-  const subcommand = command ? SUBCOMMANDS[command] : undefined
-  if (!subcommand) {
-    console.log(USAGE)
-    process.exitCode = command && command !== "help" ? 1 : 0
-    return
-  }
-  subcommand(parseArgs(rest))
+  runSubcommand(argv, USAGE, SUBCOMMANDS, parseArgs)
 }
 
 if (isMain(import.meta.filename)) {

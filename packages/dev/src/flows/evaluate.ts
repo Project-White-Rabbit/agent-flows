@@ -1,5 +1,6 @@
 import type { Flow } from "@agent-flows/core"
 import {
+  CONFIGURE_GET_AND_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
   REQUIRE_CONFIG,
@@ -87,11 +88,7 @@ export const evaluateFlow: Flow = devKit.defineFlow({
     argumentHint: "[PR number or URL | help]",
   },
   commands: DEV_COMMANDS.defineCommands({
-    configure: {
-      description:
-        "`get <path>...` prints configured values; `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked",
-      args: "<subcommand>",
-    },
+    configure: CONFIGURE_GET_AND_INTEGRATIONS,
   }),
   tools: {},
   compile: {

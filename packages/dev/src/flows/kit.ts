@@ -23,9 +23,33 @@ export const DEV_COMMANDS = defineCommandCatalog({
   configure: { file: "configure.ts" },
   sync: { file: "sync.ts" },
   tickets: { file: "tickets.ts" },
+  work: { file: "work.ts" },
 })
 
 export type DevTargetName = (typeof devKit.targetNames)[number]
+
+const INTEGRATIONS_USAGE =
+  "`integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops"
+
+/** The `configure` command entry for a flow that reads only integrations. */
+export const CONFIGURE_INTEGRATIONS = {
+  description: `${INTEGRATIONS_USAGE}. Exits 2 when the repo isn't configured for it`,
+  args: "<subcommand>",
+}
+
+/** The `configure` command entry for a flow that also reads config values. */
+export const CONFIGURE_GET_AND_INTEGRATIONS = {
+  description: `\`get <path>...\` prints configured values; ${INTEGRATIONS_USAGE}. Both exit 2 when the repo isn't configured for what's asked`,
+  args: "<subcommand>",
+}
+
+/**
+ * Where a flow keeps its files: the worktree's private git dir, so they never
+ * land in the tree and each worktree has its own.
+ */
+export function flowDir(flow: string): string {
+  return `\`git rev-parse --absolute-git-dir\` plus \`/agent-flows/${flow}\``
+}
 
 /**
  * Prose for a step that reads configuration with `configure.ts get` or

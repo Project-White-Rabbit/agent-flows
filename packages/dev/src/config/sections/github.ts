@@ -22,6 +22,12 @@ const GRAPHQL =
 // nor the REST issue has the parent and the pull requests that close it.
 const ISSUE_QUERY =
   "query($owner: String!, $repo: String!, $n: Int!) { repository(owner: $owner, name: $repo) { issue(number: $n) { number title url body state stateReason labels(first: 20) { nodes { name } } assignees(first: 5) { nodes { login } } parent { number } closedByPullRequestsReferences(first: 5, includeClosedPrs: true) { nodes { url } } } } }"
+// assignedIssues in one query: neither `gh issue list` nor REST says whether
+// an issue has open sub-issues, a closing pull request, or blocks another.
+const ASSIGNED_QUERY =
+  "query($q: String!, $after: String) { search(type: ISSUE, query: $q, first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { ... on Issue { number title url body labels(first: 20) { nodes { name } } milestone { dueOn } subIssuesSummary { total completed } closedByPullRequestsReferences(first: 5) { nodes { url } } issueDependenciesSummary { blocking } } } } }"
+const ASSIGNED =
+  "with `q` `repo:{owner}/{repo} is:issue is:open assignee:@me`, following `endCursor` while `hasNextPage`. Its id is `#<number>` and its state `open`; it has open sub-issues when `subIssuesSummary.completed` is below `total`, and blocks another issue when `issueDependenciesSummary.blocking` is above 0. Its priority comes from a priority label (`P0` to `P3`, `priority: high`), else `none`, and its due date from its milestone's `dueOn`, else none"
 const ISSUE_NOT_FOUND =
   "`Could not resolve to an Issue` (a pull request's number, or none) means there is none. Its project is separate, since reading projects needs the `read:project` token scope: `gh issue view <N> --repo {owner}/{repo} --json projectItems`, only when a flow needs it; when that fails, treat the project as unknown and leave it alone"
 
@@ -154,6 +160,10 @@ export const github: IntegrationSpec = {
         mcp: "The GitHub MCP's `search_issues` with `perPage: 10`: once with `query: repo:{owner}/{repo} is:issue is:open <text>`, and once with `is:closed closed:>=<the date 90 days ago>` in place of `is:open`. Load a candidate with `getIssue` for its parent and whether a pull request is attached. Then try two or three shorter queries from the text's key words, since search matches words, not meaning",
         cli: "`gh search issues <text> --repo {owner}/{repo} --match title,body --limit 10 --json number,title,url,state,body`: once with `--state open`, and once with `--state closed --closed '>=<the date 90 days ago, YYYY-MM-DD>'`. Load a candidate with `getIssue` for its parent and whether a pull request is attached. Then try two or three shorter queries from the text's key words, since search matches words, not meaning",
         api: `${SEARCH}<the query, URL-encoded>"\`, once with the query \`repo:{owner}/{repo} is:issue is:open <text>\` and once with \`is:closed closed:>=<the date 90 days ago>\` in place of \`is:open\`, the first 10 of each. Load a candidate with \`getIssue\` for its parent and whether a pull request is attached. Then try two or three shorter queries from the text's key words, since search matches words, not meaning`,
+      },
+      assignedIssues: {
+        cli: `\`gh api graphql -f query='${ASSIGNED_QUERY}' -f q='repo:{owner}/{repo} is:issue is:open assignee:@me'\` (add \`-f after=<endCursor>\` for the next page), ${ASSIGNED}`,
+        api: `${GRAPHQL} with JSON \`query\` \`${ASSIGNED_QUERY}\` and \`variables\` ${ASSIGNED}`,
       },
       createIssue: {
         mcp: `The GitHub MCP's \`issue_write\` with \`method: create\` (or \`create_issue\`) for {owner}/{repo} with \`title\`, \`body\` <description>, \`assignees\` the current user's login (\`get_me\`) unless \`<fields>\` names an assignee, and ${ISSUE_FIELDS}. With \`<parent>\`, then \`sub_issue_write\` with \`method: add\` (or \`add_sub_issue\`) on the parent's number, with \`sub_issue_id\` the new issue's \`id\` (not its number). Its id is \`#<number>\``,

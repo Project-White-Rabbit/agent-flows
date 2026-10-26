@@ -4,7 +4,7 @@
 // runtime.
 
 import { spawnSync } from "node:child_process"
-import { realpathSync } from "node:fs"
+import { readFileSync, realpathSync } from "node:fs"
 
 export type RunResult = {
   status: number | null
@@ -58,4 +58,78 @@ export async function readStdin(): Promise<string> {
     chunks.push(chunk as Buffer)
   }
   return Buffer.concat(chunks).toString("utf8")
+}
+
+/** Bad arguments or input: the command exits 2, so the skill can say what's wrong. */
+export class UsageError extends Error {}
+
+export const USAGE_EXIT = 2
+
+/** `--name value` flags; `switches` take no value and read as `yes`. */
+export type Flags = Map<string, string>
+
+export function parseFlags(
+  args: string[],
+  switches: ReadonlySet<string> = new Set(),
+): Flags {
+  const flags: Flags = new Map()
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    const name = arg.startsWith("--") ? arg.slice(2) : undefined
+    if (name && switches.has(name)) {
+      flags.set(name, "yes")
+    } else if (name && args[i + 1] !== undefined) {
+      flags.set(name, args[++i])
+    } else {
+      throw new UsageError(`expected \`--<name> <value>\`, got \`${arg}\``)
+    }
+  }
+  return flags
+}
+
+export function requiredFlag(flags: Flags, name: string): string {
+  const value = flags.get(name)
+  if (!value) {
+    throw new UsageError(`--${name} <value> is required`)
+  }
+  return value
+}
+
+export function readJson<T>(file: string): T {
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as T
+  } catch (error) {
+    throw new UsageError(
+      `can't read ${file}: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+/**
+ * Run the subcommand `argv` names with its parsed arguments. No subcommand, or
+ * `help`, prints `usage` and exits 0; an unknown one prints it and exits 1; a
+ * UsageError prints its message and exits 2.
+ */
+export function runSubcommand<A>(
+  argv: string[],
+  usage: string,
+  subcommands: Record<string, (args: A) => void>,
+  parse: (rest: string[]) => A,
+): void {
+  const [command, ...rest] = argv
+  const subcommand = command ? subcommands[command] : undefined
+  if (!subcommand) {
+    console.log(usage)
+    process.exitCode = command && command !== "help" ? 1 : 0
+    return
+  }
+  try {
+    subcommand(parse(rest))
+  } catch (error) {
+    if (!(error instanceof UsageError)) {
+      throw error
+    }
+    console.error(error.message)
+    process.exitCode = USAGE_EXIT
+  }
 }

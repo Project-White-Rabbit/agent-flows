@@ -1,6 +1,7 @@
 import type { Flow } from "@agent-flows/core"
 import { ISSUE_FIELD_RULES } from "./issues.ts"
 import {
+  CONFIGURE_GET_AND_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
   REQUIRE_CONFIG,
@@ -58,11 +59,7 @@ export const syncFlow: Flow = devKit.defineFlow({
     argumentHint: { deriveFromModes: true, suffix: "[ISSUE-ID]" },
   },
   commands: DEV_COMMANDS.defineCommands({
-    configure: {
-      description:
-        "`get <path>...` prints configured values; `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked",
-      args: "<subcommand>",
-    },
+    configure: CONFIGURE_GET_AND_INTEGRATIONS,
     sync: {
       description:
         "`survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `finish` records the sync. State lives in the repo's git common dir, per branch",

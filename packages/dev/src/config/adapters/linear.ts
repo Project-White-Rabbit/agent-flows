@@ -1,9 +1,11 @@
 // Linear ops as code. findIssue and searchIssues need it: the MCP's search is
 // fuzzy and paginated, while the API filters descriptions exactly and ranks
-// issues by meaning with its own search.
+// issues by meaning with its own search. assignedIssues reads every page, with
+// each issue's sub-issues, pull requests, and relations, in one call.
 //
 // Runtime code: Node built-ins only.
 
+import { hasBranchLine, ISSUE_ID } from "../branch-line.ts"
 import type { Adapter, AdapterInput } from "../types.ts"
 
 const GRAPHQL = "https://api.linear.app/graphql"
@@ -51,6 +53,37 @@ query SearchIssues($term: String!, $first: Int!, $filter: IssueFilter) {
   }
 }`
 
+const ASSIGNED_ISSUES = `
+query AssignedIssues($team: String!, $after: String) {
+  viewer {
+    assignedIssues(
+      first: 100
+      after: $after
+      filter: {
+        team: { key: { eq: $team } }
+        state: { type: { in: ["triage", "backlog", "unstarted", "started"] } }
+      }
+    ) {
+      nodes {
+        identifier title url description priority dueDate
+        state { name type }
+        children { nodes { state { type } } }
+        attachments { nodes { url } }
+        relations { nodes { type relatedIssue { state { type } } } }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`
+
+/** Linear's priority numbers, as the issue tracker's priorities. */
+const PRIORITIES: Record<number, string> = {
+  1: "urgent",
+  2: "high",
+  3: "medium",
+  4: "low",
+}
+
 type IssueNode = {
   identifier: string
   title: string
@@ -95,33 +128,6 @@ async function graphql<T>(
     )
   }
   return body.data as T
-}
-
-const BRANCH_LINE = /^> Branch:\s*(.+?)\s*$/
-const ISSUE_ID = /(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]*-\d+)(?![A-Za-z0-9])/g
-
-/**
- * A branch as written in a `> Branch:` line, compared loosely: without the
- * backticks sync writes, with any issue id the tracker turned into a link
- * (`[HVT-1](https://…)`, or `<issue …>HVT-1</issue>` from the MCP) read as its
- * text, and with issue ids in one case, since a link shows the id uppercased.
- */
-export function normalizeBranch(text: string): string {
-  const plain = text
-    .trim()
-    .replace(/^`(.*)`$/, "$1")
-    .replace(/<issue\b[^>]*>(.*?)<\/issue>/g, "$1")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-  return plain.replace(ISSUE_ID, (id) => id.toLowerCase())
-}
-
-/** Whether `description` has a `> Branch:` line naming `branch`. */
-export function hasBranchLine(description: string, branch: string): boolean {
-  const want = normalizeBranch(branch)
-  return description.split("\n").some((line) => {
-    const found = line.trim().match(BRANCH_LINE)
-    return found !== null && normalizeBranch(found[1]) === want
-  })
 }
 
 /**
@@ -186,8 +192,23 @@ export const findIssue: Adapter = {
   },
 }
 
+type AssignedNode = {
+  identifier: string
+  title: string
+  url: string
+  description?: string | null
+  priority: number
+  dueDate?: string | null
+  state: { name: string; type: string }
+  children?: { nodes: { state: { type: string } }[] }
+  attachments?: { nodes: { url: string }[] }
+  relations?: {
+    nodes: { type: string; relatedIssue: { state: { type: string } } }[]
+  }
+}
+
 /** Attachments that are pull or merge requests. */
-function pullRequests(node: SearchNode): string[] {
+function pullRequests(node: Pick<SearchNode, "attachments">): string[] {
   return (node.attachments?.nodes ?? [])
     .map((a) => a.url)
     .filter((url) => /\/(pull|merge_requests)\/\d+/.test(url))
@@ -229,6 +250,49 @@ export const searchIssues: Adapter = {
         open: OPEN_STATES.includes(node.state.type),
         parent: node.parent?.identifier ?? null,
         pullRequests: pullRequests(node),
+        description: (node.description ?? "").slice(0, MAX_DESCRIPTION),
+      })),
+    }
+  },
+}
+
+export const assignedIssues: Adapter = {
+  needs: "api",
+  async run(input) {
+    const nodes: AssignedNode[] = []
+    let after: string | undefined
+    do {
+      const data = await graphql<{
+        viewer: {
+          assignedIssues: {
+            nodes: AssignedNode[]
+            pageInfo: { hasNextPage: boolean; endCursor: string | null }
+          }
+        }
+      }>(input, ASSIGNED_ISSUES, { team: input.values.teamKey, after })
+      const page = data.viewer.assignedIssues
+      nodes.push(...page.nodes)
+      after = page.pageInfo.hasNextPage
+        ? (page.pageInfo.endCursor ?? undefined)
+        : undefined
+    } while (after)
+    const open = (type: string) => OPEN_STATES.includes(type)
+    return {
+      issues: nodes.map((node) => ({
+        id: node.identifier,
+        title: node.title,
+        url: node.url,
+        state: node.state.name,
+        stage: node.state.type === "started" ? "in progress" : "todo",
+        priority: PRIORITIES[node.priority] ?? "none",
+        dueDate: node.dueDate ?? null,
+        openSubIssues: (node.children?.nodes ?? []).some((c) =>
+          open(c.state.type),
+        ),
+        pullRequests: pullRequests(node),
+        blocks: (node.relations?.nodes ?? []).some(
+          (r) => r.type === "blocks" && open(r.relatedIssue.state.type),
+        ),
         description: (node.description ?? "").slice(0, MAX_DESCRIPTION),
       })),
     }
