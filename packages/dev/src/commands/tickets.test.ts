@@ -8,6 +8,7 @@ import {
   checkPlan,
   type Plan,
   parentsFirst,
+  planIds,
   recordFiled,
   renderTable,
   summaryLine,
@@ -231,5 +232,20 @@ describe("tickets.ts", () => {
     const result = cli(["check", "--plan", file])
     expect(result.status).toBe(1)
     expect(result.stdout.trim()).toBe("PROBLEM the plan has no items")
+  })
+})
+
+describe("planIds", () => {
+  it("lists each issue a plan matched or filed, once", () => {
+    expect(
+      planIds({
+        items: [
+          { key: "a", match: "ENG-1" },
+          { key: "b", match: "new" },
+          { key: "c" },
+          { key: "d", match: "ENG-1" },
+        ],
+      }),
+    ).toEqual(["ENG-1"])
   })
 })

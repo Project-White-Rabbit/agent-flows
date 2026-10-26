@@ -79,17 +79,33 @@ export const CAPABILITIES: CapabilitySpec[] = [
     ops: {
       issueRef:
         "Which strings name one of this tracker's issues: an issue id, or the tracker's URL for one",
-      getIssue: `Issue <ID>: its id, title, URL, workflow state, description, ${ISSUE_FIELDS}, parent issue, and whether a pull request is attached. Not found, or archived, means there is none`,
+      getIssue: `Issue <ID>: its id, title, URL, workflow state, description, ${ISSUE_FIELDS}, parent issue, whether a pull request is attached, and the branch name the tracker suggests for it, when it suggests one. Not found, or archived, means there is none`,
       findIssue:
         "Open issues anchored to branch <branch>, any assignee: their description has a `> Branch:` line naming it, in backticks or bare (as older tools wrote it), reading an issue id in it that the tracker turned into a link as plain text",
       searchIssues:
         "Issues that may already describe the work in <text>, any assignee: open ones, and ones closed in the last 90 days, ranked by the tracker's own search, each with its id, title, URL, workflow state, description, parent issue, and whether a pull request is attached",
+      assignedIssues:
+        "Every open issue assigned to the current user, all pages: each with its id, title, URL, workflow state, description, priority, due date, whether it has open sub-issues, whether a pull request is attached, and whether it blocks another open issue",
       createIssue: `File an issue titled <title> with the description <description>, assigned to the current user unless <fields> names an assignee, as a sub-issue of <parent> when one is given, with <fields>: whichever of ${ISSUE_FIELDS} the flow sets, leaving out the rest. Prints its id and URL`,
       updateIssue: `Set issue <ID>'s title to <title>, its description to <description>, its workflow state to the one matching <state> (\`todo\`, \`in progress\`, \`in review\`, \`done\`, or \`canceled\`), and <fields> as for createIssue. Anything left out (the title, the description, the state, or a field) stays as it is`,
       linkBlocked:
         "Record that issue <ID> is blocked by issue <blocker>, keeping the relations it already has. Linking a pair that's already linked changes nothing",
       prLink:
         "Where a pull request names issue <ID> so the tracker links the two: a closing form, which also closes the issue when the pull request merges, and a linking-only form, when the tracker tells them apart",
+    },
+  },
+  {
+    id: "workspaces",
+    name: "Workspaces",
+    purpose:
+      "Open a branch in a workspace of its own, with a coding agent already working on it",
+    ops: {
+      workspaces:
+        "Every open (not archived) workspace of this repository: each with its id, name, branch, and sidebar section (none when it has none), and whether this session runs in it",
+      renameWorkspace:
+        "Rename the workspace <id> to <name>. With <section>, file it in that sidebar section, making the section when there's none yet; with <section> `none`, take it out of every section; with no <section>, leave its section as it is. Its git branch is renamed separately",
+      createWorkspace:
+        "Open a new workspace of this repository named <name>, on the branch <branch> (made from <base> when it doesn't exist): exactly <branch> when <exact> is `yes`, else under the prefix the integration or the repo puts on new branches. File it in the sidebar section <section> when one is given, making the section when there's none yet. Start a coding agent in it on the prompt in the file <prompt-file>, or, when the integration can't start one, print the command that does. Prints the workspace's id, the branch it's on, and a link or path to open it",
     },
   },
   {

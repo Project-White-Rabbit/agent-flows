@@ -18,10 +18,12 @@ describe("dev flows", () => {
       "skills/create-tickets-apply/SKILL.md",
       "skills/evaluate/SKILL.md",
       "skills/evaluate-run/SKILL.md",
+      "skills/start-work/SKILL.md",
       "skills/sync/SKILL.md",
       "skills/sync-local/SKILL.md",
       "skills/sync-remote/SKILL.md",
       "skills/sync-report/SKILL.md",
+      "skills/tickets-to-work/SKILL.md",
     ])
   })
 
@@ -60,6 +62,7 @@ describe("dev flows", () => {
         "issueTracker",
         "errorTracking",
         "sessions",
+        "workspaces",
       ]),
     )
     for (const id of asks) {
@@ -68,7 +71,7 @@ describe("dev flows", () => {
     const vendorFree = files.filter((f) => !f.path.includes("configure"))
     for (const file of vendorFree) {
       expect(file.content, file.path).not.toMatch(
-        /\b(gh|glab|gt) |GitHub|GitLab|Graphite|Linear|Jira|Sentry|Lore/,
+        /\b(gh|glab|gt|superset|conductor) |GitHub|GitLab|Graphite|Linear|Jira|Sentry|Lore|Superset|Conductor/,
       )
     }
   })
@@ -81,6 +84,7 @@ describe("dev flows", () => {
         "issueTracker",
         "errorTracking",
         "sessions",
+        "workspaces",
       ].flatMap((id) => Object.keys(findCapability(id)?.ops ?? {})),
     )
     const flows = files.filter((f) => !f.path.includes("configure"))
@@ -94,6 +98,11 @@ describe("dev flows", () => {
         "shareSession",
         "createIssue",
         "linkBlocked",
+        "getIssue",
+        "assignedIssues",
+        "updateIssue",
+        "workspaces",
+        "createWorkspace",
       ]),
     )
     for (const op of named) {
@@ -200,6 +209,24 @@ describe("dev flows", () => {
     ]) {
       expect(matched?.content).toContain(line)
     }
+  })
+
+  it("chains tickets-to-work to start-work, and start-work to create-tickets", () => {
+    const skill = (id: string) =>
+      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+    expect(skill("tickets-to-work")).toContain(
+      "run the `/agent-flows:start-work` skill with `<ID> --yes`",
+    )
+    const startWork = skill("start-work")
+    expect(startWork).toContain(
+      "run the `/agent-flows:create-tickets` skill with the text and `--yes`",
+    )
+    expect(startWork).toContain(
+      "Run the `/agent-flows:create-tickets` skill with `match` and the text",
+    )
+    expect(startWork).toContain("/agent-flows/create-tickets")
+    expect(startWork).toContain("ids --plan <create-tickets dir>/match.json")
+    expect(skill("create-tickets")).toContain("<dir>/match.json")
   })
 
   it("routes configure through confirm before writing", () => {

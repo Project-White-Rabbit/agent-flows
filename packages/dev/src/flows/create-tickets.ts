@@ -1,8 +1,10 @@
 import type { Flow } from "@agent-flows/core"
 import { ISSUE_FIELD_RULES } from "./issues.ts"
 import {
+  CONFIGURE_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
+  flowDir,
   REQUIRE_CONFIG,
   USE_INTEGRATIONS,
 } from "./kit.ts"
@@ -30,11 +32,7 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
     },
   },
   commands: DEV_COMMANDS.defineCommands({
-    configure: {
-      description:
-        "`integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Exits 2 when the repo isn't configured for it",
-      args: "<subcommand>",
-    },
+    configure: CONFIGURE_INTEGRATIONS,
     tickets: {
       description:
         "`check` checks the plan and prints the table to confirm (or `PROBLEM` lines); `record` saves an issue apply just filed into the plan",
@@ -105,7 +103,7 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
    - **A URL:** read the page with this session's tools for that site (an MCP server's fetch or read tool; search for deferred ones before deciding there are none), else a plain web fetch. When nothing can read it (it needs a sign-in no tool has), ask the person to paste the page and stop until they do.
    - **Pasted notes** (often a flat list with no headings, copied from a chat channel or a doc) **or a sentence:** use the text as given.
    - **Nothing:** ask for the notes or a link, and stop.
-3. **Where the plan goes:** \`<dir>\` is \`git rev-parse --absolute-git-dir\` plus \`/agent-flows/create-tickets\` (create it), so the plan never lands in the tree. The plan is \`<dir>/plan.json\` in default mode and \`<dir>/match.json\` in \`match\` mode, so looking never overwrites a notes plan or the issues it recorded as filed.`,
+3. **Where the plan goes:** \`<dir>\` is ${flowDir("create-tickets")} (create it), so the plan never lands in the tree. The plan is \`<dir>/plan.json\` in default mode and \`<dir>/match.json\` in \`match\` mode, so looking never overwrites a notes plan or the issues it recorded as filed.`,
           next: "main/draft",
         },
         {

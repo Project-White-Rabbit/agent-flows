@@ -1,4 +1,4 @@
-import { findIssue, searchIssues } from "../adapters/linear.ts"
+import { assignedIssues, findIssue, searchIssues } from "../adapters/linear.ts"
 import type { IntegrationSpec, SectionValues } from "../types.ts"
 import { jiraLinkedKeys } from "./jira.ts"
 import { ISSUE_KEY } from "./patterns.ts"
@@ -105,14 +105,14 @@ export const linear: IntegrationSpec = {
     mcp: { server: "Linear" },
     api: { base: "https://api.linear.app/graphql", token: ["LINEAR_API_KEY"] },
   },
-  adapters: { findIssue, searchIssues },
+  adapters: { findIssue, searchIssues, assignedIssues },
   provides: {
     issueTracker: {
       issueRef:
         "`{teamKey}-<n>` in any case, or a `https://linear.app/<workspace>/issue/{teamKey}-<n>` URL",
       getIssue: {
-        mcp: "The Linear MCP's `get_issue` with `id: <ID>` and `fields` including `priority`, `estimate`, `labels`, `cycleId`, `project`, `assignee`, `dueDate`, `parentId`, and `attachments` (a pull request is one whose URL is a pull request's)",
-        api: `${GRAPHQL} \`issue(id: "<ID>") { identifier title url description archivedAt state { name type } priority estimate labels { nodes { name } } cycle { number } project { name } assignee { name } dueDate parent { identifier } attachments { nodes { url } } }\``,
+        mcp: "The Linear MCP's `get_issue` with `id: <ID>` and `fields` including `priority`, `estimate`, `labels`, `cycleId`, `project`, `assignee`, `dueDate`, `parentId`, `attachments` (a pull request is one whose URL is a pull request's), and `gitBranchName` (the branch it suggests)",
+        api: `${GRAPHQL} \`issue(id: "<ID>") { identifier title url description archivedAt state { name type } priority estimate labels { nodes { name } } cycle { number } project { name } assignee { name } dueDate parent { identifier } attachments { nodes { url } } branchName }\`; \`branchName\` is the branch it suggests`,
       },
       // Also an adapter (`adapters/linear.ts`), which sync runs first: the
       // API's `contains` filter is exact, where the MCP's `query` is a fuzzy,
@@ -123,6 +123,11 @@ export const linear: IntegrationSpec = {
       // Also an adapter, which ranks with the API's semantic search.
       searchIssues: {
         mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <text>`, and `limit: 10`: once with no state (open issues), once with `state: completed` and once with `state: canceled`, each with `updatedAt: -P90D`. Ask for `fields` `title`, `url`, `status`, `statusType`, `description`, and `parentId`; load a candidate with `get_issue` to see whether a pull request is attached. Then try two or three shorter queries from the text's key words, since `query` matches words, not meaning",
+      },
+      // Also an adapter, which pages through every open issue in one call.
+      assignedIssues: {
+        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `assignee: \"me\"`, `includeArchived: false`, and `limit: 250`, once per open state type (`triage`, `backlog`, `unstarted`, `started`), following `cursor` until `hasNextPage` is false. Then load each with `get_issue` for its sub-issues (open ones are in an open state type), its `attachments` (a pull request is one whose URL is a pull request's), and its relations (it blocks another issue through a `blocks` relation to an open one)",
+        api: `${GRAPHQL} \`viewer { assignedIssues(first: 100, after: <cursor>, filter: { team: { key: { eq: "{teamKey}" } }, state: { type: { in: ["triage", "backlog", "unstarted", "started"] } } }) { nodes { identifier title url description priority dueDate state { name type } children { nodes { state { type } } } attachments { nodes { url } } relations { nodes { type relatedIssue { state { type } } } } } pageInfo { hasNextPage endCursor } } }\`, following \`endCursor\` until \`hasNextPage\` is false. \`priority\` is 0 for none, 1 urgent, 2 high, 3 medium, 4 low; open sub-issues and blocked issues are in an open state type`,
       },
       createIssue: {
         mcp: `The Linear MCP's \`save_issue\` with \`team: {teamKey}\`, \`title\`, \`description\`, \`assignee: "me"\` (unless \`<fields>\` names one), \`parentId: <parent>\` when given, and ${MCP_FIELDS}`,

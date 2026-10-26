@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest"
 import type { AdapterInput } from "../types.ts"
 import {
+  assignedIssues,
   branchAnchors,
   findIssue,
-  hasBranchLine,
-  normalizeBranch,
   searchIssues,
 } from "./linear.ts"
 
@@ -111,20 +110,6 @@ describe("linear findIssue adapter", () => {
       new Response("", { status: 401 })) as typeof globalThis.fetch
     await expect(findIssue.run(input(denied))).rejects.toThrow("HTTP 401")
   })
-
-  it("matches whole branch names only", () => {
-    expect(hasBranchLine("a\n> Branch: `x`\nb", "x")).toBe(true)
-    expect(hasBranchLine("> Branch: x", "x")).toBe(true)
-    expect(hasBranchLine("> Branch: `x-y`", "x")).toBe(false)
-    expect(hasBranchLine("> Branch: x y", "x")).toBe(false)
-    expect(
-      hasBranchLine(
-        '> Branch: ruven/<issue id="1">ENG-12</issue>-feature',
-        BRANCH,
-      ),
-    ).toBe(true)
-    expect(normalizeBranch("`a/ENG-1-b`")).toBe("a/eng-1-b")
-  })
 })
 
 describe("linear searchIssues adapter", () => {
@@ -187,5 +172,90 @@ describe("linear searchIssues adapter", () => {
   it("needs text to search for", async () => {
     const { fetch } = fakeLinear([])
     await expect(searchIssues.run(input(fetch, {}))).rejects.toThrow("--text")
+  })
+})
+
+describe("linear assignedIssues adapter", () => {
+  it("reads every page and reports what tickets-to-work sorts by", async () => {
+    const node = (identifier: string, extra: object) => ({
+      identifier,
+      title: identifier,
+      url: `https://l/${identifier}`,
+      description: "Body",
+      priority: 0,
+      dueDate: null,
+      state: { name: "Todo", type: "unstarted" },
+      children: { nodes: [] },
+      attachments: { nodes: [] },
+      relations: { nodes: [] },
+      ...extra,
+    })
+    const page = (nodes: object[], hasNextPage: boolean) => ({
+      viewer: {
+        assignedIssues: {
+          nodes,
+          pageInfo: { hasNextPage, endCursor: hasNextPage ? "c1" : null },
+        },
+      },
+    })
+    const { fetch, seen } = fakeLinear([
+      page(
+        [
+          node("ENG-1", {
+            priority: 2,
+            dueDate: "2026-11-01",
+            children: { nodes: [{ state: { type: "started" } }] },
+          }),
+        ],
+        true,
+      ),
+      page(
+        [
+          node("ENG-2", {
+            state: { name: "In Progress", type: "started" },
+            attachments: { nodes: [{ url: "https://g/acme/web/pull/4" }] },
+            relations: {
+              nodes: [
+                {
+                  type: "blocks",
+                  relatedIssue: { state: { type: "backlog" } },
+                },
+              ],
+            },
+          }),
+        ],
+        false,
+      ),
+    ])
+    const result = (await assignedIssues.run(input(fetch, {}))) as {
+      issues: Record<string, unknown>[]
+    }
+    expect(seen).toEqual([
+      { team: "ENG", after: undefined },
+      { team: "ENG", after: "c1" },
+    ])
+    expect(result.issues).toEqual([
+      {
+        id: "ENG-1",
+        title: "ENG-1",
+        url: "https://l/ENG-1",
+        state: "Todo",
+        stage: "todo",
+        priority: "high",
+        dueDate: "2026-11-01",
+        openSubIssues: true,
+        pullRequests: [],
+        blocks: false,
+        description: "Body",
+      },
+      expect.objectContaining({
+        id: "ENG-2",
+        stage: "in progress",
+        priority: "none",
+        openSubIssues: false,
+        pullRequests: ["https://g/acme/web/pull/4"],
+        blocks: true,
+      }),
+    ])
   })
 })

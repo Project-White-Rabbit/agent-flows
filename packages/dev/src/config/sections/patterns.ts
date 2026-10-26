@@ -34,3 +34,9 @@ export const VISIBILITY: FieldPattern = {
   regex: /^(private|workspace|public)$/,
   hint: "`private`, `workspace`, or `public`",
 }
+
+/** A file system path: `../worktrees`, `~/src/worktrees`. */
+export const PATH: FieldPattern = {
+  regex: /^[A-Za-z0-9._~/-]+$/,
+  hint: "letters, digits, `.`, `_`, `~`, `/`, or `-` (`../worktrees`)",
+}

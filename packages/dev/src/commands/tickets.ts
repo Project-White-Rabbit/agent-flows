@@ -9,7 +9,16 @@
 // issues instead of filing them twice.
 
 import fs from "node:fs"
-import { isMain, printJson, runMain } from "./lib.ts"
+import {
+  type Flags,
+  isMain,
+  parseFlags,
+  printJson,
+  readJson,
+  requiredFlag,
+  runMain,
+  runSubcommand,
+} from "./lib.ts"
 
 export const PRIORITIES = ["urgent", "high", "medium", "low"] as const
 
@@ -299,6 +308,14 @@ export function summaryLine(rows: Row[]): string {
   return `SUMMARY ${count("file")} to file, ${count("update")} to update, ${count("unchanged")} unchanged`
 }
 
+/** The issues a plan filed, updated, or matched, each once. */
+export function planIds(plan: Plan): string[] {
+  const ids = plan.items
+    .filter((item) => !isNew(item))
+    .map((item) => item.match as string)
+  return [...new Set(ids)]
+}
+
 /** Saves a filed issue as the item's match, so a re-run updates it. */
 export function recordFiled(
   plan: Plan,
@@ -323,41 +340,15 @@ function today(): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
 
-type Args = Map<string, string>
-
-function parseArgs(args: string[]): Args {
-  const flags = new Map<string, string>()
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]
-    if (!arg.startsWith("--") || args[i + 1] === undefined) {
-      throw new Error(`expected \`--<name> <value>\`, got \`${arg}\``)
-    }
-    flags.set(arg.slice(2), args[++i])
-  }
-  return flags
-}
-
-function required(args: Args, name: string): string {
-  const value = args.get(name)
-  if (!value) {
-    throw new Error(`--${name} <value> is required`)
-  }
-  return value
-}
+type Args = Flags
 
 function readPlan(file: string): Plan {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8")) as Plan
-  } catch (error) {
-    throw new Error(
-      `can't read the plan at ${file}: ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
+  return readJson<Plan>(file)
 }
 
 function check(args: Args): void {
   const checked = checkPlan(
-    readPlan(required(args, "plan")),
+    readPlan(requiredFlag(args, "plan")),
     args.get("today") ?? today(),
   )
   if (checked.problems.length > 0) {
@@ -373,12 +364,17 @@ function check(args: Args): void {
 }
 
 function record(args: Args): void {
-  const file = required(args, "plan")
-  const key = required(args, "key")
-  const id = required(args, "id")
+  const file = requiredFlag(args, "plan")
+  const key = requiredFlag(args, "key")
+  const id = requiredFlag(args, "id")
   const plan = recordFiled(readPlan(file), key, id, args.get("url"))
   fs.writeFileSync(file, `${JSON.stringify(plan, null, 2)}\n`)
   printJson({ recorded: true, key, id })
+}
+
+function ids(args: Args): void {
+  const found = planIds(readPlan(requiredFlag(args, "plan")))
+  console.log(found.length > 0 ? found.join(" ") : "NONE")
 }
 
 const USAGE = `Usage: tickets.ts <command>
@@ -390,19 +386,21 @@ const USAGE = `Usage: tickets.ts <command>
                   a SUMMARY line, and CHECK lines that need an answer first.
   record --plan <file> --key <key> --id <id> [--url <url>]
                   Save an issue apply just filed as the item's match, so a
-                  re-run updates it instead of filing it again.`
+                  re-run updates it instead of filing it again.
+  ids --plan <file>
+                  The issues the plan filed, updated, or matched, each once,
+                  space-separated, or NONE.
 
-const SUBCOMMANDS: Record<string, (args: Args) => void> = { check, record }
+Exits 2 on bad arguments or a plan it can't read.`
+
+const SUBCOMMANDS: Record<string, (args: Args) => void> = {
+  check,
+  record,
+  ids,
+}
 
 export function main(argv: string[]): void {
-  const [command, ...rest] = argv
-  const subcommand = command ? SUBCOMMANDS[command] : undefined
-  if (!subcommand) {
-    console.log(USAGE)
-    process.exitCode = command && command !== "help" ? 1 : 0
-    return
-  }
-  subcommand(parseArgs(rest))
+  runSubcommand(argv, USAGE, SUBCOMMANDS, (rest) => parseFlags(rest))
 }
 
 if (isMain(import.meta.filename)) {
