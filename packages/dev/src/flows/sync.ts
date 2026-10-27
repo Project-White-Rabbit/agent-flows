@@ -11,7 +11,7 @@ import {
 
 // The PR body sync writes inside its block; everything outside it is the
 // team's and survives every re-run.
-const PR_BLOCK = `> Issue: [<ID>: <issue title>](<issue URL>)   (one line per linked issue; omit with no issue tracker)
+const PR_BLOCK = `> Issue: [<ID>](<issue URL>) <issue title>   (one line per linked issue; omit with no issue tracker)
 > Errors: <short id> ([<title>](<URL>))   (one line per error ref; omit when there are none)
 > <session-sharing name>: [Session](<session URL>)   (omit with no session link)
 
@@ -128,7 +128,7 @@ export const syncFlow: Flow = devKit.defineFlow({
 >
 > It uses the integrations in \`.agent-flows/config.json\`: source control for the PR (required outside \`local\` mode), and, when configured, stacking for restack and push, an issue tracker for the issue, error tracking to link and resolve the errors the work fixes, and session sharing to link the session behind the work. Set them up with \`{{cmd}}configure\`.
 >
-> Before filing an issue, it searches open and recently closed ones for the same work (with \`{{cmd}}create-tickets match\`), and reuses a match or files a sub-issue under a larger one. The PR's Summary and Test plan and the issue's Status are regenerated each sync. The issue's Description is written once; the issue's state follows the PR (todo, in progress, in review, done, canceled). Its priority is set once and then left to people; its labels, estimate, cycle, and project follow the config and the repo's agent instructions.`,
+> Before filing an issue, it searches open and recently closed ones for the same work (with \`{{cmd}}create-tickets match\`), and reuses a match or files a sub-issue under a larger one. The PR's Summary and Test plan and the issue's Status are regenerated each sync. The issue's Description is written once; the issue's state follows the PR (todo, in progress, in review, done, canceled), except that a done or canceled issue stays closed unless you say to reopen it. Its priority is set once and then left to people; its labels, estimate, cycle, and project follow the config and the repo's agent instructions.`,
           next: null,
         },
         {
@@ -175,7 +175,7 @@ These signals are the authority and **override the \`**Next:**\` block below**, 
 2. The survey's \`issue\`: cached for this branch by an earlier sync. Load it with \`getIssue\`: someone may have closed it since. Canceled, or done while this branch's PR isn't merged, means the team dropped it: forget it (\`finish --issue none\` in the report) and keep looking, skipping that issue below.
 3. A ref in the branch name.
 4. A ref at the start of the PR title.
-5. The PR body's \`> Issue:\` line, or the issue link an earlier sync tool put at the top of the body (a \`> \` line named for the tracker, linking \`<ID>: <title>\`).
+5. The PR body's \`> Issue:\` line, or the issue link an earlier sync tool put at the top of the body (a \`> \` line named for the tracker, linking \`<ID>\` with the title after the link, or linking \`<ID>: <title>\` as older syncs wrote it).
 6. Each entry's \`findIssue\` op with \`<branch>\` this branch: it finds the \`> Branch:\` anchor line sync writes into every issue it files or refreshes, and the bare one earlier sync tools wrote. Several matches is an anomaly: take the most recently updated one, and say so in the report.
 7. A ref in recent user messages that is clearly about this work, not a passing mention.
 8. **The same work, filed by someone else.** Only with an entry at \`track\`, which is where a new issue would go. Many issues for a branch's work were filed from planning notes (by \`{{cmd}}create-tickets\`, say), by someone else, or long ago, and carry no \`> Branch:\` line. Draft the new issue first: a 5-10 word title and a 1-3 sentence description of the work, from the PR title and body, then the session, then the commits (if all three are empty, ask: "What are you working on?"). Then run the \`{{cmd}}create-tickets\` skill with \`match --branch <branch> <title>. <description>\`: it searches every issue-tracker entry the way create-tickets does before filing, judges each candidate against this branch's work, and files and changes nothing. Its line for the item decides:
@@ -306,7 +306,7 @@ Sync owns one block of the PR body:
 ${PR_BLOCK}
 \`\`\`
 
-- **Links:** a \`> Issue:\` line for the issue, an \`> Errors:\` line for each of the survey's \`errorRefs\`, and a session line, named for the session-sharing entry (its \`name\`), with the URL 3a shared. When 3a didn't share one, keep the session line the body already has, from this block or one an earlier sync tool wrote. When the tracker's \`prLink\` op puts its link in the body, add that line too: the closing form for an entry at \`track\` (merging closes the issue even if sync doesn't run again), the linking-only form at \`link\`, which never changes the issue.
+- **Links:** a \`> Issue:\` line for the issue, its link text the bare id with the title after the link (a tracker reading the PR for the issue takes the link text as the id, so an id with the title inside it doesn't link, and merging doesn't close the issue), an \`> Errors:\` line for each of the survey's \`errorRefs\`, and a session line, named for the session-sharing entry (its \`name\`), with the URL 3a shared. When 3a didn't share one, keep the session line the body already has, from this block or one an earlier sync tool wrote. When the tracker's \`prLink\` op puts its link in the body, add that line too: the closing form for an entry at \`track\` (merging closes the issue even if sync doesn't run again), the linking-only form at \`link\`, which never changes the issue.
 - **The survey's \`format\`:** with \`linkLabels\` \`integration\`, label the issue and error lines with the \`name\` of the entry each links to (\`> <tracker name>:\` in place of \`> Issue:\`), in this block and in 3d. With an \`errorVerb\`, each error line starts with it (\`> Errors: <errorVerb> <short id> ([<title>](<URL>))\`). \`blockMarkers\` is \`splice\`'s to apply; write the block the same either way.
 - **The repo's PR template:** when the repo has one (\`.github/pull_request_template.md\`, \`.github/PULL_REQUEST_TEMPLATE.md\`, or \`docs/\` or the root with either name), the block follows it instead of the Summary and Test plan headings: the template's sections in its order, filled in from the change. A "what and why" or summary section gets the Summary's content, a test section the Test plan's, and a checklist keeps its items, checked only for what's true and verified, with a short note where an item doesn't apply. Drop the template's HTML comments. The link lines stay on top and the last-synced line at the end.
 - **Summary:** regenerated every sync, 1-3 bullets on what the change does and why. Don't restate the issue (the link does) or add progress (that's the issue's Status).
@@ -345,6 +345,8 @@ ${ISSUE_DESCRIPTION}
 
 Then the entry's \`updateIssue\` op with the title (keep the existing one unless a new one fits strictly better), the description, \`<state>\` \`workState\`, and \`<fields>\` from the issue fields in 3b.
 
+**A closed issue stays closed.** When the issue's workflow state (from \`getIssue\` in 1a; load it now when 1a didn't) is done or canceled (a duplicate counts as canceled) and \`workState\` is a different stage, leave \`<state>\` out unless the user says to reopen it. Ask once: "<ID> is <state>. Sync would move it to <workState>. Reopen it?" Only an explicit yes passes \`workState\`. A no, no answer, or a run nobody can answer (a scheduled or unattended sync) leaves the state alone, and the report says "<ID> kept at <state>; sync would have moved it to <workState>". Every other write still runs. Never set a state over a done or canceled one without that yes.
+
 ### 3e. Errors
 
 When \`workState\` is \`done\` (the PR merged): resolve each of the survey's \`errorRefs\` with the \`resolveIssue\` op of the error-tracking entry whose \`issueRef\` matches it, when that entry is at \`resolve\`. At \`link\`, leave it for the team, and list it in the report. Resolving is idempotent. Use the op's first variant that works here: an entry reached through its MCP server needs neither the CLI nor a token. A ref no entry matches, a call that fails, or one no variant can reach goes in the report as \`Needs manual resolve: <ref>\`, with what would make it work.`,
@@ -380,7 +382,7 @@ Otherwise lead with anything that needs the user's attention (an unresolved conf
 - **Mode** that ran, and what was skipped and why (the local git work in \`remote\` mode or on \`runLocal: false\`; 1a and the remote writes in \`local\` mode or on \`runRemote: false\`).
 - **Branch:** existing or created; what was committed; whether it caught up to the base (and any conflicts resolved, by file: a resolution nobody sees is one nobody checked); whether it was pushed.
 - **PR:** URL, draft or ready, existing or created, and its mergeability.
-- **Issue:** id, URL, and state; existing, found by the search (and which issue matched), created, or created as a sub-issue (of which); or none, with no issue tracker configured. The fields set or changed (priority, labels, estimate, cycle, project), and a closed issue the search found for the same work.
+- **Issue:** id, URL, and state (and, when it was closed and stayed closed, the state sync would have set); existing, found by the search (and which issue matched), created, or created as a sub-issue (of which); or none, with no issue tracker configured. The fields set or changed (priority, labels, estimate, cycle, project), and a closed issue the search found for the same work.
 - **Session:** the shared URL, or skipped or failed, and why.
 - **Errors:** refs linked, and any resolved.`,
           next: null,

@@ -221,6 +221,15 @@ describe("dev flows", () => {
     }
   })
 
+  it("links the issue by its bare id and keeps a closed issue closed", () => {
+    const remote = files.find((f) => f.path === "skills/sync-remote/SKILL.md")
+    expect(remote?.content).toContain(
+      "> Issue: [<ID>](<issue URL>) <issue title>",
+    )
+    expect(remote?.content).toContain("**A closed issue stays closed.**")
+    expect(remote?.content).toContain("Only an explicit yes passes `workState`")
+  })
+
   it("chains tickets-to-work to start-work, and start-work to create-tickets", () => {
     const skill = (id: string) =>
       files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
