@@ -54,7 +54,7 @@ For an entry at `track`, on filing and on every full update; the same rules `/de
 Sync owns one block of the PR body:
 
 ```markdown
-> Issue: [<ID>: <issue title>](<issue URL>)   (one line per linked issue; omit with no issue tracker)
+> Issue: [<ID>](<issue URL>) <issue title>   (one line per linked issue; omit with no issue tracker)
 > Errors: <short id> ([<title>](<URL>))   (one line per error ref; omit when there are none)
 > <session-sharing name>: [Session](<session URL>)   (omit with no session link)
 
@@ -74,7 +74,7 @@ Sync owns one block of the PR body:
 <lastSyncedLine>
 ```
 
-- **Links:** a `> Issue:` line for the issue, an `> Errors:` line for each of the survey's `errorRefs`, and a session line, named for the session-sharing entry (its `name`), with the URL 3a shared. When 3a didn't share one, keep the session line the body already has, from this block or one an earlier sync tool wrote. When the tracker's `prLink` op puts its link in the body, add that line too: the closing form for an entry at `track` (merging closes the issue even if sync doesn't run again), the linking-only form at `link`, which never changes the issue.
+- **Links:** a `> Issue:` line for the issue, its link text the bare id with the title after the link (a tracker reading the PR for the issue takes the link text as the id, so an id with the title inside it doesn't link, and merging doesn't close the issue), an `> Errors:` line for each of the survey's `errorRefs`, and a session line, named for the session-sharing entry (its `name`), with the URL 3a shared. When 3a didn't share one, keep the session line the body already has, from this block or one an earlier sync tool wrote. When the tracker's `prLink` op puts its link in the body, add that line too: the closing form for an entry at `track` (merging closes the issue even if sync doesn't run again), the linking-only form at `link`, which never changes the issue.
 - **The survey's `format`:** with `linkLabels` `integration`, label the issue and error lines with the `name` of the entry each links to (`> <tracker name>:` in place of `> Issue:`), in this block and in 3d. With an `errorVerb`, each error line starts with it (`> Errors: <errorVerb> <short id> ([<title>](<URL>))`). `blockMarkers` is `splice`'s to apply; write the block the same either way.
 - **The repo's PR template:** when the repo has one (`.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, or `docs/` or the root with either name), the block follows it instead of the Summary and Test plan headings: the template's sections in its order, filled in from the change. A "what and why" or summary section gets the Summary's content, a test section the Test plan's, and a checklist keeps its items, checked only for what's true and verified, with a short note where an item doesn't apply. Drop the template's HTML comments. The link lines stay on top and the last-synced line at the end.
 - **Summary:** regenerated every sync, 1-3 bullets on what the change does and why. Don't restate the issue (the link does) or add progress (that's the issue's Status).
@@ -130,6 +130,8 @@ With an issue in an entry at `track` (at `link`, leave the issue alone; the PR's
 - Keep any other section a person wrote.
 
 Then the entry's `updateIssue` op with the title (keep the existing one unless a new one fits strictly better), the description, `<state>` `workState`, and `<fields>` from the issue fields in 3b.
+
+**A closed issue stays closed.** When the issue's workflow state (from `getIssue` in 1a; load it now when 1a didn't) is done or canceled (a duplicate counts as canceled) and `workState` is a different stage, leave `<state>` out unless the user says to reopen it. Ask once: "<ID> is <state>. Sync would move it to <workState>. Reopen it?" Only an explicit yes passes `workState`. A no, no answer, or a run nobody can answer (a scheduled or unattended sync) leaves the state alone, and the report says "<ID> kept at <state>; sync would have moved it to <workState>". Every other write still runs. Never set a state over a done or canceled one without that yes.
 
 ### 3e. Errors
 
