@@ -119,7 +119,7 @@ export const configureFlow: Flow = devKit.defineFlow({
   compile: { mode: { default: "monolith" }, inlinePhases: [] },
   entries: { default: "configure/mode" },
   defaultMode: "default",
-  intro: `Record this repository's dev configuration in \`{{configPath}}\` at the repo root: settings every flow relies on (like the base branch) and the integrations the repo uses, with the ids flows need to reach them. Other agent-flows commands read it instead of guessing or asking every time. The file is committed and shared with the team, so it holds **configuration only**: ids, slugs, branch names. No secrets, and nothing that points at one.
+  intro: `Record this repository's dev configuration in \`{{configPath}}\` at the repo root: settings every flow relies on (like the base branch) and the integrations the repo uses, with the ids flows need to reach them. Other dev-flows commands read it instead of guessing or asking every time. The file is committed and shared with the team, so it holds **configuration only**: ids, slugs, branch names. No secrets, and nothing that points at one.
 
 Flows never ask for a vendor. They ask for a **capability**, and use every integration the repo configured for it:
 

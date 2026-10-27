@@ -28,6 +28,6 @@ The repo is a Bun workspace. Each package lives under `packages/`; `@agent-flows
 2. Merge to `main`.
 3. The `Release` workflow sees a version that isn't on npm yet, validates, publishes `@agent-flows/core` to npm with provenance, and creates the `core@X.Y.Z` tag and GitHub release.
 
-### The `agent-flows` plugin
+### The `dev-flows` plugin
 
 Bump the plugin's version in every PR that changes `packages/dev` (`bun run bump patch` in that directory); CI rejects the PR otherwise. Merging releases it. See [Releasing in the plugin README](packages/dev/README.md#releasing).

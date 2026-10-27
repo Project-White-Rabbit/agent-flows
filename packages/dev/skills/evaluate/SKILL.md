@@ -3,7 +3,7 @@ description: Assess branch or PR shippability without edits. Use for readiness a
 argument-hint: "[PR number or URL | help]"
 ---
 
-# /agent-flows:evaluate
+# /dev-flows:evaluate
 
 Read the diff and tell the user two things, in this order:
 
@@ -37,7 +37,7 @@ Read `$ARGUMENTS` first. If its first token is exactly one of the mode names bel
 
 If the argument is `help`, print the block below verbatim and exit. No reads.
 
-> `/agent-flows:evaluate` reads a diff and reports (1) what it does in plain English and (2) prioritized shippability risks.
+> `/dev-flows:evaluate` reads a diff and reports (1) what it does in plain English and (2) prioritized shippability risks.
 >
 > Targets:
 >   - no argument -> everything on the current branch: commits ahead of the base branch + uncommitted changes + untracked files. A PR, if one exists, supplies title/body context only.

@@ -72,7 +72,7 @@ export async function main(argv: string[]): Promise<void> {
         ? `${spec.path} has no instance \`${instance}\`.`
         : instances.length > 1
           ? `${spec.path} is configured more than once: pass --instance <name>.`
-          : `${spec.path} isn't configured. Run the agent-flows configure command first.`,
+          : `${spec.path} isn't configured. Run the dev-flows configure command first.`,
     })
     process.exitCode = NOT_CONFIGURED_EXIT
     return
@@ -118,7 +118,7 @@ export async function main(argv: string[]): Promise<void> {
     token = report.api?.ready ? readToken(source, process.env) : undefined
     if (!token) {
       unavailable(
-        `${spec.name}'s adapter needs an API token, and ${report.api?.source ?? "its token source"} has none. Run the agent-flows configure command to say where the token is on this machine.`,
+        `${spec.name}'s adapter needs an API token, and ${report.api?.source ?? "its token source"} has none. Run the dev-flows configure command to say where the token is on this machine.`,
       )
       return
     }

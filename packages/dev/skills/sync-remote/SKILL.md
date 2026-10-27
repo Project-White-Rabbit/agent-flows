@@ -1,10 +1,10 @@
 ---
 name: sync-remote
-description: Remote sync phase of the /agent-flows:sync flow. Invoked by the sync flow; not run directly
+description: Remote sync phase of the /dev-flows:sync flow. Invoked by the sync flow; not run directly
 user-invocable: false
 ---
 
-# /agent-flows:sync: Remote sync
+# /dev-flows:sync: Remote sync
 
 **Mode:** you were dispatched with a mode (`default` or `remote`); which steps apply and where they route below depend on it.
 
@@ -39,7 +39,7 @@ With an issue tracker and a new issue planned in 1a: file it with that entry's `
 
 #### Issue fields
 
-For an entry at `track`, on filing and on every full update; the same rules `/agent-flows:create-tickets` files by. Take each field from, in order: the user or this session, the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they point to for ranking or filing work), then the entry's `values` of the same name. With none of those, leave the field out. Pass as `<fields>` only the fields that change.
+For an entry at `track`, on filing and on every full update; the same rules `/dev-flows:create-tickets` files by. Take each field from, in order: the user or this session, the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they point to for ranking or filing work), then the entry's `values` of the same name. With none of those, leave the field out. Pass as `<fields>` only the fields that change.
 
 - **Priority:** set it when filing, and on an update only when the issue has none. Never change a priority the issue already has, since a person may have set it, unless the user asks to in this session.
 - **Labels:** when there's a set to pick from (the agent instructions' or `values.labels`), exactly one of it that fits the kind of work. Judge it again on each full update: keep the current one unless another fits strictly better, and never add or remove labels outside the set.

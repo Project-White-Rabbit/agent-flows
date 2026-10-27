@@ -1,16 +1,16 @@
 ---
 name: merge-run
-description: Run phase of the /agent-flows:merge flow. Invoked by the merge flow; not run directly
+description: Run phase of the /dev-flows:merge flow. Invoked by the merge flow; not run directly
 user-invocable: false
 ---
 
-# /agent-flows:merge: Run
+# /dev-flows:merge: Run
 
 ## 1. Sync
 
 Skip this step when the pre-flight already ran sync.
 
-Otherwise run the `/agent-flows:sync` skill with no arguments: invoke it, don't redo its steps. The tree is clean, so it commits nothing, but it catches the branch up to its base, pushes what's unpushed, and refreshes the pull request body and its issue. When it stops (a conflict it needs you for), stop too and pass its message on; nothing has merged.
+Otherwise run the `/dev-flows:sync` skill with no arguments: invoke it, don't redo its steps. The tree is clean, so it commits nothing, but it catches the branch up to its base, pushes what's unpushed, and refreshes the pull request body and its issue. When it stops (a conflict it needs you for), stop too and pass its message on; nothing has merged.
 
 ## 2. Merge
 
@@ -22,7 +22,7 @@ When pull request <N> is a draft, the `prReady` op. For `stack`, the same for ev
 
 ### Wait for CI
 
-`git fetch origin <branch>`. `<sha>` is `git rev-parse HEAD`; when it isn't `git rev-parse origin/<branch>`, stop: `<branch> has commits that aren't pushed. Run /agent-flows:sync, then re-run /agent-flows:merge.` What merges is the pushed head, so that's what CI must pass on.
+`git fetch origin <branch>`. `<sha>` is `git rev-parse HEAD`; when it isn't `git rev-parse origin/<branch>`, stop: `<branch> has commits that aren't pushed. Run /dev-flows:sync, then re-run /dev-flows:merge.` What merges is the pushed head, so that's what CI must pass on.
 
 Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" ci start --sha <sha>`, then wait for the checks: with a `script` variant of the `checks` op that runs here,
 
@@ -40,8 +40,8 @@ The `prMergeState` op for <N>:
 
 - `ready`: merge. Failed checks that it lets through are ones the base doesn't require: list them in the report.
 - `pending`: wait 3 seconds and ask again, up to 3 times; still pending, stop.
-- `blocked`: stop with its reasons. Failed checks: `Fix them with /agent-flows:ready, then re-run /agent-flows:merge.` A review or approval: the people who own it.
-- `conflicting` or `behind`: stop, `Run /agent-flows:sync to catch <branch> up to its base, then re-run /agent-flows:merge.`
+- `blocked`: stop with its reasons. Failed checks: `Fix them with /dev-flows:ready, then re-run /dev-flows:merge.` A review or approval: the people who own it.
+- `conflicting` or `behind`: stop, `Run /dev-flows:sync to catch <branch> up to its base, then re-run /dev-flows:merge.`
 
 A stop here leaves the pull request open and unmerged. Push nothing from here to the merge.
 
@@ -53,11 +53,11 @@ Then the `prMetadata` op for <N>: its state must be merged. If it isn't, stop: n
 
 ### Merge the chain
 
-For `stack`, instead: the stacking entry's `mergeStack` op. It can take minutes; run it in the foreground. Then the `branchPr` op for every branch in the chain. All merged: go on. Otherwise stop and say plainly that **part of the chain is merged**: list which pull requests merged and which didn't, with the op's output. The usual next step is `/agent-flows:sync` to restack what's left, fix the blocked one, and re-run `/agent-flows:merge`. When it says local branches differ from their remotes, it refused rather than land unpushed work: `/agent-flows:sync`, then re-run.
+For `stack`, instead: the stacking entry's `mergeStack` op. It can take minutes; run it in the foreground. Then the `branchPr` op for every branch in the chain. All merged: go on. Otherwise stop and say plainly that **part of the chain is merged**: list which pull requests merged and which didn't, with the op's output. The usual next step is `/dev-flows:sync` to restack what's left, fix the blocked one, and re-run `/dev-flows:merge`. When it says local branches differ from their remotes, it refused rather than land unpushed work: `/dev-flows:sync`, then re-run.
 
 ### Close out
 
-Run the `/agent-flows:sync` skill with the argument `remote`. With the pull request merged, it moves the issue to done and resolves the errors the pull request fixed, as far as each integration's `level` allows. A failure here goes in the report; the merge stands.
+Run the `/dev-flows:sync` skill with the argument `remote`. With the pull request merged, it moves the issue to done and resolves the errors the pull request fixed, as far as each integration's `level` allows. A failure here goes in the report; the merge stands.
 
 ### Delete the remote branch
 
@@ -68,7 +68,7 @@ Only after the host said merged. When `above` is more than 0, keep it: the pull 
 Lead with anything that needs the user's attention: a stop and its reason, a chain that merged partway, failed checks the host let through, a failed close-out. Then:
 
 - **Merged:** the pull request's number and URL; for a chain, every pull request bottom first, the current branch marked.
-- **Scope:** `branch` or `stack`, and how it was decided (an argument, the user's answer, or nothing below this branch). Branches still open above this one, and that `/agent-flows:sync` on each restacks them.
+- **Scope:** `branch` or `stack`, and how it was decided (an argument, the user's answer, or nothing below this branch). Branches still open above this one, and that `/dev-flows:sync` on each restacks them.
 - **Method:** the method and why; for a chain, `set by the stacking tool or the host`, and a method argument that wasn't used.
 - **CI:** the commit it passed on (short sha), how long it waited, and any failed checks the host didn't require.
 - **Close-out:** the issue and its state, errors resolved, and any to resolve by hand, from the remote sync.

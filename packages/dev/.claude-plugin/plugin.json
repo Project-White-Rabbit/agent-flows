@@ -1,10 +1,10 @@
 {
-  "name": "agent-flows",
+  "name": "dev-flows",
   "description": "Dev workflow commands for any repository: configure the repo's integrations, file issues from planning notes, evaluate a branch or PR for shippability, sync a branch with its PR and issue, take a finished branch to a ready, green PR, land it, and start work on issues in workspaces with a coding agent on each.",
   "version": "0.11.0",
   "author": {
     "name": "Bitfab"
   },
   "license": "MIT",
-  "keywords": ["dev", "workflow", "agent-flows", "worktrees"]
+  "keywords": ["dev", "workflow", "dev-flows", "agent-flows", "worktrees"]
 }

@@ -241,7 +241,7 @@ describe("configure.ts (as a script)", () => {
     const newer = run(["get", "repo.baseBranch"])
     expect(newer.status).toBe(2)
     expect(json(newer).issues).toEqual([
-      expect.stringContaining("upgrade the agent-flows plugin"),
+      expect.stringContaining("upgrade the dev-flows plugin"),
     ])
   })
 

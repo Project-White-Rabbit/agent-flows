@@ -128,8 +128,8 @@ function requireConfig(root: string): RawConfig | undefined {
         ...(loaded.exists ? { issues: loaded.issues } : {}),
       },
       loaded.exists
-        ? `${CONFIG_PATH} is invalid. Run the agent-flows configure command to fix it.`
-        : `This repo has no ${CONFIG_PATH} yet. Run the agent-flows configure command first.`,
+        ? `${CONFIG_PATH} is invalid. Run the dev-flows configure command to fix it.`
+        : `This repo has no ${CONFIG_PATH} yet. Run the dev-flows configure command first.`,
     )
     return undefined
   }
@@ -172,7 +172,7 @@ function get(root: string, paths: string[]): void {
             : {}),
         })),
       },
-      `${CONFIG_PATH} doesn't set ${missing.join(", ")}. Run the agent-flows configure command to add it.`,
+      `${CONFIG_PATH} doesn't set ${missing.join(", ")}. Run the dev-flows configure command to add it.`,
     )
     return
   }
@@ -259,7 +259,7 @@ async function integrations(root: string, args: string[]): Promise<void> {
           ...(r.skipped.length > 0 ? { skipped: r.skipped } : {}),
         })),
       },
-      `${CONFIG_PATH} has no integration for ${missing.map(([c]) => c).join(", ")}. Run the agent-flows configure command with that capability to add one.`,
+      `${CONFIG_PATH} has no integration for ${missing.map(([c]) => c).join(", ")}. Run the dev-flows configure command with that capability to add one.`,
     )
     return
   }
