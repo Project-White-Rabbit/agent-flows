@@ -5,6 +5,7 @@ import { configureFlow } from "./configure.ts"
 import { createTicketsFlow } from "./create-tickets.ts"
 import { renderAllSkills } from "./index.ts"
 import { devKit } from "./kit.ts"
+import { readyFlow } from "./ready.ts"
 import { syncFlow } from "./sync.ts"
 
 describe("dev flows", () => {
@@ -18,6 +19,8 @@ describe("dev flows", () => {
       "skills/create-tickets-apply/SKILL.md",
       "skills/evaluate/SKILL.md",
       "skills/evaluate-run/SKILL.md",
+      "skills/ready/SKILL.md",
+      "skills/ready-run/SKILL.md",
       "skills/start-work/SKILL.md",
       "skills/sync/SKILL.md",
       "skills/sync-local/SKILL.md",
@@ -103,6 +106,11 @@ describe("dev flows", () => {
         "updateIssue",
         "workspaces",
         "createWorkspace",
+        "prReady",
+        "checks",
+        "checkLog",
+        "reviewThreads",
+        "resolveThread",
       ]),
     )
     for (const op of named) {
@@ -227,6 +235,74 @@ describe("dev flows", () => {
     expect(startWork).toContain("/agent-flows/create-tickets")
     expect(startWork).toContain("ids --plan <create-tickets dir>/match.json")
     expect(skill("create-tickets")).toContain("<dir>/match.json")
+  })
+
+  it("runs ready's cleanup inline, then publishes between two syncs", () => {
+    expect(devKit.describeFlow(readyFlow)).toMatchInlineSnapshot(`
+      "Flow: ready ({{cmd}}ready)
+      Default mode: default
+      Entries:
+        default → main/prepare
+        loop → main/prepare
+        draft → main/prepare
+        help → main/help
+
+      Phase: main
+        main/help [action]
+          default → <end>
+          loop → <end>
+          draft → <end>
+          help → <end>
+        main/prepare [action]
+          default → run/sync-local
+          loop → run/sync-local
+          draft → run/sync-local
+          help → <end>
+      Phase: run
+        run/sync-local [action]
+          default → run/publish
+          loop → run/publish
+          draft → run/publish
+          help → run/publish
+        run/publish [action]
+          default → run/sync-remote
+          loop → run/sync-remote
+          draft → run/sync-remote
+          help → run/sync-remote
+        run/sync-remote [action]
+          default → run/ci
+          loop → run/ci
+          draft → run/ci
+          help → run/ci
+        run/ci [action]
+          default → run/report
+          loop → run/report
+          draft → run/report
+          help → run/report
+        run/report [action]
+          default → <end>
+          loop → <end>
+          draft → <end>
+          help → <end>"
+    `)
+  })
+
+  it("bookends ready's publish with sync local and sync remote", () => {
+    const run =
+      files.find((f) => f.path === "skills/ready-run/SKILL.md")?.content ?? ""
+    const local = run.indexOf(
+      "Run the `/agent-flows:sync` skill with the argument `local`",
+    )
+    const ready = run.indexOf("the `prReady` op")
+    const remote = run.indexOf(
+      "Run the `/agent-flows:sync` skill with the argument `remote`",
+    )
+    const ci = run.indexOf('ready.ts" ci start --sha <sha>')
+    expect(local).toBeGreaterThan(-1)
+    expect(ready).toBeGreaterThan(local)
+    expect(ci).toBeGreaterThan(ready)
+    expect(remote).toBeGreaterThan(ci)
+    expect(run).toContain("Skip in `draft` mode")
   })
 
   it("routes configure through confirm before writing", () => {

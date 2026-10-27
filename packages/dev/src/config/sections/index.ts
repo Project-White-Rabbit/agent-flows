@@ -12,6 +12,7 @@ import { linear } from "./linear.ts"
 import { lore } from "./lore.ts"
 import { neon } from "./neon.ts"
 import { posthog } from "./posthog.ts"
+import { ready } from "./ready.ts"
 import { repo } from "./repo.ts"
 import { sentry } from "./sentry.ts"
 import { slack } from "./slack.ts"
@@ -37,4 +38,4 @@ export const INTEGRATIONS: IntegrationSpec[] = [
   worktree,
 ]
 
-export const SECTIONS: SectionSpec[] = [repo, sync, ...INTEGRATIONS]
+export const SECTIONS: SectionSpec[] = [repo, sync, ready, ...INTEGRATIONS]

@@ -10,7 +10,7 @@ user-invocable: false
 
 ## 1. Show the table and confirm
 
-`<dir>` and the tracker entries are from the `create-tickets-main` skill.
+`<dir>` and the tracker entries are from the *Main* section of the `create-tickets` skill.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/src/commands/tickets.ts" check --plan <dir>/plan.json

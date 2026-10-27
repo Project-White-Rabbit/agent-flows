@@ -1,3 +1,4 @@
+import { checks } from "../adapters/gitlab.ts"
 import type { IntegrationSpec } from "../types.ts"
 import { HOST, SLUG_PATH } from "./patterns.ts"
 
@@ -63,6 +64,12 @@ const KEEP_DRAFT =
 
 const MERGE_STATUS =
   "`has_conflicts` true is conflicting; a `detailed_merge_status` of `need_rebase` is behind, and `checking`, `unchecked`, or `preparing` is pending; anything else is clean"
+
+const STATUSES =
+  "`status` `success` passes; `failed` fails, or is skipping when `allow_failure` is true; `canceled` is cancelled; `skipped` and `manual` are skipping; anything else is pending. Its `link` is `target_url`, and its `log` the job id at the end of a `target_url` ending `/-/jobs/<id>` (none for an outside service's status)"
+
+const THREADS =
+  "Keep the discussions whose first note is `resolvable` and not `resolved`: its `id`, its first note's `position.new_path` and `position.new_line`, and each note's `author.username`, `author.bot`, and `body`"
 
 const MR_FIELDS =
   "`iid`, `web_url`, `title`, `description`, `state`, `draft`, `target_branch`, `source_branch`, `changes_count`; count additions and deletions from the diff"
@@ -137,8 +144,36 @@ export const gitlab: IntegrationSpec = {
         cli: `\`glab mr view <N> ${REPO} --output json\`: ${MERGE_STATUS}`,
         api: `${API}/merge_requests/<N>"\`: ${MERGE_STATUS}`,
       },
+      prReady: {
+        mcp: "The GitLab MCP's update merge request tool for project `{project}` !<N>, with its title without the `Draft: ` prefix",
+        cli: `\`glab mr update <N> ${REPO} --ready\``,
+        api: `\`PUT\` ${API_BARE}/merge_requests/<N>\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`title\`, the current title without its \`Draft: \` prefix`,
+      },
+      // Also an adapter (`adapters/gitlab.ts`), run first: the statuses come
+      // a page at a time.
+      checks: {
+        cli: `\`glab api 'projects/{project:encoded}/repository/commits/<sha>/statuses?per_page=100' --hostname {host|gitlab.com} --paginate\`: ${STATUSES}`,
+        api: `${API}/repository/commits/<sha>/statuses?per_page=100"\`, following \`page\` while a page is full: ${STATUSES}`,
+        mcp: `The GitLab MCP's pipeline jobs for project \`{project}\` at commit <sha>: ${STATUSES}`,
+      },
+      checkLog: {
+        mcp: "The GitLab MCP's job log tool for project `{project}`, job <log>, its last 200 lines",
+        cli: "`glab api projects/{project:encoded}/jobs/<log>/trace --hostname {host|gitlab.com} | tail -200`",
+        api: `${API}/jobs/<log>/trace" | tail -200\``,
+      },
+      reviewThreads: {
+        mcp: `The GitLab MCP's merge request discussions tool for project \`{project}\` !<N>. ${THREADS}`,
+        cli: `\`glab api 'projects/{project:encoded}/merge_requests/<N>/discussions?per_page=100' --hostname {host|gitlab.com} --paginate\`. ${THREADS}`,
+        api: `${API}/merge_requests/<N>/discussions?per_page=100"\`, following \`page\` while a page is full. ${THREADS}`,
+      },
+      resolveThread: {
+        mcp: "The GitLab MCP's tool for resolving a merge request discussion, for project `{project}`, discussion <id>",
+        cli: "`glab api -X PUT 'projects/{project:encoded}/merge_requests/<N>/discussions/<id>?resolved=true' --hostname {host|gitlab.com}`",
+        api: `\`PUT\` ${API_BARE}/merge_requests/<N>/discussions/<id>?resolved=true\` (header \`PRIVATE-TOKEN: {token}\`)`,
+      },
     },
   },
+  adapters: { checks },
   detect(ctx) {
     const remote = ctx.git(["remote", "get-url", "origin"])
     const parsed = remote ? parseGitlabRemote(remote) : undefined

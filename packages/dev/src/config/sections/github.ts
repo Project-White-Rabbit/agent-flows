@@ -1,3 +1,4 @@
+import { checks } from "../adapters/github.ts"
 import type { IntegrationSpec } from "../types.ts"
 import { SLUG } from "./patterns.ts"
 
@@ -36,6 +37,17 @@ const BRANCH_MATCH =
 
 // The fields sync and create-tickets set beyond title and body. GitHub's
 // issues have no priority, estimate, cycle, or due date of their own.
+// Review threads and their comments, which only GraphQL has. Threads past
+// the first 100 are rare enough to page by hand.
+const THREADS_QUERY =
+  "query($owner: String!, $repo: String!, $n: Int!, $after: String) { repository(owner: $owner, name: $repo) { pullRequest(number: $n) { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id isResolved path line comments(first: 20) { nodes { author { login __typename } body } } } } } } }"
+const THREADS =
+  "Keep the threads whose `isResolved` is false, following `endCursor` while `hasNextPage`. An author is a bot when its `__typename` is `Bot` or its login ends in `[bot]`"
+const RESOLVE_MUTATION =
+  "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }"
+const READY_MUTATION =
+  "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { isDraft } } }"
+
 const ISSUE_FIELDS =
   "`<fields>` as `labels` (names; one the repo doesn't have fails the call, so leave it out and say so), `assignee` (a login: for a name or email, the one among `GET /repos/{owner}/{repo}/assignees` whose login or name matches), and `project` (a GitHub project's title: add the issue to it, `gh issue edit <N> --repo {owner}/{repo} --add-project <project>`, which needs the `project` token scope). `priority` only as a label, when the repo has labels for it (`P0` to `P3`, `priority: high`): one, replacing any other priority label. GitHub issues have no estimate, cycle, or due date: leave those out, and say so in the report when the flow set one"
 
@@ -141,6 +153,32 @@ export const github: IntegrationSpec = {
         cli: "`gh pr view <N> --repo {owner}/{repo} --json mergeable,mergeStateStatus`: `CONFLICTING` or `DIRTY` is conflicting, `BEHIND` is behind, an `UNKNOWN` `mergeable` is pending, anything else is clean",
         api: `${API}/pulls/<N>"\`: \`mergeable\` false is conflicting, \`mergeable_state\` \`behind\` is behind, \`mergeable\` null is pending, anything else is clean`,
       },
+      prReady: {
+        mcp: "The GitHub MCP's `update_pull_request` for {owner}/{repo} #<N> with `draft: false`",
+        cli: "`gh pr ready <N> --repo {owner}/{repo}`",
+        api: `${GRAPHQL} with JSON \`query\` \`${READY_MUTATION}\` and \`variables\` \`{"id": "<node_id>"}\`, \`<node_id>\` the pull request's \`node_id\` from ${API}/pulls/<N>"\``,
+      },
+      // Also an adapter (`adapters/github.ts`), run first: two paged lists,
+      // check runs and commit statuses, read as one.
+      checks: {
+        cli: "`gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/check-runs?per_page=100'` and `gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/status?per_page=100'`. A check run is `pending` until its `status` is `completed`, then by `conclusion`: `success` or `neutral` pass, `skipped` is skipping, `cancelled` is cancelled, anything else fails; its `link` is `details_url`, and its `log` its `id` when `app.slug` is `github-actions`. A status (named by `context`) passes on `success`, is pending on `pending`, and fails otherwise, with `link` its `target_url` and no `log`",
+        api: `${API}/commits/<sha>/check-runs?per_page=100"\` and ${API}/commits/<sha>/status?per_page=100"\`, following the \`Link\` header's next pages, read as the CLI variant says`,
+        mcp: "The GitHub MCP's check run and commit status tools for {owner}/{repo} at <sha>, read as the CLI variant says",
+      },
+      checkLog: {
+        mcp: "The GitHub MCP's `get_job_logs` for {owner}/{repo} with `job_id: <log>` and `tail_lines: 200`",
+        cli: "`gh run view --job <log> --log-failed --repo {owner}/{repo} | tail -200` (its failed steps; `--log` for all of it when that prints nothing)",
+        api: `${API}/actions/jobs/<log>/logs" | tail -200\` (it redirects to the log, which \`-L\` follows)`,
+      },
+      reviewThreads: {
+        cli: `\`gh api graphql -f query='${THREADS_QUERY}' -f owner={owner} -f repo={repo} -F n=<N>\` (add \`-f after=<endCursor>\` for the next page). ${THREADS}`,
+        api: `${GRAPHQL} with JSON \`query\` \`${THREADS_QUERY}\` and \`variables\` \`{"owner": "{owner}", "repo": "{repo}", "n": <N>}\`. ${THREADS}`,
+        mcp: "The GitHub MCP's pull request read tool (`pull_request_read` with `method: get_review_comments`) for {owner}/{repo} #<N>: the threads not resolved, each with its comments. An author is a bot when its login ends in `[bot]` or its type is `Bot`",
+      },
+      resolveThread: {
+        cli: `\`gh api graphql -f query='${RESOLVE_MUTATION}' -f id=<id>\``,
+        api: `${GRAPHQL} with JSON \`query\` \`${RESOLVE_MUTATION}\` and \`variables\` \`{"id": "<id>"}\``,
+      },
     },
     // Opt-in (`optIn` below): most repos on GitHub track issues elsewhere.
     issueTracker: {
@@ -185,6 +223,7 @@ export const github: IntegrationSpec = {
     },
   },
   optIn: ["issueTracker"],
+  adapters: { checks },
   detect(ctx) {
     const remote = ctx.git(["remote", "get-url", "origin"])
     const parsed = remote ? parseGithubRemote(remote) : undefined

@@ -369,18 +369,28 @@ function phaseDestination(
   phaseId: string,
   unitPhases: Set<string>,
 ): string {
-  if (!usesPhaseReferences(flow, target)) {
-    return `the ${dispatchSkillRef(target, `${flow.id}-${phaseId}`)} skill`
-  }
   const phase = flow.phases.find((candidate) => candidate.id === phaseId)
   if (phase === undefined) {
     throw new Error(`Unknown phase "${phaseId}" in flow "${flow.id}"`)
   }
+  const title = s(phase.title, target.name, `phase[${phaseId}].title`)
   const fromReference = [...unitPhases].some(
     (id) => !flow.compile.inlinePhases.includes(id),
   )
+  // An inline phase has no file of its own: it's a section of the
+  // orchestrator, the skill named after the flow.
+  const inline = flow.compile.inlinePhases.includes(phaseId)
+  if (!usesPhaseReferences(flow, target)) {
+    return inline
+      ? `the *${title}* section of the ${dispatchSkillRef(target, flow.id)} skill`
+      : `the ${dispatchSkillRef(target, `${flow.id}-${phaseId}`)} skill`
+  }
+  if (inline) {
+    return fromReference
+      ? `the *${title}* section of [the skill](../SKILL.md)`
+      : `the *${title}* section`
+  }
   const prefix = fromReference ? "./" : "references/"
-  const title = s(phase.title, target.name, `phase[${phaseId}].title`)
   return `the [${title}](${prefix}${phaseId}.md) reference`
 }
 
