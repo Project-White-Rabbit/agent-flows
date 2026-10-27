@@ -287,6 +287,16 @@ describe("reuse", () => {
       expect(
         renameBranch({ ...to("sam/other"), from: "sam/new" }, repo),
       ).toMatch(/already pushed/)
+      git("config", "--unset", "branch.sam/new.remote")
+      git("config", "--unset", "branch.sam/new.merge")
+      expect(
+        renameBranch(
+          { ...to("sam/it's"), from: "sam/new" },
+          repo,
+          "git branch -m <name> && echo renamed by the stack",
+        ),
+      ).toBe("RENAMED branch=sam/it's")
+      expect(git("branch", "--show-current")).toBe("sam/it's")
     } finally {
       fs.rmSync(repo, { recursive: true, force: true })
     }

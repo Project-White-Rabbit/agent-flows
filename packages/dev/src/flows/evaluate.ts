@@ -4,6 +4,7 @@ import {
   DEV_COMMANDS,
   devKit,
   REQUIRE_CONFIG,
+  STACK_PARENT,
   USE_INTEGRATIONS,
 } from "./kit.ts"
 
@@ -153,7 +154,7 @@ The skill is read-only. It never writes to source control, the issue tracker, er
           body: `Pure reads.
 
 1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then pick the ref to diff against: \`<base-ref>\` is \`origin/<base>\` when \`git rev-parse --verify --quiet refs/remotes/origin/<base>\` succeeds, else \`<base>\`. Comparing against the remote-tracking ref keeps a stale local base branch from counting already-merged work as this branch's. Don't fetch; use the refs as they are.
-2. **Source control:** \`{{command:configure}} integrations sourceControl --optional\` prints \`{"integrations": {"sourceControl": [...]}}\`: every source-control entry the repo configured (often one, possibly several, possibly none). ${USE_INTEGRATIONS} An entry's id is its \`integration\`, plus \`:<instance>\` when it has one.
+2. **Source control:** \`{{command:configure}} integrations sourceControl stacking --optional\` prints \`{"integrations": {"sourceControl": [...], "stacking": [...]}}\`: every source-control entry the repo configured (often one, possibly several, possibly none), and the stacking entry, if any (the first). ${USE_INTEGRATIONS} An entry's id is its \`integration\`, plus \`:<instance>\` when it has one.
 
    This checkout can only evaluate PRs of its own repository, since the file contents come from it. So keep the **local entries**: those whose repository (from their \`values\`) is one of this checkout's remotes in \`git remote -v\`. Counting every remote, not just \`origin\`, keeps fork workflows working, where the PR lives in \`upstream\`. None configured, or none local, means there's no PR context for the working tree.
 3. **Argument provided?** If the argument is a bare number or a pull (or merge) request URL, it's an explicit PR target:
@@ -163,7 +164,8 @@ The skill is read-only. It never writes to source control, the issue tracker, er
    - Otherwise skip to the {{step-ref:run/gather-diff}} step with \`target = pr:<entry>:<N>\`.
 4. **Current branch:** \`git branch --show-current\`. If it is the base, abort: \`Refusing to evaluate from <base>. Check out the feature branch, or pass an explicit PR number.\`
 5. **PR for current branch (context only):** run each local entry's \`currentPr\` op and stop at the first open PR. If none finds one (or there are no local entries), there is no PR; continue. A PR found here supplies title/body/state context for the report; it does **not** become the diff source, because the working tree may contain work the PR hasn't seen.
-6. **Working tree state:** \`git log --oneline <base-ref>..HEAD\` and \`git status --porcelain\`.
+6. **Parent:** a stacked branch is compared against its parent, not the base, so the review covers only its own work. The source-control entry here is the local one step 5 used (the first local one when it found no PR). ${STACK_PARENT} When the branch's own work starts at a branch other than \`<base>\` (\`<landed>\`, else a \`<parent>\` that isn't \`<base>\`), make that branch the base: \`<base>\` is its name, and \`<base-ref>\` is picked for it as in step 1.
+7. **Working tree state:** \`git log --oneline <base-ref>..HEAD\` and \`git status --porcelain\`.
    - If either is non-empty: \`target = worktree:<branch>\`, covering commits ahead of the base, uncommitted (staged and unstaged) changes, and untracked files.
    - If both are empty and a PR exists (e.g. post-merge): fall back to \`target = pr:<entry>:<number>\`.
    - If both are empty and no PR exists, abort: \`Nothing to evaluate: <branch> has no commits ahead of <base>, a clean working tree, and no PR. Make a change, or pass an explicit PR number.\`

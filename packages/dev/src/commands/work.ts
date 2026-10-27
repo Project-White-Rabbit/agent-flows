@@ -337,11 +337,22 @@ export function describeReuse(reuse: Reuse): string {
   return `${head} branch=${reuse.from} -> ${reuse.branch} name="${reuse.name}" section=${section}${issue}`
 }
 
+/** A value as one single-quoted shell word. */
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
 /**
  * Renames this worktree's branch, refusing when it's pushed (its remote branch
  * and pull request would stay behind under the old name) or the name is taken.
+ * `command` is a stacking integration's `rename` op, run with `<name>` filled
+ * in so the tool's record of the branch follows it; without one, plain git.
  */
-export function renameBranch(reuse: Reuse, cwd?: string): string {
+export function renameBranch(
+  reuse: Reuse,
+  cwd?: string,
+  command?: string,
+): string {
   const who = reuse.ticket?.id ?? "workspace"
   if (reuse.branch === reuse.from) {
     return `KEPT branch=${reuse.branch}`
@@ -359,7 +370,13 @@ export function renameBranch(reuse: Reuse, cwd?: string): string {
   ) {
     return `FAILED ${who} a branch named ${reuse.branch} already exists`
   }
-  const renamed = git("branch", "-m", reuse.branch)
+  const renamed = command
+    ? run(
+        "sh",
+        ["-c", command.replaceAll("<name>", shellQuote(reuse.branch))],
+        cwd,
+      )
+    : git("branch", "-m", reuse.branch)
   return renamed.status === 0
     ? `RENAMED branch=${reuse.branch}`
     : `FAILED ${who} ${(renamed.stderr || renamed.stdout).trim()}`
@@ -529,7 +546,7 @@ function reuse(args: Args): void {
   }
   console.log(describeReuse(planned))
   if (args.has("yes")) {
-    const line = renameBranch(planned)
+    const line = renameBranch(planned, undefined, args.get("rename"))
     console.log(line)
     if (line.startsWith("FAILED")) {
       process.exitCode = 1
@@ -595,7 +612,7 @@ const USAGE = `Usage: work.ts <command>
                   this session runs in, or none.
   reuse (--input <file> | --title "<title>")
         [--section <name> | --section-by-rank | --no-section] [--ranks <names>]
-        [--yes]
+        [--yes [--rename <command>]]
                   Work in this workspace instead of a new one: on the one
                   ticket in <file> (as for plan), or with no ticket on work
                   named <title>. Prints
@@ -606,7 +623,9 @@ const USAGE = `Usage: work.ts <command>
                   for plan. With --yes, it then renames this worktree's
                   branch and prints RENAMED branch=<new>, KEPT branch=<b>
                   when it already fits, or FAILED (exit 1) when the branch
-                  is pushed or the new name is taken.
+                  is pushed or the new name is taken. --rename renames with
+                  <command> (a stacking integration's rename op, its <name>
+                  left in) instead of git branch -m.
   branch-line --description <file> --branch <branch>
                   Add a "> Branch:" line on top of the description in <file>,
                   in place. Prints ADDED <file>, or UNCHANGED when it has one.
