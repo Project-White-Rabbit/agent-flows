@@ -5,6 +5,7 @@ import {
   devKit,
   flowDir,
   REQUIRE_CONFIG,
+  UNKNOWN_FLAGS,
   USE_INTEGRATIONS,
 } from "./kit.ts"
 
@@ -124,7 +125,7 @@ integration (a workspace app, or plain git worktrees); set it up with
           kind: "action",
           title: "Find the issues",
           commandCalls: ["configure", "tickets"],
-          body: `1. **Flags.** Take \`--start-only\`, \`--reuse\`, \`--no-ticket\`, \`--confirm\`, \`--section <name>\`, \`--section-by-rank\`, \`--no-section\`, \`--in <integration>\`, and \`--yes\` out of \`{{argsToken}}\`, and keep them for the later steps. Read plain words the same way: "don't file anything" or "only start them" is \`--start-only\`; "ask me first" is \`--confirm\`; "do it here", "in this workspace", or "reuse this worktree" is \`--reuse\`; "no ticket" or "just rename this" is \`--no-ticket\`, which turns on \`--reuse\`; "put them in Bugs" is \`--section Bugs\`; "sort them into sections by priority" is \`--section-by-rank\`. "Just file them" means this isn't the command: run \`{{cmd}}create-tickets\` with the notes instead, and stop. When more than one of the three section flags is there, say only one can be given, and stop. \`--no-ticket\` can't be combined with issue ids, \`--start-only\`, or \`--section-by-rank\` (there's no issue to rank): say so and stop. \`--yes\` means the caller (such as \`{{cmd}}tickets-to-work\`) already has the person's go-ahead: ignore \`--confirm\` and ask nothing.
+          body: `1. **Flags.** Take \`--start-only\`, \`--reuse\`, \`--no-ticket\`, \`--confirm\`, \`--section <name>\`, \`--section-by-rank\`, \`--no-section\`, \`--in <integration>\`, and \`--yes\` out of \`{{argsToken}}\`, and keep them for the later steps. ${UNKNOWN_FLAGS} Read plain words the same way: "don't file anything" or "only start them" is \`--start-only\`; "ask me first" is \`--confirm\`; "do it here", "in this workspace", or "reuse this worktree" is \`--reuse\`; "no ticket" or "just rename this" is \`--no-ticket\`, which turns on \`--reuse\`; "put them in Bugs" is \`--section Bugs\`; "sort them into sections by priority" is \`--section-by-rank\`. "Just file them" means this isn't the command: run \`{{cmd}}create-tickets\` with the notes instead, and stop. When more than one of the three section flags is there, say only one can be given, and stop. \`--no-ticket\` can't be combined with issue ids, \`--start-only\`, or \`--section-by-rank\` (there's no issue to rank): say so and stop. \`--yes\` means the caller (such as \`{{cmd}}tickets-to-work\`) already has the person's go-ahead: ignore \`--confirm\` and ask nothing.
 2. **Integrations.** \`{{command:configure}} integrations workspaces issueTracker\` (with \`--reuse\`, also \`{{command:configure}} integrations stacking --optional\`: its first entry, if any, renames the branch) and \`{{command:configure}} get repo.baseBranch\`. ${REQUIRE_CONFIG} ${USE_INTEGRATIONS}
    - New workspaces open with the \`workspaces\` entry \`--in\` names (by \`instance\` or \`integration\`), else the first one. Every \`workspaces\` entry is read for workspaces already open.
    - An issue belongs to the \`issueTracker\` entry whose \`issueRef\` it matches. Only an entry at \`level\` \`track\` gets its issues' branch line and state changed; at \`link\` they are only read.

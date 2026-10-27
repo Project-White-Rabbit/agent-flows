@@ -6,6 +6,7 @@ import {
   devKit,
   flowDir,
   REQUIRE_CONFIG,
+  UNKNOWN_FLAGS,
   USE_INTEGRATIONS,
 } from "./kit.ts"
 
@@ -100,6 +101,7 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
    - Every entry is searched. Only entries at \`level\` \`track\` get issues filed or updated: file in the first of those, unless the notes, the user, or the repo's agent instructions name another. An entry at \`link\` is read-only here.
    - In default mode with no entry at \`track\`, stop: \`Every issue tracker here is linked only, so create-tickets can't file. Run {{cmd}}configure <integration> to track issues, or use {{cmd}}create-tickets match to look without filing.\`
 2. **The notes**, from the arguments (minus the mode keyword and flags):
+   - **Flags:** \`--yes\` in default mode, \`--branch <branch>\` in \`match\` mode. ${UNKNOWN_FLAGS}
    - **A URL:** read the page with this session's tools for that site (an MCP server's fetch or read tool; search for deferred ones before deciding there are none), else a plain web fetch. When nothing can read it (it needs a sign-in no tool has), ask the person to paste the page and stop until they do.
    - **Pasted notes** (often a flat list with no headings, copied from a chat channel or a doc) **or a sentence:** use the text as given.
    - **Nothing:** ask for the notes or a link, and stop.
