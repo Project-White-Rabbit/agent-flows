@@ -254,6 +254,7 @@ describe("dev flows", () => {
     )
     expect(takesFlags.map((f) => f.path)).toEqual([
       "skills/create-tickets/SKILL.md",
+      "skills/ready/SKILL.md",
       "skills/start-work/SKILL.md",
       "skills/tickets-to-work/SKILL.md",
     ])
