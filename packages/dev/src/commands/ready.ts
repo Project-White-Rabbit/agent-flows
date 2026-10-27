@@ -244,6 +244,80 @@ export function readyCommands(
   return { configured: fix.length + checks.length > 0, fix, checks }
 }
 
+/** The steps ready can skip, in the order it reaches them. */
+export const READY_STEPS = [
+  "cleanup",
+  "tests",
+  "fix",
+  "checks",
+  "ci",
+  "reviews",
+] as const
+
+export type ReadyStep = (typeof READY_STEPS)[number]
+
+/** Shorthand for every local step, and for every step. */
+const STEP_GROUPS: Record<string, ReadyStep[]> = {
+  local: ["cleanup", "tests", "fix", "checks"],
+  all: [...READY_STEPS],
+}
+
+export type ReadySkips = {
+  /** The steps this run skips: the config's, plus the run's own. */
+  skip: ReadyStep[]
+  /** CI check name patterns this run neither waits on nor fixes. */
+  ignoreChecks: string[]
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : []
+}
+
+/**
+ * The config's `ready.skip` and `ready.ignoreChecks`, with the run's own
+ * `--skip` and `--ignore-check` added. A step it doesn't know is an error, so
+ * a typo can't quietly run the step it meant to skip.
+ */
+export function readySkips(
+  config: Record<string, unknown> | undefined,
+  run: { skip?: string[]; ignoreChecks?: string[] } = {},
+): ReadySkips {
+  const section =
+    config?.ready && typeof config.ready === "object"
+      ? (config.ready as Record<string, unknown>)
+      : {}
+  const named = [...stringList(section.skip), ...(run.skip ?? [])]
+    .flatMap((item) => item.split(","))
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+  const steps = new Set<ReadyStep>()
+  for (const name of named) {
+    const group = STEP_GROUPS[name]
+    if (group) {
+      for (const step of group) {
+        steps.add(step)
+      }
+    } else if ((READY_STEPS as readonly string[]).includes(name)) {
+      steps.add(name as ReadyStep)
+    } else {
+      throw new UsageError(
+        `ready can't skip \`${name}\`: it skips ${READY_STEPS.join(", ")}, local (the first four), or all`,
+      )
+    }
+  }
+  return {
+    skip: READY_STEPS.filter((step) => steps.has(step)),
+    ignoreChecks: [
+      ...new Set([
+        ...stringList(section.ignoreChecks),
+        ...(run.ignoreChecks ?? []),
+      ]),
+    ],
+  }
+}
+
 /** `origin/<base>` when it exists, so a stale local base doesn't widen the diff. */
 function resolveBase(base: string): string {
   if (refExists(`refs/remotes/origin/${base}`)) {
@@ -255,9 +329,15 @@ function resolveBase(base: string): string {
   throw new UsageError(`no branch or ref \`${base}\` (fetch it first?)`)
 }
 
-function plan(flags: Map<string, string>): void {
+function plan(args: string[]): void {
+  const { values: skip, rest: afterSkip } = takeRepeated(args, "skip")
+  const { values: ignoreChecks, rest } = takeRepeated(afterSkip, "ignore-check")
+  const flags = parseFlags(rest)
   const base = requiredFlag(flags, "base")
   const root = gitPath("--show-toplevel")
+  // Read first, so a step it can't skip stops the plan before the fetch.
+  const config = loadConfig(root).config
+  readySkips(config, { skip, ignoreChecks })
   // A stacked parent may exist only locally, so a failed fetch isn't fatal.
   const fetched = run("git", ["fetch", "--quiet", "origin", base]).status === 0
   const baseRef = resolveBase(base)
@@ -291,7 +371,8 @@ function plan(flags: Map<string, string>): void {
     untracked: untracked.length,
     packages: touchedPackages(root, changed),
     instructions: instructionFiles(root, changed),
-    commands: readyCommands(loadConfig(root).config, mergeBase),
+    commands: readyCommands(config, mergeBase),
+    ...readySkips(config, { skip, ignoreChecks }),
     logDir,
   })
 }
@@ -333,6 +414,17 @@ export type CiReport = {
   newFailures: Check[]
   /** Failures of checks the push meant to fix. */
   stalled: string[]
+  /** Checks left out by an ignore pattern: not waited on, never failures. */
+  ignored: string[]
+}
+
+/** A check name pattern, where `*` is any run of characters, case aside. */
+export function matchesCheck(name: string, pattern: string): boolean {
+  const source = pattern
+    .split("*")
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*")
+  return new RegExp(`^${source}$`, "i").test(name)
 }
 
 /** Start (or restart) the pass for a pushed commit. */
@@ -366,10 +458,15 @@ function isFailure(check: Check): boolean {
 export function recordChecks(
   state: ReadyState,
   sha: string,
-  checks: Check[],
+  all: Check[],
   now: Date,
   timeoutSeconds = DEFAULT_TIMEOUT,
+  ignore: string[] = [],
 ): { state: ReadyState; report: CiReport } {
+  const ignored = all.filter((check) =>
+    ignore.some((pattern) => matchesCheck(check.name, pattern)),
+  )
+  const checks = all.filter((check) => !ignored.includes(check))
   let next = state
   if (next.passes.at(-1)?.sha !== sha) {
     next = startPass(next, sha, [], now)
@@ -382,9 +479,11 @@ export function recordChecks(
     Math.round((now.getTime() - Date.parse(pass.startedAt)) / 1000),
   )
   const pending = checks.filter((check) => check.state === "pending")
+  // Every check reported is ignored: nothing left to wait for.
   const noChecks =
     checks.length === 0 &&
-    elapsedSeconds >= Math.min(NO_CHECKS_GRACE, timeoutSeconds)
+    (ignored.length > 0 ||
+      elapsedSeconds >= Math.min(NO_CHECKS_GRACE, timeoutSeconds))
   const settled = noChecks || (checks.length > 0 && pending.length === 0)
   const failures = checks.filter(isFailure)
   const newFailures = failures.filter(
@@ -421,6 +520,7 @@ export function recordChecks(
       stalled: failures
         .map((check) => check.name)
         .filter((name) => pass.fixed.includes(name)),
+      ignored: ignored.map((check) => check.name),
     },
   }
 }
@@ -485,7 +585,7 @@ function numberFlag(
   return n
 }
 
-/** `--fixed` may repeat, so it's taken out before the other flags are parsed. */
+/** A flag that may repeat (`--fixed`), so it's taken out before the other flags are parsed. */
 function takeRepeated(
   args: string[],
   name: string,
@@ -520,7 +620,8 @@ function ciStart(args: string[]): void {
 }
 
 async function ciRecord(args: string[]): Promise<void> {
-  const flags = parseFlags(args)
+  const { values: ignore, rest } = takeRepeated(args, "ignore-check")
+  const flags = parseFlags(rest)
   const sha = requiredFlag(flags, "sha")
   const file = flags.get("file")
   const checks = parseChecks(
@@ -534,6 +635,7 @@ async function ciRecord(args: string[]): Promise<void> {
     checks,
     new Date(),
     numberFlag(flags, "timeout", DEFAULT_TIMEOUT),
+    ignore,
   )
   writeBranchState(dir, branch, state)
   printJson(report)
@@ -552,11 +654,14 @@ export function progressLine(report: CiReport): string {
     report.pending.length > 0
       ? `, ${report.pending.length} pending (${report.pending.slice(0, 5).join(", ")}${report.pending.length > 5 ? ", …" : ""})`
       : ""
-  return `[ready-ci] pass ${report.pass}, ${minutes(report.elapsedSeconds)} of ${minutes(report.timeoutSeconds)}: ${total} checks, ${report.counts.fail + report.counts.cancelled} failed${waiting}`
+  const ignored =
+    report.ignored.length > 0 ? `, ${report.ignored.length} ignored` : ""
+  return `[ready-ci] pass ${report.pass}, ${minutes(report.elapsedSeconds)} of ${minutes(report.timeoutSeconds)}: ${total} checks, ${report.counts.fail + report.counts.cancelled} failed${waiting}${ignored}`
 }
 
 async function ciWait(args: string[]): Promise<void> {
-  const flags = parseFlags(args)
+  const { values: ignore, rest } = takeRepeated(args, "ignore-check")
+  const flags = parseFlags(rest)
   const sha = requiredFlag(flags, "sha")
   const command = requiredFlag(flags, "command")
   const timeout = numberFlag(flags, "timeout", DEFAULT_TIMEOUT)
@@ -600,6 +705,7 @@ async function ciWait(args: string[]): Promise<void> {
         checks,
         new Date(),
         timeout,
+        ignore,
       )
       writeBranchState(dir, branch, state)
       for (const check of report.newFailures) {
@@ -620,28 +726,33 @@ async function ciWait(args: string[]): Promise<void> {
 
 const USAGE = `Usage: ready.ts <subcommand> [flags]
 
-  plan --base <branch>
+  plan --base <branch> [--skip <step>[,<step>]]... [--ignore-check <pattern>]...
       What the branch touches against <branch> (fetched from origin first):
       the merge base, changed files (committed, uncommitted, untracked), the
       package each belongs to with its check scripts, the agent instruction
-      files above them, the config's ready commands, and a log dir.
+      files above them, the config's ready commands, and a log dir. Also the
+      steps to skip (${READY_STEPS.join(", ")}, local for the first four, or
+      all)
+      and the CI checks to ignore: the config's, plus these flags'.
 
   ci start --sha <sha> [--fixed <check>]...
       Start the CI pass for a pushed commit. --fixed names each check the
       push meant to fix, so its failing again reads as stalled.
 
-  ci record --sha <sha> [--file <checks.json>] [--timeout <seconds>]
+  ci record --sha <sha> [--file <checks.json>] [--timeout <seconds>] [--ignore-check <pattern>]...
       Fold one snapshot of the commit's checks (the checks op's JSON, from
       the file or stdin) into its pass, and print where it stands: settled,
-      timedOut, green, noChecks, counts, pending, failures, newFailures, and
-      stalled.
+      timedOut, green, noChecks, counts, pending, failures, newFailures,
+      stalled, and ignored. A check whose name matches an --ignore-check
+      pattern (\`*\` is any run of characters) isn't waited on or failed.
 
-  ci wait --sha <sha> --command <cmd> [--interval <s>] [--timeout <s>] [--max-wait <s>]
+  ci wait --sha <sha> --command <cmd> [--interval <s>] [--timeout <s>] [--max-wait <s>] [--ignore-check <pattern>]...
       Run <cmd> (it prints the checks op's JSON) every --interval seconds
       (${DEFAULT_INTERVAL}), recording each, until the pass settles or has waited --timeout
       seconds (${DEFAULT_TIMEOUT}) since \`ci start\`; --max-wait returns sooner, for a
       host that limits how long a command runs. Progress and each new failure
-      go to stderr; the last record's report to stdout.
+      go to stderr; the last record's report to stdout. --ignore-check as
+      for record.
 
 A pass's state is kept per branch in the repo's git common dir.`
 
@@ -649,7 +760,7 @@ export async function main(argv: string[]): Promise<void> {
   const [command, sub, ...rest] = argv
   try {
     if (command === "plan") {
-      plan(parseFlags([sub, ...rest].filter((a) => a !== undefined)))
+      plan([sub, ...rest].filter((a) => a !== undefined))
     } else if (command === "ci" && sub === "start") {
       ciStart(rest)
     } else if (command === "ci" && sub === "record") {

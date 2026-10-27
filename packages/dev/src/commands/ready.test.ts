@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it } from "vitest"
 import type { Check } from "../config/adapters/checks.ts"
 import {
   instructionFiles,
+  matchesCheck,
   NO_CHECKS_GRACE,
   parseChecks,
   progressLine,
   type ReadyState,
   readyCommands,
+  readySkips,
   recordChecks,
   startPass,
   touchedPackages,
@@ -135,6 +137,63 @@ describe("readyCommands", () => {
   })
 })
 
+describe("readySkips", () => {
+  it("adds the run's skips and ignores to the config's, in step order", () => {
+    expect(
+      readySkips(
+        { ready: { skip: ["ci"], ignoreChecks: ["Vercel*"] } },
+        { skip: ["tests,Fix"], ignoreChecks: ["codecov/*", "Vercel*"] },
+      ),
+    ).toEqual({
+      skip: ["tests", "fix", "ci"],
+      ignoreChecks: ["Vercel*", "codecov/*"],
+    })
+  })
+
+  it("reads local as every local step", () => {
+    expect(readySkips({}, { skip: ["local"] }).skip).toEqual([
+      "cleanup",
+      "tests",
+      "fix",
+      "checks",
+    ])
+  })
+
+  it("reads all as every step", () => {
+    expect(readySkips({ ready: { skip: ["all"] } }).skip).toEqual([
+      "cleanup",
+      "tests",
+      "fix",
+      "checks",
+      "ci",
+      "reviews",
+    ])
+  })
+
+  it("skips nothing without a ready section or flags", () => {
+    expect(readySkips(undefined)).toEqual({ skip: [], ignoreChecks: [] })
+  })
+
+  it("rejects a step it doesn't know, from the config or the run", () => {
+    expect(() => readySkips({ ready: { skip: ["lint"] } })).toThrow(
+      "ready can't skip `lint`",
+    )
+    expect(() => readySkips({}, { skip: ["ci,revews"] })).toThrow(
+      "ready can't skip `revews`",
+    )
+  })
+})
+
+describe("matchesCheck", () => {
+  it("matches the whole name, with * for any run of characters, case aside", () => {
+    expect(matchesCheck("Vercel – Preview", "vercel*")).toBe(true)
+    expect(matchesCheck("codecov/patch", "codecov/*")).toBe(true)
+    expect(matchesCheck("lint", "lint")).toBe(true)
+    expect(matchesCheck("lint (node 22)", "lint")).toBe(false)
+    expect(matchesCheck("a.b", "a?b")).toBe(false)
+  })
+})
+
 const start = new Date("2026-10-26T12:00:00Z")
 const at = (seconds: number) => new Date(start.getTime() + seconds * 1000)
 
@@ -235,6 +294,46 @@ describe("recordChecks", () => {
     expect(report.pass).toBe(2)
     expect(report.elapsedSeconds).toBe(30)
     expect(report.stalled).toEqual(["lint"])
+  })
+
+  it("neither waits on nor fails a check an ignore pattern matches", () => {
+    const { report } = recordChecks(
+      started,
+      "sha1",
+      [
+        check("lint", "pass"),
+        check("Vercel – Preview", "pending"),
+        check("codecov/patch", "fail"),
+      ],
+      at(60),
+      900,
+      ["vercel*", "codecov/*"],
+    )
+    expect(report).toMatchObject({
+      settled: true,
+      green: true,
+      pending: [],
+      failures: [],
+      ignored: ["Vercel – Preview", "codecov/patch"],
+      counts: { pass: 1, fail: 0, pending: 0, skipping: 0, cancelled: 0 },
+    })
+    expect(progressLine(report)).toContain("1 checks, 0 failed, 2 ignored")
+  })
+
+  it("has nothing to wait for when every check is ignored", () => {
+    const { report } = recordChecks(
+      started,
+      "sha1",
+      [check("Vercel", "pending")],
+      at(5),
+      900,
+      ["Vercel"],
+    )
+    expect(report).toMatchObject({
+      settled: true,
+      noChecks: true,
+      green: false,
+    })
   })
 
   it("starts a pass for a commit it hasn't seen", () => {

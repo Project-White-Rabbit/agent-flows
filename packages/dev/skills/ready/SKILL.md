@@ -1,18 +1,18 @@
 ---
 description: Take finished branch work to a ready, green pull request: scoped local cleanup and checks, commit, publish, mark it ready, and fix CI with high confidence. Not for merging, reviewing, or one-off checks.
-argument-hint: "[loop|draft|help]"
+argument-hint: "[loop|draft|help] [--skip <steps>] [--ignore-check <pattern>]..."
 ---
 
 # /agent-flows:ready
 
-Take a branch from "I think I'm done" to "this pull request is ready and green." It bundles scoped local cleanup (what must change together, tests, the repo's own fix and check commands for what the branch touches), `/agent-flows:sync local`, the push and the draft-to-ready flip, `/agent-flows:sync remote`, and a CI fix pass into one command. Local checks cover what the branch touches; CI stays the full-suite backstop. The two sync calls bookend the publish on purpose: `local` commits the cleanup without touching anything remote, publish pushes and marks the pull request ready in one beat, and `remote` refreshes the pull request body and its issue against the published state (so the issue moves to in review). Every vendor-specific action goes through the repo's configured integrations (`/agent-flows:configure`), so the same skill works with any source-control host and CI, with or without a stacking tool.
+Take a branch from "I think I'm done" to "this pull request is ready and green." It bundles scoped local cleanup (what must change together, tests, the repo's own fix and check commands for what the branch touches), `/agent-flows:sync local`, the push and the draft-to-ready flip, `/agent-flows:sync remote`, and a CI fix pass into one command. Local checks cover what the branch touches; CI stays the full-suite backstop. The two sync calls bookend the publish on purpose: `local` commits the cleanup without touching anything remote, publish pushes and marks the pull request ready in one beat, and `remote` refreshes the pull request body and its issue against the published state (so the issue moves to in review). Every vendor-specific action goes through the repo's configured integrations (`/agent-flows:configure`), so the same skill works with any source-control host and CI, with or without a stacking tool. Any step can be skipped, and any CI check ignored, from the config's `ready` section or for one run with `--skip` and `--ignore-check`.
 
 **CLI commands** available via Bash (paths relative to `${CLAUDE_PLUGIN_ROOT}/src/commands/`):
 
 | Command | Description |
 |---------|-------------|
 | `configure.ts <subcommand>` | `get <path>...` prints configured values; `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
-| `ready.ts <subcommand>` | `plan` scopes the branch (merge base, changed files, touched packages and their check scripts, agent instructions, the config's ready commands); `ci start`, `ci record`, and `ci wait` track each pushed commit's CI pass: settled, timed out, new failures, and fixes that didn't work |
+| `ready.ts <subcommand>` | `plan` scopes the branch (merge base, changed files, touched packages and their check scripts, agent instructions, the config's ready commands, and the steps to skip and CI checks to ignore); `ci start`, `ci record`, and `ci wait` track each pushed commit's CI pass: settled, timed out, new failures, and fixes that didn't work |
 
 ## Invariants
 
@@ -43,34 +43,45 @@ Read `$ARGUMENTS` first. If its first token is exactly one of the mode names bel
 If mode is `help`, print the block below verbatim and exit. No reads, no writes.
 
 ```
-/agent-flows:ready  [loop | draft | help]
+/agent-flows:ready  [loop | draft | help] [--skip <steps>] [--ignore-check <pattern>]...
 
 Modes:
   default  One full pass: local cleanup, sync local, publish (push and
            mark ready), sync remote, one CI fix pass. Doesn't wait for
            the run its fixes start.
   loop     Default, then: fix failures locally as they appear, wait for
-           the run to settle, push all fixes at once, and repeat until
-           green or progress stalls.
+           the run to settle, rerun the local checks, push all fixes at
+           once, and repeat until green or progress stalls.
   draft    Leaves the pull request a draft. Everything else still runs.
   help     Show this and exit.
 
+Flags:
+  --skip <steps>            Skip steps for this run, comma-separated:
+                            cleanup, tests, fix, checks, local (those
+                            four), ci, reviews, all (every step: only
+                            commit, publish, and sync)
+  --ignore-check <pattern>  Don't wait on or fix CI checks whose name
+                            matches (* is any run of characters).
+                            Repeatable
+
 Steps (all modes):
   1. Local cleanup: scope the branch, update what must change with it
-     and its tests, then the repo's fix and check commands for what
-     it touches
+     (cleanup) and its tests (tests), then the repo's fix and check
+     commands for what it touches (fix, checks)
   2. /agent-flows:sync local: commit and catch up to the base, no push
   3. Publish: push, open the pull request if there's none, mark it
      ready (not in draft)
   4. /agent-flows:sync remote: refresh the pull request body and its issue
-  5. CI: wait for the checks, fix what's high-confidence, push once
+  5. CI: wait for the checks (ci), and read automated reviewers'
+     threads (reviews); fix what's high-confidence, push once
 
 It uses the integrations in .agent-flows/config.json: source control
 for the pull request, its checks, and its review threads (at write
 level), and a stacking tool when there is one. The config's `ready`
 section can name the fix and check commands; otherwise it runs the
 scripts of each package the branch touches, as the repo's agent
-instructions say.
+instructions say. Its `skip` and `ignoreChecks` lists apply to every
+run; the flags add to them.
 ```
 
 ## 1. Local cleanup
@@ -78,6 +89,8 @@ instructions say.
 **Run only when mode is `default`, `loop` or `draft`.**
 
 Parse the argument for a mode keyword (`loop`, `draft`, `help`). No keyword means default mode.
+
+**Flags:** take `--skip <steps>` (comma-separated, may repeat) and `--ignore-check <pattern>` (may repeat) out of the arguments, for the plan below. Any other argument that starts with `--` is a flag this command doesn't take: name it, print the usage block from `help`, and stop, rather than running without it. A `--` inside pasted notes, a quoted value, or a command the notes quote (`git push --force`) is part of that text, not a flag. Read plain words the same way: "don't write tests" is `--skip tests`; "skip the local checks" is `--skip local`; "don't wait for CI" or "just push it" is `--skip ci`; "ignore the review bots" is `--skip reviews`; "skip everything" or "just publish it" is `--skip all`; "don't wait on the Vercel preview" is `--ignore-check 'Vercel*'`.
 
 Stop the whole flow and tell the user if any part of this step leaves something unresolved (a check it couldn't fix, a source bug a test found, a change elsewhere that needs judgment, a migration). Don't go on to sync with known-broken local state.
 
@@ -89,14 +102,14 @@ Stop the whole flow and tell the user if any part of this step leaves something 
    - **Stacking:** the first entry, if any.
 3. **Pull request:** the source-control entry's `currentPr` op: `<pr>` is its number, or none.
 4. **Parent:** With a stacking entry, its `parent` op. When that succeeds and names a branch other than `<base>`, check it hasn't already merged: the source-control entry's `branchPr` op for it (with no source-control entry, skip the check). Merged means it landed, so `<parent>` is the base that pull request merged into, and `<landed>` is the old parent: `/agent-flows:sync` moves the branch off it (until then, the branch still holds the landed parent's commits, so compare its own work against `<landed>`, not `<parent>`). Otherwise `<parent>` is the branch the op named. When there's no stacking entry, or its `parent` op fails (the branch isn't tracked): the pull request's base branch when there's a pull request, else `<base>`.
-5. **Scope:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" plan --base <landed, else parent>` fetches the parent and prints JSON: `mergeBase` (keep it as `<mergeBase>` for the whole flow, so a base that moves meanwhile doesn't change the scope), `ahead`, `dirty`, `changed` (every file the pull request will hold: committed since the merge base, uncommitted, and untracked), `packages` (each touched package's directory, manifest, how to run its scripts, and its fix and check scripts), `instructions` (the agent instruction files at the root and above each changed file), `commands` (the config's `ready` section, with `{base}` filled in), and `logDir`. If it fails because HEAD is detached, stop and tell the user to check out a branch.
+5. **Scope:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" plan --base <landed, else parent>`, plus each `--skip` and `--ignore-check` from the flags as given (quote each pattern for the shell), fetches the parent and prints JSON: `mergeBase` (keep it as `<mergeBase>` for the whole flow, so a base that moves meanwhile doesn't change the scope), `ahead`, `dirty`, `changed` (every file the pull request will hold: committed since the merge base, uncommitted, and untracked), `packages` (each touched package's directory, manifest, how to run its scripts, and its fix and check scripts), `instructions` (the agent instruction files at the root and above each changed file), `commands` (the config's `ready` section, with `{base}` filled in), `skip` (the steps this run skips: the config's `ready.skip` and the flags'), `ignoreChecks` (the CI check patterns this run ignores: the config's `ready.ignoreChecks` and the flags'), and `logDir`. Keep `skip` and `ignoreChecks` for the whole flow: every step below names the `skip` entry that turns it off. If it fails because HEAD is detached, stop and tell the user to check out a branch; because it can't skip a step, relay its message and the usage block from `help`, and stop.
 6. **Anything to publish?** With no pull request, `ahead` 0, and `dirty` false, stop: `Nothing to publish: no pull request, and no work ahead of <parent>.`
 
 Read every file in `instructions` you haven't already: they're where the repo says what must change together and how to check it, and they win over anything below.
 
 ### 1b. What must change together
 
-Walk the changed files against the repo's rules, from the agent instructions first, then the repo's own evidence:
+**Skip when `skip` has `cleanup`.** Walk the changed files against the repo's rules, from the agent instructions first, then the repo's own evidence:
 
 - **Docs:** a change to a public API, a command, a config field, or an install step, and the docs or README that describe it.
 - **Mirrors:** files the instructions say are kept in step (two implementations of one interface, a rule written in two places, one skill per host).
@@ -108,9 +121,11 @@ Fix what's missing when it's straightforward; flag it when it needs judgment. On
 
 ### 1c. Tests
 
-Find source files in `changed` with new or changed behavior and no matching test change. Write or extend tests for that behavior, following the package's test conventions. When a test shows a source bug, flag it; don't change the source to make it pass.
+**Skip when `skip` has `tests`.** Find source files in `changed` with new or changed behavior and no matching test change. Write or extend tests for that behavior, following the package's test conventions. When a test shows a source bug, flag it; don't change the source to make it pass.
 
 ### 1d. Fix, then check
+
+**Skip the fix commands when `skip` has `fix`, and the check commands when it has `checks`;** with both, skip this step. Skipping `checks` doesn't skip CI: that's `ci`.
 
 **Which commands:** the config's `commands` when `commands.configured` is true: `fix` then `checks`, from the repo root, as given. Otherwise, per touched package, what its agent instructions say to run before committing, else its own scripts from `packages`: fix scripts first (`lint:fix`, `format`, `fix`), then checks in this order: lint and type checks (`lint`, `check`, `validate`, `typecheck`, `tsc`), the **relevant tests**, then `build` when the package builds something the checks read. For a package with no scripts (`manifest` not `package.json`), use its toolchain's usual lint and test commands as its instructions name them. A root package (`dir` `.`) runs only when its own files changed, unless the instructions say its scripts cover the others.
 
@@ -130,7 +145,7 @@ On success that shows up to 20 warning and error lines from anywhere in the log,
 
 ### 1e. Rescan
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" plan --base <landed, else parent>` again. When the edits above touched packages that weren't in `packages` before, run 1d for them. This rescan is what keeps a stale first plan from skipping files the cleanup itself changed.
+Skip when `skip` has both `fix` and `checks`: there's nothing to run for new packages. Otherwise run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" plan --base <landed, else parent>` again, with the same flags. When the edits above touched packages that weren't in `packages` before, run 1d for them. This rescan is what keeps a stale first plan from skipping files the cleanup itself changed.
 
 **Next:**
 

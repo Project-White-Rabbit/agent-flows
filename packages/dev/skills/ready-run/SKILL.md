@@ -41,15 +41,17 @@ Then the `prMergeability` op: `pending` → wait 3 seconds and ask again, up to 
 
 ### Start the CI pass
 
+**Skip when `skip` has `ci`:** no pass, no waiter.
+
 `<sha>` is `git rev-parse HEAD`, the commit just published. Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" ci start --sha <sha>`: it starts this commit's pass (its 15-minute clock, and the record later snapshots are compared against). Print `Ready CI pass <pass>: waiting up to 15 minutes for <short sha>.`
 
 When the `checks` op has a `script` variant that runs here, start the waiter now, in the background if this host can run a command in the background, so the remote sync overlaps the wait:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" ci wait --sha <sha> --command '<the checks op's script variant, with <sha> filled in>'
+node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" ci wait --sha <sha> --command '<the checks op's script variant, with <sha> filled in>' [--ignore-check '<pattern>']...
 ```
 
-It polls every 30 seconds until every check settles or the pass times out, prints `[ready-ci]` progress and each new failure to stderr, and the final report to stdout. Read its progress at least once a minute and relay it in one line. Keep its handle: the CI step joins it, and never starts a second waiter for the same commit. Pinning it to the local `<sha>` keeps a lagging pull request head from making it watch the previous commit. When the host limits how long one command runs, add `--max-wait <a bit under that limit>` and run it again until it settles: the pass's clock started at `ci start`, so a rerun keeps the same deadline.
+with an `--ignore-check` for each entry of `ignoreChecks` from 1a of the *Local cleanup* section of the `ready` skill. It polls every 30 seconds until every check settles or the pass times out, prints `[ready-ci]` progress and each new failure to stderr, and the final report to stdout. Read its progress at least once a minute and relay it in one line. Keep its handle: the CI step joins it, and never starts a second waiter for the same commit. Pinning it to the local `<sha>` keeps a lagging pull request head from making it watch the previous commit. When the host limits how long one command runs, add `--max-wait <a bit under that limit>` and run it again until it settles: the pass's clock started at `ci start`, so a rerun keeps the same deadline.
 
 ## 3. Sync (remote pass)
 
@@ -61,15 +63,21 @@ Run it even when the local sync and the publish changed nothing: an already-publ
 
 Read every check and the automated reviewers' threads, fix what's high-confidence, push, and in `loop` mode repeat. **Every fix must be high-confidence; if it isn't, stop and ask.** High-confidence: a lint, format, or type error with one obvious fix; a test that fails because the test itself is out of date with a change the branch meant to make; a version bump or changelog entry a check requires, made with the repo's own command for it, at the smallest level; generated files regenerated with the repo's command; an automated reviewer's suggestion that is mechanical and unambiguous (a rename, a null check, a missing `await`). Stop and ask when: a test fails for a reason that needs a change to source logic; a type error means a real API change; a review comment needs a judgment call (architecture, scope, behavior); the same failure survives a fix attempt; the failure is in infrastructure, is flaky, or is in code the branch doesn't touch; a version bump past the smallest level looks warranted; it involves a database migration or a dependency or toolchain version; anything unfamiliar. The bar: if you'd write a comment apologizing for a wrong guess, don't make the guess. Hand it back.
 
+**Skips** (`skip` and `ignoreChecks` from 1a of the *Local cleanup* section of the `ready` skill):
+
+- `ci`: don't wait for the checks, read their logs, or fix them. With `reviews` too, skip this step and go to the report. Otherwise handle only the automated reviewers' threads, once: read them, fix and push as below (with no `ci start` after the push), resolve what shipped, and go to the report. `loop` mode has no run to watch, so it makes this one pass.
+- `reviews`: don't read, fix, or resolve review threads, and a green pass doesn't wait on them.
+- `ignoreChecks`: pass an `--ignore-check` for each to every `ci wait` and `ci record`. Those checks aren't waited on, counted, or failed; the report lists them as `ignored`. Never fix an ignored check, even when its failure is plain.
+
 **Settled** means every check has reached `pass`, `skipping`, `fail`, or `cancelled`; a `pending` check isn't settled, and CI is green only once every check settled with none failed. In `loop` mode, prepare fixes for visible failures while other checks still run, but **never commit or push until the commit's checks have all settled**: that keeps the rest of the run's signal and puts every fix from it in one push. A pass waits at most 15 minutes; past that, list what's still pending (`Timed out waiting for checks to settle (15m). Still pending: <names>. These may need manual inspection.`) and exit without pushing partial fixes.
 
 ### Wait for the checks
 
-Join the waiter the publish step started. When there's none (the op has no `script` variant that runs here, or its handle was lost), wait in the foreground: with a `script` variant, `ci wait` as in the publish step; without one, every 30 seconds run the `checks` op for `<sha>`, write its JSON (in the shape the op describes) to a file, and run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" ci record --sha <sha> --file <file>`, until it says `settled` or `timedOut`. Never poll with a second waiter for the same commit.
+Join the waiter the publish step started. When there's none (the op has no `script` variant that runs here, or its handle was lost), wait in the foreground: with a `script` variant, `ci wait` as in the publish step; without one, every 30 seconds run the `checks` op for `<sha>`, write its JSON (in the shape the op describes) to a file, and run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" ci record --sha <sha> --file <file>` (with the `--ignore-check` flags), until it says `settled` or `timedOut`. Never poll with a second waiter for the same commit.
 
-Each report has `settled`, `timedOut`, `green`, `noChecks`, `counts`, `pending`, `failures` (each with its `name`, `state`, `link`, and `log`), `newFailures` (not reported before in this pass), and `stalled`. Use them as given: the last report once settled is the authority for this pass.
+Each report has `settled`, `timedOut`, `green`, `noChecks`, `counts`, `pending`, `failures` (each with its `name`, `state`, `link`, and `log`), `newFailures` (not reported before in this pass), `stalled`, and `ignored` (checks left out by `ignoreChecks`). Use them as given: the last report once settled is the authority for this pass.
 
-- `noChecks`: nothing reported on the commit within 3 minutes, so the repo runs no CI on it. Say so in the report and skip to the review threads.
+- `noChecks`: nothing reported on the commit within 3 minutes, so the repo runs no CI on it, or every check reported is ignored. Say which in the report and skip to the review threads.
 - `timedOut`: list `pending` and stop as above.
 - `stalled` not empty: checks a fix was pushed for failed again. The fix didn't work: stop and hand them to the user with their logs. Don't push again.
 
@@ -79,7 +87,7 @@ In `loop` mode, act on each `newFailures` entry as it arrives (from the waiter's
 
 For each failure with a `log`, the `checkLog` op with `<log>`; read logs for failures visible at the same time in parallel, but edit files one at a time. A failure with no `log` is an outside service's status: its `link` is all there is, so name it in the report rather than guess at it.
 
-Then the `reviewThreads` op for the pull request. A thread is an **automated reviewer's** when its first comment's author is a bot, or is a reviewer the repo's agent instructions name as automated. Read only those threads' comments; leave people's threads to the people (count them for the report). Do this once per settled pass, not on every poll.
+Then, unless `skip` has `reviews`, the `reviewThreads` op for the pull request. A thread is an **automated reviewer's** when its first comment's author is a bot, or is a reviewer the repo's agent instructions name as automated. Read only those threads' comments; leave people's threads to the people (count them for the report). Do this once per settled pass, not on every poll.
 
 ### Categorize
 
@@ -100,7 +108,7 @@ On a **stop** bucket, don't attempt the uncertain fix and don't push any partial
 
 Apply the high-confidence fixes in this order, so later ones build on earlier ones: local check misses, then required bookkeeping, then automated review suggestions. After each bucket, `git status --short` must show a change; a fix that produced no diff is a stalled fix: stop and surface it.
 
-Once the commit's checks have all settled, with no stop bucket and at least one fix, commit them in one batch: `git add -A`, then `git commit -m "<message>"` in the repo's convention (`CI: address review comments`, say). Push as the publish step does: the stacking entry's `submit`, else `git push origin HEAD`. The push leaves the pull request's draft or ready state alone. Then:
+Once the commit's checks have all settled, with no stop bucket and at least one fix, **rerun the local checks** on the batch before committing it, so a fix push never trades one failure for another: the fix commands, then the check commands, chosen as in 1d of the *Local cleanup* section of the `ready` skill (the config's `commands`, else the touched packages' scripts with the relevant tests), run and capped the same way, minus what `skip` turns off there (`fix`, `checks`). Rerun them for every package the branch touches, not only the ones the fixes did. A failure the batch caused gets a high-confidence fix and another rerun; one it didn't cause, or one that survives a fix, is a stop: report it and don't push. Then commit them in one batch: `git add -A`, then `git commit -m "<message>"` in the repo's convention (`CI: address review comments`, say). Push as the publish step does: the stacking entry's `submit`, else `git push origin HEAD`. The push leaves the pull request's draft or ready state alone. Then:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" ci start --sha <the new HEAD> --fixed <check name>...
@@ -113,7 +121,7 @@ with a `--fixed` for each failed check the batch meant to fix, so the next pass 
 ### Loop or exit
 
 - **`default` and `draft` mode:** one pass. Go to the report; don't wait for the run the fix push started.
-- **`loop` mode:** a stop bucket or a stalled fix ends it: report the blockers and exit without pushing. A fix push starts the next pass: print `Ready CI pass <pass>: waiting up to 15 minutes for <short sha>.`, start one waiter for the new commit as the publish step does, and come back to *Wait for the checks*. A pass that settled green, with no automated reviewer's thread left unresolved, ends it successfully. Report success only for a commit you saw go green; never because a number of passes or minutes went by.
+- **`loop` mode:** a stop bucket or a stalled fix ends it: report the blockers and exit without pushing. A fix push starts the next pass: print `Ready CI pass <pass>: waiting up to 15 minutes for <short sha>.`, start one waiter for the new commit as the publish step does, and come back to *Wait for the checks*. A pass that settled green, with no automated reviewer's thread left unresolved (unless `skip` has `reviews`), ends it successfully. Report success only for a commit you saw go green; never because a number of passes or minutes went by.
 
 `loop` mode is a long-running foreground task by design: the user asked you to sit on it. Run the waiter in the background only so you can keep fixing while it waits, never to end your turn and come back later.
 
@@ -121,10 +129,10 @@ with a `--fixed` for each failed check the batch meant to fix, so the next pass 
 
 Lead with anything that needs the user's attention: every stop bucket and stalled fix with the check's name and log tail, what you would have done and why you didn't, a failed remote sync, a timeout. Don't bury it under the rest. Then:
 
-- **Mode** that ran (`default`, `loop`, or `draft`).
+- **Mode** that ran (`default`, `loop`, or `draft`), the steps it skipped, and the CI check patterns it ignored, each with where it came from (the config or a flag).
 - **Local cleanup:** clean, fixed N things (what changed together, tests written, check fixes), or surfaced N for the user; the packages checked and with which commands.
 - **Sync (local):** committed, caught up (and any conflicts resolved, by file), or nothing to do.
 - **Publish:** pushed or already published; pull request opened or existing; marked ready, already ready, or left a draft in `draft` mode; its mergeability.
 - **Sync (remote):** the pull request and issue URLs, and the issue's state.
-- **CI:** in `loop` mode, the passes it waited on, the fix pushes, the final state of the checks, and which exit it took; otherwise, what the one pass fixed and pushed, and what's left for the next run. Pass and fail counts for the last settled commit.
-- **Review threads:** `Automated review: N open / M resolved this run`, always, even when both are 0, and the number of people's threads still open.
+- **CI:** in `loop` mode, the passes it waited on, the fix pushes, the final state of the checks, and which exit it took; otherwise, what the one pass fixed and pushed, and what's left for the next run. Pass and fail counts for the last settled commit, and the checks it ignored. With `ci` skipped: `CI: skipped`.
+- **Review threads:** `Automated review: N open / M resolved this run`, always, even when both are 0, and the number of people's threads still open. With `reviews` skipped: `Automated review: skipped`.
