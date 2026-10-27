@@ -21,6 +21,7 @@ export const devKit = createFlowKit({
 
 export const DEV_COMMANDS = defineCommandCatalog({
   configure: { file: "configure.ts" },
+  ready: { file: "ready.ts" },
   sync: { file: "sync.ts" },
   tickets: { file: "tickets.ts" },
   work: { file: "work.ts" },

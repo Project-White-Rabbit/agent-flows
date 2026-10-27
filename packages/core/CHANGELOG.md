@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- `{{skill-ref:<phase>}}` and `{{dispatch-ref:<phase>}}` naming a phase in `inlinePhases`, from another unit, render as "the *<Phase Title>* section of the `<flow>` skill" (with phase references: "the *<Phase Title>* section of [the skill](../SKILL.md)"). They used to name a `<flow>-<phase>` skill or `references/<phase>.md` file that is never generated, since an inline phase is part of the orchestrator. Flows that use them render differently: regenerate.
+
 ## [0.1.2]
 
 ### Fixed

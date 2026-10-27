@@ -10,7 +10,7 @@ user-invocable: false
 
 ## 1. File and report
 
-After a yes (or with `--yes` and nothing to ask). `<dir>` and the tracker entries are from the `create-tickets-main` skill.
+After a yes (or with `--yes` and nothing to ask). `<dir>` and the tracker entries are from the *Main* section of the `create-tickets` skill.
 
 Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/tickets.ts" check --plan <dir>/plan.json` once more for the final row order, then go through the rows in order. An item files in its `tracker` entry, else the first entry at `track`.
 

@@ -315,14 +315,14 @@ export function branchFile(dir: string, branch: string): string {
   return path.join(dir, `${encodeURIComponent(branch)}.json`)
 }
 
-export function readBranchState(
+export function readBranchState<T extends object = BranchState>(
   dir: string,
   branch: string,
-): BranchState | undefined {
+): T | undefined {
   try {
     const parsed = JSON.parse(fs.readFileSync(branchFile(dir, branch), "utf8"))
     if (parsed && typeof parsed === "object") {
-      return parsed as BranchState
+      return parsed as T
     }
   } catch {
     // Missing or unreadable: start over, which only costs one full sync.
@@ -335,10 +335,10 @@ export function readBranchState(
  * of one, and forget branches that no longer exist, so the dir doesn't grow
  * forever.
  */
-export function writeBranchState(
+export function writeBranchState<T extends object = BranchState>(
   dir: string,
   branch: string,
-  state: BranchState,
+  state: T,
   exists: (branch: string) => boolean = (b) => refExists(`refs/heads/${b}`),
 ): void {
   fs.mkdirSync(dir, { recursive: true })

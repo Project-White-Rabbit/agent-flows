@@ -14,6 +14,10 @@ const ISSUE_FIELDS =
 const PR_FIELDS =
   "number, url, title, body, state, whether it's a draft, base and head branches, additions, deletions, and changed-file count"
 
+// What the `checks` op prints, so `ready.ts ci` can read any host's checks.
+const CHECKS_SHAPE =
+  '`{"checks": [{"name", "state", "link", "log"}]}`, with `state` one of `pass`, `fail`, `pending` (queued or running), `skipping` (skipped, or allowed to fail), or `cancelled`, `link` the check\'s page, and `log` the id `checkLog` reads its log by, left out when the host keeps no log for it (an outside service\'s status)'
+
 export const CAPABILITIES: CapabilitySpec[] = [
   {
     id: "sourceControl",
@@ -24,7 +28,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
       {
         id: "write",
         description:
-          "Also push branches and open and edit draft pull requests (sync)",
+          "Also push branches, open and edit draft pull requests (sync), mark them ready, and resolve review threads (ready)",
       },
     ],
     defaultLevel: "write",
@@ -42,6 +46,14 @@ export const CAPABILITIES: CapabilitySpec[] = [
         "Set pull request <N>'s title to <title> and its body to the file <body-file>, leaving its draft or ready state alone",
       prMergeability:
         "Whether pull request <N> merges cleanly into its base: `clean`, `conflicting`, `behind` (the base moved and the host wants it caught up), or `pending` (the host is still computing it)",
+      prReady:
+        "Mark pull request <N> ready for review. One that's already ready stays as it is",
+      checks: `Every CI check and commit status on commit <sha>, all pages, as JSON: ${CHECKS_SHAPE}. An empty list means none has reported yet`,
+      checkLog:
+        "The last 200 lines of the log of check <log> (a check's `log` from the `checks` op)",
+      reviewThreads:
+        "Pull request <N>'s unresolved review threads, all pages: each with its id, file path and line, and its comments oldest first, each with its author, whether the author is a bot, and its text",
+      resolveThread: "Mark review thread <id> on pull request <N> resolved",
     },
   },
   {

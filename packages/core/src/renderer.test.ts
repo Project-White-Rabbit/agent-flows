@@ -2428,6 +2428,33 @@ describe("renderFlow: split-chain (tail-call dispatch)", () => {
     )
   })
 
+  it("resolves a placeholder naming an inline phase to its section of the orchestrator", () => {
+    // An inline phase has no sub-skill or reference file of its own, so a
+    // sub-skill pointing back at it names the orchestrator, the flow's skill.
+    const base = makeChainFlow()
+    const flow = makeChainFlow({
+      phases: base.phases.map((phase) => ({
+        ...phase,
+        steps: phase.steps.map((step) => ({
+          ...step,
+          body: "Values are from {{skill-ref:setup}}.",
+        })),
+      })),
+    })
+    const claudePlugin = renderFlow(flow, TARGETS.claude).find(
+      (file) => file.slug === "plugin",
+    )?.content
+    expect(claudePlugin).toContain(
+      "Values are from the *Setup* section of the `test` skill.",
+    )
+    expect(claudePlugin).not.toContain("test-setup")
+    const codex = renderFlow(flow, TARGETS.codex)
+    expect(codex.find((file) => file.slug === "plugin")?.content).toContain(
+      "Values are from the *Setup* section of [the skill](../SKILL.md).",
+    )
+    expect(codex[0].content).toContain("Values are from the *Setup* section.")
+  })
+
   it("contrasts dispatch against done when one mode tails on and another terminates", () => {
     const plugin = fileFor(makeChainFlow(), "plugin")
     expect(plugin).toContain(
