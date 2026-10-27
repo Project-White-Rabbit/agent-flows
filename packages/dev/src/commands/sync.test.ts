@@ -289,7 +289,7 @@ describe("spliceBlock without markers", () => {
     "_Last synced: 2026-10-20 10:00 UTC (HEAD: 0000000)_",
   ].join("\n")
   const ours = [
-    "> Linear: [ENG-1: Fix login](https://l/ENG-1)",
+    "> Linear: [ENG-1](https://l/ENG-1) Fix login",
     "> Sentry: Fixes WEB-4P ([WEB-4P](https://s/WEB-4P))",
     "> Lore: [Session](https://lore/t/2)",
     "",
@@ -356,7 +356,7 @@ describe("spliceBlock without markers", () => {
   it("replaces capability-labeled lines with integration-labeled ones", () => {
     const old = spliceBlock(
       "",
-      "> Issue: [ENG-1: Fix login](https://l/ENG-1)\n> Errors: WEB-4P ([WEB-4P](https://s/WEB-4P))\n\n## Summary\n\n- x\n\n" +
+      "> Issue: [ENG-1](https://l/ENG-1) Fix login\n> Errors: WEB-4P ([WEB-4P](https://s/WEB-4P))\n\n## Summary\n\n- x\n\n" +
         stamp,
       { markers: false },
     )
