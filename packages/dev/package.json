@@ -1,7 +1,7 @@
 {
   "name": "@agent-flows/dev",
   "private": true,
-  "description": "Dev workflow commands for any repository, compiled from agent-flows and shipped as the agent-flows plugin",
+  "description": "Dev workflow commands for any repository, compiled from agent-flows and shipped as the dev-flows plugin",
   "license": "MIT",
   "author": "Bitfab",
   "type": "module",

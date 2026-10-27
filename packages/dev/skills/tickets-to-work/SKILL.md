@@ -3,9 +3,9 @@ description: Go through your open issues that have no pull request or workspace 
 argument-hint: "[--priority <ranks>] [--limit <n>] [--section <name> | --section-by-rank] [--in <integration>] [help]"
 ---
 
-# /agent-flows:tickets-to-work
+# /dev-flows:tickets-to-work
 
-Walks through the open issues assigned to you that have no pull request, workspace, or git worktree yet, most urgent first, and decides each one with you: start it (through `/agent-flows:start-work`: a workspace with a coding agent on it, and the issue moved to in progress), skip it, or close it. One issue at a time, one question each. Issues are read and closed through the repo's configured issue tracker, and workspaces through its workspaces integration (`/agent-flows:configure`).
+Walks through the open issues assigned to you that have no pull request, workspace, or git worktree yet, most urgent first, and decides each one with you: start it (through `/dev-flows:start-work`: a workspace with a coding agent on it, and the issue moved to in progress), skip it, or close it. One issue at a time, one question each. Issues are read and closed through the repo's configured issue tracker, and workspaces through its workspaces integration (`/dev-flows:configure`).
 
 **CLI commands** available via Bash (paths relative to `${CLAUDE_PLUGIN_ROOT}/src/commands/`):
 
@@ -16,7 +16,7 @@ Walks through the open issues assigned to you that have no pull request, workspa
 
 ## Invariants
 
-- **Act through the integrations' ops.** Issues are read and closed, and workspaces listed, only through the ops `configure.ts integrations` returns, run as given; workspaces open only through `/agent-flows:start-work`.
+- **Act through the integrations' ops.** Issues are read and closed, and workspaces listed, only through the ops `configure.ts integrations` returns, run as given; workspaces open only through `/dev-flows:start-work`.
 - **The person decides every issue.** One question per issue, never several in one, never skipped because the answer looks obvious.
 
 ## 0. Help shortcut
@@ -26,7 +26,7 @@ Walks through the open issues assigned to you that have no pull request, workspa
 If the argument is `help`, print the block below verbatim and stop.
 
 ```
-/agent-flows:tickets-to-work  [--priority <ranks>] [--limit <n>]
+/dev-flows:tickets-to-work  [--priority <ranks>] [--limit <n>]
                               [--section <name> | --section-by-rank]
                               [--in <integration>] [help]
 
@@ -34,7 +34,7 @@ Goes through your open issues that have no pull request, workspace, or git
 worktree yet, most urgent first (then the ones blocking other work, then
 the earliest due), and asks about each one:
   - Start: opens a workspace with a coding agent on it and moves the issue
-    to in progress (/agent-flows:start-work)
+    to in progress (/dev-flows:start-work)
   - Skip: leaves it for later
   - Close: moves it to canceled (or done, if you say so)
   - Stop: ends the run
@@ -53,7 +53,7 @@ An issue with open sub-issues is left out: its sub-issues are the work.
 ## 1. List the issues
 
 1. **Flags.** Take `--priority <ranks>`, `--limit <n>`, `--section <name>`, `--section-by-rank`, and `--in <integration>` out of `$ARGUMENTS`. Any other argument that starts with `--` is a flag this command doesn't take: name it, print the usage block from `help`, and stop, rather than running without it. A `--` inside pasted notes, a quoted value, or a command the notes quote (`git push --force`) is part of that text, not a flag. Read plain words the same way: "only urgent and P0" is `--priority urgent,p0`, "just 5" or "top 5" is `--limit 5`, "sort them into sections by priority" is `--section-by-rank`. When both `--section-by-rank` and `--section` are given, `--section-by-rank` wins: say once that `--section` is ignored.
-2. **Integrations.** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" integrations issueTracker workspaces`. If it exits with status 2 and prints `"configured": false`, stop this command here. Relay its `message`: the repo isn't set up for agent-flows yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `/agent-flows:configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead. Each entry is one configured integration, or one instance of an integration configured more than once (two repositories on one host, told apart by `instance`): its `values`, its `access` (how this machine can reach it), and its `ops`. An op says how that integration does the job, with config values already filled in and `<N>`-style placeholders for you to fill: one string when it's the same however you reach the integration, else one variant per way to reach it. For each op, use the first variant, in the order the op lists them, whose way works here: `script` (an adapter: the op as code, built in or the repo's own; run it, and when it exits 3 it can't run here, so go on to the next), `mcp` when this session has tools from an MCP server whose name contains `access.mcp.server` (tools that are deferred, or from a server still connecting, count: search for them with your tool search before deciding they're missing), `cli` when `access.cli.ready` (installed and signed in), `api` when `access.api.ready` (the variant reads the token from the variable `access.api.token` names; never print or echo a token). Most ops list MCP, then CLI, then API; one that lists them otherwise does so because that way is more exact. Run the chosen variant as given rather than a tool you know. When no variant of an op works, don't improvise one: tell the user what would make it work (connect the MCP server, install the CLI or sign in with `access.cli.auth`, or set the token variable) and treat that action as unavailable. An entry's `level`, for a capability that has levels, is how far the team lets flows go with that integration (set by configure, from the capability's levels); never do more with it than its level allows. A capability can have several integrations, and the skill works the same with any of them. Closing an issue needs its entry at `level` `track`; at `link`, its issues can be started or skipped, not closed.
+2. **Integrations.** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" integrations issueTracker workspaces`. If it exits with status 2 and prints `"configured": false`, stop this command here. Relay its `message`: the repo isn't set up for dev-flows yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `/dev-flows:configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead. Each entry is one configured integration, or one instance of an integration configured more than once (two repositories on one host, told apart by `instance`): its `values`, its `access` (how this machine can reach it), and its `ops`. An op says how that integration does the job, with config values already filled in and `<N>`-style placeholders for you to fill: one string when it's the same however you reach the integration, else one variant per way to reach it. For each op, use the first variant, in the order the op lists them, whose way works here: `script` (an adapter: the op as code, built in or the repo's own; run it, and when it exits 3 it can't run here, so go on to the next), `mcp` when this session has tools from an MCP server whose name contains `access.mcp.server` (tools that are deferred, or from a server still connecting, count: search for them with your tool search before deciding they're missing), `cli` when `access.cli.ready` (installed and signed in), `api` when `access.api.ready` (the variant reads the token from the variable `access.api.token` names; never print or echo a token). Most ops list MCP, then CLI, then API; one that lists them otherwise does so because that way is more exact. Run the chosen variant as given rather than a tool you know. When no variant of an op works, don't improvise one: tell the user what would make it work (connect the MCP server, install the CLI or sign in with `access.cli.auth`, or set the token variable) and treat that action as unavailable. An entry's `level`, for a capability that has levels, is how far the team lets flows go with that integration (set by configure, from the capability's levels); never do more with it than its level allows. A capability can have several integrations, and the skill works the same with any of them. Closing an issue needs its entry at `level` `track`; at `link`, its issues can be started or skipped, not closed.
 3. **The issues.** `<dir>` is `git rev-parse --absolute-git-dir` plus `/agent-flows/tickets-to-work` (create it). Run every `issueTracker` entry's `assignedIssues` op and every `workspaces` entry's `workspaces` op, and write them to `<dir>/issues.json`:
 
    ```json
@@ -88,7 +88,7 @@ Take the issues in the printed order, one at a time. Each gets its own question,
 
 Act on the answer before asking about the next issue:
 
-- **Start:** run the `/agent-flows:start-work` skill with `<ID> --yes`, plus `--section-by-rank` when it was given, else `--section "<name>"` when that was, else `--no-section` (so the workspace lands in no section rather than this one's), plus `--in <integration>` when given, and follow it through. The answer is the go-ahead, which is what `--yes` tells it, so it doesn't ask again. Report its row for the issue; on a failure, say so and keep going.
+- **Start:** run the `/dev-flows:start-work` skill with `<ID> --yes`, plus `--section-by-rank` when it was given, else `--section "<name>"` when that was, else `--no-section` (so the workspace lands in no section rather than this one's), plus `--in <integration>` when given, and follow it through. The answer is the go-ahead, which is what `--yes` tells it, so it doesn't ask again. Report its row for the issue; on a failure, say so and keep going.
 - **Skip:** move on.
 - **Close:** the entry's `updateIssue` op with only the state `canceled`, or `done` when the person says the work is already done. Leave the title, description, and fields out.
 - **Stop:** go to the report.

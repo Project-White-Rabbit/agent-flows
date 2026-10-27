@@ -1,10 +1,10 @@
 ---
 name: ready-run
-description: Run phase of the /agent-flows:ready flow. Invoked by the ready flow; not run directly
+description: Run phase of the /dev-flows:ready flow. Invoked by the ready flow; not run directly
 user-invocable: false
 ---
 
-# /agent-flows:ready: Run
+# /dev-flows:ready: Run
 
 **Mode:** you were dispatched with a mode (`default` or `loop` or `draft`); which steps apply and where they route below depend on it.
 
@@ -12,7 +12,7 @@ user-invocable: false
 
 ## 1. Sync (local pass)
 
-Run the `/agent-flows:sync` skill with the argument `local`: invoke it, don't redo its steps. It commits pending work (the cleanup included), catches up to the base, and leaves the branch ahead of its remote; `local` never pushes, opens a pull request, or touches the issue. The publish step owns the push.
+Run the `/dev-flows:sync` skill with the argument `local`: invoke it, don't redo its steps. It commits pending work (the cleanup included), catches up to the base, and leaves the branch ahead of its remote; `local` never pushes, opens a pull request, or touches the issue. The publish step owns the push.
 
 When sync stops (a conflict it needs you for, a hook it couldn't satisfy), stop too and pass its message on.
 
@@ -33,7 +33,7 @@ Skip the push when the branch's remote has this exact commit: `git fetch origin 
 
 When there's still none (no stacking integration, or one whose `submit` didn't open it): the `prCreate` op with `<base>` `<parent>`, a title in the repo's convention (its agent instructions, then the shape of recent subjects on the base, `git log -20 --format=%s <parent>`), and an empty body file. The remote sync below writes the body; anything put there now would survive it as text outside sync's block. Quote the title for the shell: single quotes, with any `'` written as `'\''`.
 
-Then the `prMergeability` op: `pending` → wait 3 seconds and ask again, up to 3 times, then treat it as clean; `conflicting` or `behind` → run the `/agent-flows:sync` skill with `local` once more, push again, and ask again. Still not clean: stop and show the user what the op returned.
+Then the `prMergeability` op: `pending` → wait 3 seconds and ask again, up to 3 times, then treat it as clean; `conflicting` or `behind` → run the `/dev-flows:sync` skill with `local` once more, push again, and ask again. Still not clean: stop and show the user what the op returned.
 
 ### Mark ready
 
@@ -53,7 +53,7 @@ It polls every 30 seconds until every check settles or the pass times out, print
 
 ## 3. Sync (remote pass)
 
-Run the `/agent-flows:sync` skill with the argument `remote`. It refreshes everything outside the git tree against the published state: the pull request's body and title, the issue's description and Status, and the issue's state, which follows the pull request (now `in review` once it's ready; still `in progress` in `draft` mode). It never commits, pushes, or creates a pull request, so the push above has to come first.
+Run the `/dev-flows:sync` skill with the argument `remote`. It refreshes everything outside the git tree against the published state: the pull request's body and title, the issue's description and Status, and the issue's state, which follows the pull request (now `in review` once it's ready; still `in progress` in `draft` mode). It never commits, pushes, or creates a pull request, so the push above has to come first.
 
 Run it even when the local sync and the publish changed nothing: an already-published pull request can still need its links or issue state refreshed. When it fails, say so in the report and carry on to CI: the remote sync can be re-run on its own.
 

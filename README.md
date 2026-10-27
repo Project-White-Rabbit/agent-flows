@@ -10,12 +10,12 @@ Write an agent workflow once as typed data. Compile it into skill files for each
 | Package | Description |
 |---|---|
 | [`@agent-flows/core`](packages/core) [![npm](https://img.shields.io/npm/v/@agent-flows/core)](https://www.npmjs.com/package/@agent-flows/core) | Typed flow schema and compiler that renders flows into skill files |
-| [`@agent-flows/dev`](packages/dev) | Dev workflow commands for any repository, shipped as the `agent-flows` Claude Code plugin |
+| [`@agent-flows/dev`](packages/dev) | Dev workflow commands for any repository, shipped as the `dev-flows` Claude Code plugin |
 
 ## Install the plugin
 
 ```
-/plugin install agent-flows --marketplace Project-White-Rabbit/agent-flows
+/plugin install dev-flows --marketplace Project-White-Rabbit/agent-flows
 ```
 
 ## Contributing

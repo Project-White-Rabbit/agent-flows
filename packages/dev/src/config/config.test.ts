@@ -175,7 +175,7 @@ describe("migrate", () => {
 
   it("rejects a config from a newer plugin instead of misreading it", () => {
     expect(migrate({ version: 3 }, migrations, 2).issues).toEqual([
-      expect.stringContaining("upgrade the agent-flows plugin"),
+      expect.stringContaining("upgrade the dev-flows plugin"),
     ])
   })
 

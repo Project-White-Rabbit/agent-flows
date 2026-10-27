@@ -8,7 +8,7 @@ body:
       label: Package
       options:
         - "@agent-flows/core"
-        - agent-flows plugin (@agent-flows/dev)
+        - dev-flows plugin (@agent-flows/dev)
     validations:
       required: true
   - type: input

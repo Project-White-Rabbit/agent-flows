@@ -1,10 +1,10 @@
 ---
 name: sync-report
-description: Report phase of the /agent-flows:sync flow. Invoked by the sync flow; not run directly
+description: Report phase of the /dev-flows:sync flow. Invoked by the sync flow; not run directly
 user-invocable: false
 ---
 
-# /agent-flows:sync: Report
+# /dev-flows:sync: Report
 
 **Mode:** you were dispatched with a mode (`default` or `local` or `remote`); which steps apply and where they route below depend on it.
 

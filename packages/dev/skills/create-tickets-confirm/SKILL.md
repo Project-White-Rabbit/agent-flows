@@ -1,10 +1,10 @@
 ---
 name: create-tickets-confirm
-description: Confirm phase of the /agent-flows:create-tickets flow. Invoked by the create-tickets flow; not run directly
+description: Confirm phase of the /dev-flows:create-tickets flow. Invoked by the create-tickets flow; not run directly
 user-invocable: false
 ---
 
-# /agent-flows:create-tickets: Confirm
+# /dev-flows:create-tickets: Confirm
 
 **Run only when mode is `default`.**
 

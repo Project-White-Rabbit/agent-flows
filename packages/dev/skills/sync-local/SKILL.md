@@ -1,10 +1,10 @@
 ---
 name: sync-local
-description: Local sync phase of the /agent-flows:sync flow. Invoked by the sync flow; not run directly
+description: Local sync phase of the /dev-flows:sync flow. Invoked by the sync flow; not run directly
 user-invocable: false
 ---
 
-# /agent-flows:sync: Local sync
+# /dev-flows:sync: Local sync
 
 **Mode:** you were dispatched with a mode (`default` or `local`); which steps apply and where they route below depend on it.
 
@@ -22,7 +22,7 @@ Only when `onBase` is true. Create the branch before anything else, and don't st
 
 ### 2b. Track the stack
 
-Find `<parent>` (and `<landed>`, when the parent already merged): With a stacking entry, its `parent` op. When that succeeds and names a branch other than `<base>`, check it hasn't already merged: the source-control entry's `branchPr` op for it (with no source-control entry, skip the check). Merged means it landed, so `<parent>` is the base that pull request merged into, and `<landed>` is the old parent: `/agent-flows:sync` moves the branch off it (until then, the branch still holds the landed parent's commits, so compare its own work against `<landed>`, not `<parent>`). Otherwise `<parent>` is the branch the op named. When there's no stacking entry, or its `parent` op fails (the branch isn't tracked): the pull request's base branch when there's a pull request, else `<base>`. When the stacking entry's `parent` op failed, the branch isn't tracked: run its `track` op with that `<parent>`.
+Find `<parent>` (and `<landed>`, when the parent already merged): With a stacking entry, its `parent` op. When that succeeds and names a branch other than `<base>`, check it hasn't already merged: the source-control entry's `branchPr` op for it (with no source-control entry, skip the check). Merged means it landed, so `<parent>` is the base that pull request merged into, and `<landed>` is the old parent: `/dev-flows:sync` moves the branch off it (until then, the branch still holds the landed parent's commits, so compare its own work against `<landed>`, not `<parent>`). Otherwise `<parent>` is the branch the op named. When there's no stacking entry, or its `parent` op fails (the branch isn't tracked): the pull request's base branch when there's a pull request, else `<base>`. When the stacking entry's `parent` op failed, the branch isn't tracked: run its `track` op with that `<parent>`.
 
 ### 2c. Commit
 

@@ -116,7 +116,7 @@ export function migrate(
   if (version > target) {
     return {
       issues: [
-        `config is version ${version}, newer than this plugin understands (${target}); upgrade the agent-flows plugin`,
+        `config is version ${version}, newer than this plugin understands (${target}); upgrade the dev-flows plugin`,
       ],
     }
   }
