@@ -114,6 +114,43 @@ describe("configure.ts (as a script)", () => {
     expect(unknown.stderr).toContain("unknown section(s): bitbucket")
   })
 
+  it("reports the mode, and plans every section, skipped ones too, in manual", () => {
+    init()
+    run(
+      ["write"],
+      JSON.stringify({
+        sections: { repo: { baseBranch: "main" } },
+        skip: ["integrations.linear"],
+      }),
+    )
+    // No mode and no names: the flow asks which mode to run.
+    const bare = json(run(["detect"]))
+    expect(bare.mode).toBeUndefined()
+    expect(bare.requested).toBeUndefined()
+
+    const auto = json(run(["detect", "auto"]))
+    expect(auto.mode).toBe("auto")
+    expect(auto.requested).toBeUndefined()
+    expect(auto.plan).toEqual(bare.plan)
+
+    const manual = json(run(["detect", "manual"]))
+    expect(manual.mode).toBe("manual")
+    expect(manual.requested).toContain("integrations.linear")
+    expect(manual.plan.changes).toContainEqual(
+      expect.objectContaining({ section: "integrations.linear", kind: "add" }),
+    )
+
+    // Names alone are a manual walk of just those sections.
+    const named = json(run(["detect", "linear"]))
+    expect(named.mode).toBe("manual")
+    expect(named.requested).toEqual(["integrations.linear"])
+    expect(json(run(["detect", "auto", "linear"])).mode).toBe("auto")
+
+    const both = run(["detect", "auto", "manual"])
+    expect(both.status).toBe(1)
+    expect(both.stderr).toContain("pick one mode")
+  })
+
   it("expands a capability to every integration that provides it", () => {
     init()
     run(

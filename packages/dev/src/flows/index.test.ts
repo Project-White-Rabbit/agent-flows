@@ -362,11 +362,13 @@ describe("dev flows", () => {
       "Flow: configure ({{cmd}}configure)
       Default mode: default
       Entries:
-        default → configure/detect
+        default → configure/mode
 
       Phase: configure
+        configure/mode [branch]
+          default → configure/detect, configure/detect
         configure/detect [branch]
-          default → <end>, <end>, configure/fill, configure/fill
+          default → <end>, configure/report, configure/fill, configure/fill
         configure/fill [action]
           default → configure/confirm
         configure/confirm [branch]
