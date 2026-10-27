@@ -22,7 +22,7 @@ Only when `onBase` is true. Create the branch before anything else, and don't st
 
 ### 2b. Track the stack
 
-With a stacking integration: run its `parent` op. If it fails, the branch isn't tracked; run its `track` op with `<parent>` set to the PR's base branch when there's a PR, else `<base>`.
+Find `<parent>` (and `<landed>`, when the parent already merged): With a stacking entry, its `parent` op. When that succeeds and names a branch other than `<base>`, check it hasn't already merged: the source-control entry's `branchPr` op for it (with no source-control entry, skip the check). Merged means it landed, so `<parent>` is the base that pull request merged into, and `<landed>` is the old parent: `/agent-flows:sync` moves the branch off it (until then, the branch still holds the landed parent's commits, so compare its own work against `<landed>`, not `<parent>`). Otherwise `<parent>` is the branch the op named. When there's no stacking entry, or its `parent` op fails (the branch isn't tracked): the pull request's base branch when there's a pull request, else `<base>`. When the stacking entry's `parent` op failed, the branch isn't tracked: run its `track` op with that `<parent>`.
 
 ### 2c. Commit
 
@@ -30,10 +30,10 @@ When `git status --porcelain` isn't empty: `git add -A`, then `git commit -m "<m
 
 ### 2d. Catch up
 
-- **With a stacking integration:** run its `restack` op.
+- **With a stacking integration:** when 2b found `<landed>`, its `reparent` op with `<old>` `<landed>` and `<onto>` `<parent>`, so the branch keeps only its own commits and its pull request retargets on the next push; otherwise its `restack` op.
 - **Without one:** when `git rev-list --count HEAD..<baseRef>` isn't 0, `git merge --no-edit <baseRef>`.
 
-On conflicts, run `git status`, read each conflicted file, and write a resolution that keeps the intent of both sides. Resolve routine collisions yourself (imports, lockfiles, settings, formatting, counts both sides moved); **stop and ask** only when both sides changed the same logic incompatibly. Stage each file with `git add <file>`, then finish: the stacking integration's `continue` op after a restack (repeat until the restack completes), `git commit --no-edit` after a merge.
+On conflicts, run `git status`, read each conflicted file, and write a resolution that keeps the intent of both sides. Resolve routine collisions yourself (imports, lockfiles, settings, formatting, counts both sides moved); **stop and ask** only when both sides changed the same logic incompatibly. Stage each file with `git add <file>`, then finish: the stacking integration's `continue` op after a restack (repeat until the restack completes), what its `reparent` op says after a reparent, `git commit --no-edit` after a merge.
 
 ### 2e. Push
 

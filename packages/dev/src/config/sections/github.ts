@@ -45,6 +45,9 @@ const THREADS =
   "Keep the threads whose `isResolved` is false, following `endCursor` while `hasNextPage`. An author is a bot when its `__typename` is `Bot` or its login ends in `[bot]`"
 const RESOLVE_MUTATION =
   "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }"
+// mergeStateStatus (CLI) and mergeable_state (REST, MCP) name the same states.
+const MERGE_STATE =
+  "`CLEAN`, `HAS_HOOKS`, or `UNSTABLE` (only checks the base doesn't require are failing) is ready; `BLOCKED` is blocked, by the review when `reviewDecision` is `REVIEW_REQUIRED` or `CHANGES_REQUESTED`, else by a required check or a rule; `DRAFT` is blocked by the draft; `DIRTY` is conflicting; `BEHIND` is behind; `UNKNOWN` is pending"
 const READY_MUTATION =
   "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { isDraft } } }"
 
@@ -123,6 +126,11 @@ export const github: IntegrationSpec = {
         cli: `\`gh pr view <N> --repo {owner}/{repo} --json ${PR_JSON}\``,
         api: `${API}/pulls/<N>"\`: a set \`merged_at\` means merged`,
       },
+      branchPr: {
+        mcp: `The GitHub MCP's \`list_pull_requests\` for {owner}/{repo} with \`head: {owner}:<branch>\` and \`state: all\`, the most recent; then its pull request read tool for ${PR_FIELDS}`,
+        cli: `\`gh pr list --repo {owner}/{repo} --head <branch> --state all --limit 1 --json ${PR_JSON}\`: an empty list means none`,
+        api: `${API}/pulls?state=all&head={owner}:<branch>"\`, the most recent; then \`prMetadata\` for its counts`,
+      },
       prDiff: {
         mcp: "The GitHub MCP's pull request read tool (`pull_request_read` with `method: get_diff`, or `get_pull_request_diff`) for {owner}/{repo} #<N>",
         cli: "`gh pr diff <N> --repo {owner}/{repo}`",
@@ -152,6 +160,17 @@ export const github: IntegrationSpec = {
         mcp: "The GitHub MCP's pull request read tool for {owner}/{repo} #<N>: `mergeable` false is conflicting, `mergeable_state` `behind` is behind, `mergeable` null is pending, anything else is clean",
         cli: "`gh pr view <N> --repo {owner}/{repo} --json mergeable,mergeStateStatus`: `CONFLICTING` or `DIRTY` is conflicting, `BEHIND` is behind, an `UNKNOWN` `mergeable` is pending, anything else is clean",
         api: `${API}/pulls/<N>"\`: \`mergeable\` false is conflicting, \`mergeable_state\` \`behind\` is behind, \`mergeable\` null is pending, anything else is clean`,
+      },
+      prMergeState: {
+        mcp: `The GitHub MCP's pull request read tool for {owner}/{repo} #<N>: its \`mergeable_state\`, upper-cased, reads as ${MERGE_STATE}`,
+        cli: `\`gh pr view <N> --repo {owner}/{repo} --json mergeStateStatus,reviewDecision\`: ${MERGE_STATE}`,
+        api: `${API}/pulls/<N>"\`: its \`mergeable_state\`, upper-cased, reads as ${MERGE_STATE}`,
+      },
+      // CLI and API first: they pin the head, which the MCP's merge can't.
+      prMerge: {
+        cli: "`gh pr merge <N> --repo {owner}/{repo} --<method> --match-head-commit <sha>`. Never with `--delete-branch` (its local cleanup fails in a worktree), `--admin`, or `--auto`",
+        api: `\`PUT\` ${API_BARE}/pulls/<N>/merge\` (header \`Authorization: Bearer {token}\`) with JSON \`merge_method\` <method> and \`sha\` <sha>: 405 is refused, with the reason in \`message\`; 409 is a moved head`,
+        mcp: "The GitHub MCP's `merge_pull_request` for {owner}/{repo} #<N> with `merge_method: <method>`. It can't pin the head, so read the pull request's `head.sha` with its read tool just before, and don't merge unless it's <sha>",
       },
       prReady: {
         mcp: "The GitHub MCP's `update_pull_request` for {owner}/{repo} #<N> with `draft: false`",

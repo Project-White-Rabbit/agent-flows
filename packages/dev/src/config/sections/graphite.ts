@@ -1,4 +1,5 @@
 import path from "node:path"
+import { downstack } from "../adapters/graphite.ts"
 import type { IntegrationSpec } from "../types.ts"
 
 /** Graphite's repo config: `{ "trunk": "main" }` or `{ "trunks": [{ "name": "main" }] }`. */
@@ -44,9 +45,26 @@ export const graphite: IntegrationSpec = {
         cli: "When `gt parent` is the configured `trunk` (`<trunk>` below): `git fetch origin <trunk>`, then `git rebase origin/<trunk>`. Otherwise `gt restack`. Not `gt sync`, which skips silently in a worktree whose trunk checkout has changes",
       },
       continue: { cli: "`gt continue`" },
+      // Not `gt move`: onto trunk it rebases onto the local trunk, which a
+      // worktree branch never fast-forwards. The merge base with <old> is
+      // where the branch's own commits start, squash-merged or not.
+      reparent: {
+        cli: 'When <onto> is the configured `trunk`: `git fetch origin <onto>`, then `git rebase --onto origin/<onto> "$(git merge-base HEAD <old>)"` (`origin/<old>` in place of `<old>` when there\'s no local branch `<old>`). Otherwise `git rebase --onto <onto> "$(git merge-base HEAD <old>)"`. Then `gt track --parent <onto>`. On conflicts, resolve and `git rebase --continue`, then `gt track --parent <onto>`',
+      },
+      rename: {
+        cli: "`if gt parent >/dev/null 2>&1; then gt rename --no-interactive <name>; else git branch -m <name>; fi`",
+      },
       submit: { cli: "`gt submit --draft --no-edit --no-interactive`" },
+      // Also an adapter (`adapters/graphite.ts`), run first: it reads the
+      // parents Graphite records, without parsing `gt log`.
+      downstack: {
+        cli: "`gt log short --stack`: one branch per line, the top of the stack first and trunk last, the checked-out one marked. `chain` is the branches from just above trunk up to the checked-out one, bottom first; `above` counts the lines above it; `size` counts every branch but trunk",
+      },
+      // Lands bottom-up, retargeting and restacking each next branch itself.
+      mergeStack: { cli: "`gt merge --no-interactive`" },
     },
   },
+  adapters: { downstack },
   detect(ctx) {
     const text = ctx.gitCommonDir
       ? ctx.read(path.join(ctx.gitCommonDir, ".graphite_repo_config"))

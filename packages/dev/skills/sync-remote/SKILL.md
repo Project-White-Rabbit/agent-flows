@@ -92,7 +92,7 @@ It replaces the old block, or puts the block on top of a body that has none, and
 With `format.prTitle` and an issue, the title is that template, with `{issueId}` and `{title}` the issue's id and title. Otherwise it follows the repo's convention: its agent instructions first, then the shape of recent subjects on the base (`git log -20 --format=%s <baseRef>`, which are PR titles when the repo squash-merges). Put the issue id in it only when the tracker's `prLink` op says the title is the only place that links them, keeping the rest of the convention. Keep the existing title when it still fits (with a template, only when it matches it). Quote the title for the shell: single quotes, with any `'` written as `'\''`.
 
 - **PR exists:** when the body or title changed, the `prEdit` op with `<body-file>` `<dir>/pr-new.md`.
-- **No PR, default mode:** the `prCreate` op, with `<base>` the stacking integration's `parent` when stacked, else `<base>`.
+- **No PR, default mode:** the `prCreate` op, with `<base>` the `<parent>` 2b found (`<base>` when 2b didn't run).
 - **No PR, `remote` mode:** skip. Remote mode never creates a PR.
 
 ### 3d. Issue
