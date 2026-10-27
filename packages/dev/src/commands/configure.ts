@@ -354,6 +354,27 @@ export function resolveNames(names: string[]): {
   }
 }
 
+/** How a configure run goes: decide what it can, or walk every section. */
+export const MODES = ["auto", "manual"] as const
+export type Mode = (typeof MODES)[number]
+
+/**
+ * The mode a user typed, if any, and the section names after it. Names alone
+ * mean a manual walk of just those sections.
+ */
+export function parseMode(args: string[]): {
+  mode?: Mode
+  names: string[]
+} {
+  const named = args.filter((a): a is Mode => MODES.includes(a as Mode))
+  if (named.length > 1) {
+    throw new Error(`pick one mode, not ${named.join(" and ")}`)
+  }
+  const names = args.filter((a) => !MODES.includes(a as Mode))
+  const mode = named[0] ?? (names.length > 0 ? "manual" : undefined)
+  return { ...(mode ? { mode } : {}), names }
+}
+
 const PATCH_SHAPE =
   '{"sections": {"<path>": {...} | [{"name": ..., ...}, ...] | null}, "skip": ["<path>", ...]}'
 
@@ -437,13 +458,15 @@ async function write(root: string): Promise<void> {
 const HELP = `Usage: configure.ts <command>
 
   show            Print ${CONFIG_PATH} with its issues and warnings.
-  detect [section | capability ...]
+  detect [auto | manual] [section | capability ...]
                   Print the current config, what each section's detector found
                   (values and evidence), and a plan: what's new, which required
                   fields are missing, and whether it's already upToDate. Given
                   sections (linear or integrations.linear) or capabilities
                   (issueTracker: every integration providing it), detects and
-                  plans only those, including ones skipped before.
+                  plans only those, including ones skipped before. manual with
+                  no names plans every section the same way. Prints the mode
+                  (names alone mean manual; none at all, no mode).
   get <path>...   Print {"values": {"<path>": value}} for sections or fields
                   (repo.baseBranch, integrations.linear). A field of an
                   integration configured as a list prints one {name, value}
@@ -488,13 +511,21 @@ async function main(): Promise<void> {
     return
   }
   if (command === "detect") {
-    const { paths, unknown } = resolveNames(args)
+    const { mode, names } = parseMode(args)
+    const { paths, unknown } = resolveNames(names)
     if (unknown.length > 0) {
       throw new Error(
-        `unknown section(s): ${unknown.join(", ")} (known sections: ${SECTIONS.map((s) => s.path).join(", ")}; capabilities: ${CAPABILITIES.map((c) => c.id).join(", ")})`,
+        `unknown section(s): ${unknown.join(", ")} (known sections: ${SECTIONS.map((s) => s.path).join(", ")}; capabilities: ${CAPABILITIES.map((c) => c.id).join(", ")}; modes: ${MODES.join(", ")})`,
       )
     }
-    const only = paths.length > 0 ? paths : undefined
+    // Manual walks every section, skipped ones included, so with no names it
+    // plans them all the way naming each one would.
+    const only =
+      paths.length > 0
+        ? paths
+        : mode === "manual"
+          ? SECTIONS.map((s) => s.path)
+          : undefined
     const loaded = loadConfig(root)
     const detected = detectSections(
       createDetectContext(root),
@@ -503,6 +534,7 @@ async function main(): Promise<void> {
         : SECTIONS,
     )
     printJson({
+      mode,
       ...loaded,
       ...(only ? { requested: only } : {}),
       ...(loaded.config ? { coverage: coverage(loaded.config) } : {}),

@@ -1,6 +1,6 @@
 ---
 description: Set up or update .agent-flows/config.json, the repo's shared dev configuration: base branch and the integrations it uses for each capability (source control, issue tracker, deployments, error tracking, …).
-argument-hint: "[section | capability ...]"
+argument-hint: "[auto | manual] [section | capability ...]"
 ---
 
 # /agent-flows:configure
@@ -68,19 +68,25 @@ The file is made of **sections**, each an object of fields at a dotted path. Eve
 
 `version` is the file format, set by `write`. An older file is upgraded when it's read (version 1 called the integrations `services`), and the next `write` saves it in the current format. `skipped` lists integrations the team chose not to configure. Sections and fields this plugin doesn't know (from a newer plugin, or added by hand) are reported as warnings and kept as they are.
 
-To configure individual sections, name them ($ARGUMENTS): `/agent-flows:configure linear vercel`. A name is a section path or its last part (`integrations.linear` or `linear`), or a capability (`issueTracker`), which stands for every integration that provides it. Only the named sections are detected, shown, and changed, even ones that were skipped or are already configured; the rest of the file stays as it is. With no names, every section above is considered.
+A run goes one of three ways ($ARGUMENTS):
+
+- **Auto** (`/agent-flows:configure auto`): examine this checkout and machine, settle everything that has one clear answer, and ask only about what's ambiguous.
+- **Manual** (`/agent-flows:configure manual`): go through every section one at a time, skipped ones included, and ask about each.
+- **Per section** (`/agent-flows:configure linear vercel`): the manual walk, for just the named sections. A name is a section path or its last part (`integrations.linear` or `linear`), or a capability (`issueTracker`), which stands for every integration that provides it. Only the named sections are detected, shown, and changed, even ones that were skipped or are already configured; the rest of the file stays as it is.
+
+With neither a mode nor names, configure asks which mode to run.
 
 Each integration also records what the team **uses** it for, under `use`: per capability it provides, a level from the table above (`"use": {"issueTracker": "track"}`), or `true` for a capability without levels. A capability left out isn't used, even if the integration provides it (PostHog only for feature flags). Flows never go past the level, so this is where a team decides, say, that sync links issues but doesn't file them. Without `use`, flows assume each capability's default level, and configure asks.
 
 An integration can be reached in up to three ways: its **MCP server**, its **CLI**, or its **HTTP API** directly, with a token from an environment variable. Which ones work depends on the machine, not the repo, so it's never written to the config: every flow checks at run time and uses the first that works, in that order. Configure uses the same check to offer integrations this machine can already reach, even when the repo shows no sign of them.
 
-Re-running is safe: values already in the file are kept, skipped sections stay skipped, and when nothing new turns up the command says so and changes nothing.
+Re-running is safe: values already in the file are kept, skipped sections stay skipped (until a manual run or naming them brings them back), and when nothing new turns up the command says so and changes nothing.
 
 **CLI commands** available via Bash (paths relative to `${CLAUDE_PLUGIN_ROOT}/src/commands/`):
 
 | Command | Description |
 |---------|-------------|
-| `configure.ts <subcommand>` | `show` the config, `detect` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, `write` a patch read from stdin (JSON), or `token <integration> --env|--file|--command <where>` to record where an API token is on this machine |
+| `configure.ts <subcommand>` | `show` the config, `detect [auto|manual]` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, `write` a patch read from stdin (JSON), or `token <integration> --env|--file|--command <where>` to record where an API token is on this machine |
 
 ## Invariants
 
@@ -88,21 +94,28 @@ Re-running is safe: values already in the file are kept, skipped sections stay s
 - Never call a service in a way that changes it. Lookups are read-only, and that includes local setup: don't run a CLI command that initializes or configures the tool in this repo (some do on first use), even to read a value. Read its files instead, or ask.
 - Only change the config through `write`; never edit the file by hand to get past the validator.
 
-## 1. Detect
+## 1. Pick the mode
+
+If the user typed `auto`, `manual`, or any section names, that settles it: go straight to detect. Otherwise use `AskUserQuestion` how to run it:
+
+> A) **Auto**: examine the repo and this machine, and ask only about what's ambiguous *(recommended)* → step 2
+> B) **Manual**: go through every section, one at a time → step 2
+
+## 2. Detect
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" detect [section | capability ...]
+node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" detect [auto | manual] [section | capability ...]
 ```
 
-Pass the sections or capabilities the user named, if any, as they typed them. An unknown name fails with the list of known sections and capabilities: show it and ask which they meant.
+Pass the mode (typed or picked) and the sections or capabilities the user named, if any, as they typed them. An unknown name fails with the list of known sections, capabilities, and modes: show it and ask which they meant.
 
-The JSON has `configPath`, `exists`, the current `config` (when valid), its `issues`, `requested` (when you passed names: the section paths they resolved to, with each capability expanded to its integrations), `coverage` (per capability, the integrations configured for it), `detected` (per section path: guessed `values` and the `evidence` behind them, from local files and git metadata only), and a `plan`:
+The JSON has `mode` (`auto` or `manual`; names alone mean `manual`), `configPath`, `exists`, the current `config` (when valid), its `issues`, `requested` (when you passed names: the section paths they resolved to, with each capability expanded to its integrations), `coverage` (per capability, the integrations configured for it), `detected` (per section path: guessed `values` and the `evidence` behind them, from local files and git metadata only), and a `plan`:
 
 - `changes`: sections to `add`, and empty fields of configured sections to `fill`.
 - `needs`: required fields still missing after those changes (per instance, with its `instance` name, for a list).
 - `conflicts`: configured values that disagree with detection. Configured values always win; mention a conflict, never change it on your own.
 - `moreInstances`: for an integration that's already configured, instances detected that match none of its configured ones (a second linked Vercel app). Detection only fills the instance it matches, and never edits a list. These are offered, not planned, and don't make the config out of date.
-- With `requested` set, the plan covers only those sections, and proposes each even if it was skipped or nothing was detected, plus any section marked *always* that the config still lacks (the file isn't valid without it).
+- With `requested` set (the named sections, or every section in manual mode), the plan covers only those sections, and proposes each even if it was skipped or nothing was detected, plus any section marked *always* that the config still lacks (the file isn't valid without it).
 - `upToDate`: the config exists and there is nothing to add or fill. Sections listed in `skipped` were deliberately left out on an earlier run and are never proposed again.
 
 `access` says, per integration, how this machine can reach it: `cli` (`installed`, and `ready` when it's also signed in), `api` (the token variable, and `ready` when it's set; never print its value), and `mcp.server`, which only you can check: it's available when your tools include ones from that MCP server (named for it, like `mcp__<server>__…`, or a connector of that name). An integration is **in reach** when it isn't configured, isn't in `skipped`, and one of those three works.
@@ -110,13 +123,28 @@ The JSON has `configPath`, `exists`, the current `config` (when valid), its `iss
 Route on the result:
 
 - **`issues` is non-empty (the file is broken)**: show the issues and stop. For each issue, say what's wrong and the fix (a wrong type or a missing required field); with the user's OK, fix it with `write`, or by hand only when `write` refuses because the file is unreadable, then re-run this command. A version newer than the plugin means the user should upgrade the plugin instead
-- **`plan.upToDate` is true, the user named no sections, and no integration is in reach**: say the config is already up to date (list its sections, any `skipped`, any `warnings`, and any `conflicts`) and stop. Change nothing. If `plan.moreInstances` isn't empty, add one line per integration naming the instances found, and that `/agent-flows:configure <integration>` adds them
-- **the user named sections**: go to fill for exactly the `requested` sections. For each one already configured, show its current values (and any of its `plan.moreInstances`) and ask what to change; for the rest, fill them as usual → step 2
-- **otherwise**: continue → step 2
+- **`mode` is `auto`, `plan.upToDate` is true, and no integration is in reach**: say the config is already up to date (any `warnings` and any `conflicts` too) and change nothing. If `plan.moreInstances` isn't empty, add one line per integration naming the instances found, and that `/agent-flows:configure <integration>` adds them → step 6
+- **`mode` is `manual`**: walk the `requested` sections one at a time → step 3
+- **otherwise (`auto`)**: continue → step 3
 
-## 2. Fill the gaps
+## 3. Fill the gaps
 
-**Offer what's in reach.** Unless the user named sections, take the integrations in reach that the plan doesn't already add, and use `AskUserQuestion` with multiple selection: which of them should the repo use? One option per integration, saying how it's reached (`Linear: MCP connected`, `Vercel: CLI signed in`, `Sentry: SENTRY_AUTH_TOKEN set`). Being reachable from this machine doesn't mean the repo uses it, so recommend none by default, only ones the repo shows signs of. With more than fit in one question, ask several. The ones picked join the plan as sections to add; the rest go in the write's `skip` list, so the next run doesn't offer them again.
+How much this step asks depends on the mode.
+
+**Auto: ask only what's ambiguous.** Settle everything with one clear answer yourself, and keep the questions below for real choices:
+
+- Integrations in reach that the plan doesn't add: don't ask about them, and don't skip them. List them in confirm as available but not added, so `/agent-flows:configure manual` or `/agent-flows:configure <integration>` can pick them up later.
+- `use`: record each capability's default level without asking, and leave out `(opt-in)` capabilities. Ask only when the repo points somewhere else (its agent instructions say sync files issues, an opt-in capability no other integration covers).
+- Tokens: when an integration's usual variable is already set (`access.api.ready`), the token is found; don't ask. Ask only when one is needed and none is found.
+- Lookups: a lookup with exactly one result is the answer. Ask when it returns several (two Vercel projects, several Linear teams) or none.
+- Several integrations detected for one capability, `plan.conflicts`, and `plan.moreInstances`: ask.
+- A section that can't be filled without the user and isn't worth asking about: leave it out of this run rather than skipping it.
+
+**Manual: one section at a time.** Go through the `requested` sections in the sections table's order. For each, show what's configured (and any of its `plan.moreInstances`), what was detected, and how this machine reaches it, then use `AskUserQuestion` whether to configure it, keep it as it is, or skip it, then ask the questions below for that section only before moving on. Recommend keeping what's configured, and configuring what was detected or is in reach.
+
+The rest of this step applies to both modes, within those limits.
+
+**Offer what's in reach.** Auto only lists these (above), and naming sections leaves them out. In manual mode with no names, take the integrations in reach that the plan doesn't already add, and use `AskUserQuestion` with multiple selection: which of them should the repo use? One option per integration, saying how it's reached (`Linear: MCP connected`, `Vercel: CLI signed in`, `Sentry: SENTRY_AUTH_TOKEN set`). Being reachable from this machine doesn't mean the repo uses it, so recommend none by default, only ones the repo shows signs of. With more than fit in one question, ask several. The ones picked join the plan as sections to add; the rest go in the write's `skip` list, so the next run doesn't offer them again.
 
 **Ask what each is for.** For every integration being added, and every configured one `plan.needs` lists `use` for, use `AskUserQuestion` what the team uses it for: one question per capability it provides, with that capability's levels from the table above plus "Not for this", and its default level recommended. For a capability the sections table marks `(opt-in)`, recommend "Not for this" unless the repo shows it uses the integration for it (no other integration covers the capability, and the agent instructions or recent PRs point to it), since without `use` flows leave it out. A capability without levels is a yes or no. Several integrations can go in one call, up to its limit on questions. Record the answers as the entry's `use`, and leave out the capabilities answered "Not for this". If every capability is "Not for this", the integration isn't used: skip it instead.
 
@@ -138,21 +166,21 @@ When detection finds several instances of one integration (`detected.<path>.inst
 
 Several integrations can provide the same capability (Linear and Jira are both issue trackers). Don't make the user pick just one: when detection finds evidence for more than one, propose each, and when the user named a capability, ask which of its integrations the team uses. They can choose any number; configure those and skip the rest.
 
-When the user named sections, touch only those (and any *always* section the plan adds because the config lacks it): don't propose, fill, or skip any other section.
+When the user named sections, or in manual mode, touch only the `requested` sections (and any *always* section the plan adds because the config lacks it): don't propose, fill, or skip any other section.
 
 A section whose required fields can't be found, or that the user doesn't want, goes in the write's `skip` list (sections marked *always* can't be skipped; ask for their values instead), so the next run doesn't propose it again. Never change a value the config already has unless the user asks.
 
-## 3. Confirm
+## 4. Confirm
 
-Show one table of what will change: section (with the instance name, for a list), field, new value, and where it came from (detected, looked up, or asked). Then the sections you'll mark skipped. Leave out everything that stays the same, and say how many sections are unchanged.
+Show one table of what will change: section (with the instance name, for a list), field, new value, and where it came from (detected, looked up, or asked). Then the sections you'll mark skipped, and in auto mode, the integrations in reach that weren't added. Leave out everything that stays the same, and say how many sections are unchanged.
 
 Then use `AskUserQuestion`:
 
-> A) **Save it** *(recommended)* → step 4
-> B) **Change something**: add, drop, or skip a section, or correct a value → step 2
+> A) **Save it** *(recommended)* → step 5
+> B) **Change something**: add, drop, or skip a section, or correct a value → step 3
 > C) **Cancel** → stop
 
-## 4. Write
+## 5. Write
 
 Pass only what changes on stdin, keyed by section path. Each section you include **replaces** that section's whole entry (so include its existing fields too); `null` removes one; `skip` marks sections as deliberately not configured; everything you omit stays as it is.
 
@@ -166,6 +194,14 @@ A list entry replaces the whole list, so include every instance you're keeping: 
 
 It validates the whole result and writes only if the content changed, in a fixed order, so the same answers always produce the same file. On issues it prints them with `"written": false` and exits 1: fix each one and run it again. `warnings` (unknown sections or fields it kept) are worth mentioning but don't block.
 
-## 5. Report
+## 6. Report
+
+Print the resulting configuration:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" show
+```
+
+Show it as one table: section (with the instance name, for a list), its fields and values, and what the team uses it for (`use`). Then list the `skipped` sections, and any `warnings`.
 
 Say what changed in `.agent-flows/config.json`, or that nothing did (`"written": false` with no issues). Then, from `coverage`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from `access`, plus your MCP check; for the API, `access.api.source`, which says where the token comes from, never what it is), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (`access.cli.auth`), or record where its token is (`token`). That part is about this machine only and never goes in the config. If the file changed, remind the user to commit it so the team shares it.
