@@ -5,6 +5,7 @@ import {
   devKit,
   flowDir,
   REQUIRE_CONFIG,
+  UNKNOWN_FLAGS,
   USE_INTEGRATIONS,
 } from "./kit.ts"
 import { RANKS, STAGES } from "./start-work.ts"
@@ -89,7 +90,7 @@ An issue with open sub-issues is left out: its sub-issues are the work.
           kind: "action",
           title: "List the issues",
           commandCalls: ["configure", "work"],
-          body: `1. **Flags.** Take \`--priority <ranks>\`, \`--limit <n>\`, \`--section <name>\`, \`--section-by-rank\`, and \`--in <integration>\` out of \`{{argsToken}}\`. Read plain words the same way: "only urgent and P0" is \`--priority urgent,p0\`, "just 5" or "top 5" is \`--limit 5\`, "sort them into sections by priority" is \`--section-by-rank\`. When both \`--section-by-rank\` and \`--section\` are given, \`--section-by-rank\` wins: say once that \`--section\` is ignored.
+          body: `1. **Flags.** Take \`--priority <ranks>\`, \`--limit <n>\`, \`--section <name>\`, \`--section-by-rank\`, and \`--in <integration>\` out of \`{{argsToken}}\`. ${UNKNOWN_FLAGS} Read plain words the same way: "only urgent and P0" is \`--priority urgent,p0\`, "just 5" or "top 5" is \`--limit 5\`, "sort them into sections by priority" is \`--section-by-rank\`. When both \`--section-by-rank\` and \`--section\` are given, \`--section-by-rank\` wins: say once that \`--section\` is ignored.
 2. **Integrations.** \`{{command:configure}} integrations issueTracker workspaces\`. ${REQUIRE_CONFIG} ${USE_INTEGRATIONS} Closing an issue needs its entry at \`level\` \`track\`; at \`link\`, its issues can be started or skipped, not closed.
 3. **The issues.** \`<dir>\` is ${flowDir("tickets-to-work")} (create it). Run every \`issueTracker\` entry's \`assignedIssues\` op and every \`workspaces\` entry's \`workspaces\` op, and write them to \`<dir>/issues.json\`:
 

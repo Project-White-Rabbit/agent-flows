@@ -58,6 +58,7 @@ If mode is `help`, print the block below verbatim and exit. No reads, no writes.
    - Every entry is searched. Only entries at `level` `track` get issues filed or updated: file in the first of those, unless the notes, the user, or the repo's agent instructions name another. An entry at `link` is read-only here.
    - In default mode with no entry at `track`, stop: `Every issue tracker here is linked only, so create-tickets can't file. Run /agent-flows:configure <integration> to track issues, or use /agent-flows:create-tickets match to look without filing.`
 2. **The notes**, from the arguments (minus the mode keyword and flags):
+   - **Flags:** `--yes` in default mode, `--branch <branch>` in `match` mode. Any other argument that starts with `--` is a flag this command doesn't take: name it, print the usage block from `help`, and stop, rather than running without it. A `--` inside pasted notes, a quoted value, or a command the notes quote (`git push --force`) is part of that text, not a flag.
    - **A URL:** read the page with this session's tools for that site (an MCP server's fetch or read tool; search for deferred ones before deciding there are none), else a plain web fetch. When nothing can read it (it needs a sign-in no tool has), ask the person to paste the page and stop until they do.
    - **Pasted notes** (often a flat list with no headings, copied from a chat channel or a doc) **or a sentence:** use the text as given.
    - **Nothing:** ask for the notes or a link, and stop.

@@ -4,7 +4,7 @@ import { findCapability } from "../config/integrations.ts"
 import { configureFlow } from "./configure.ts"
 import { createTicketsFlow } from "./create-tickets.ts"
 import { renderAllSkills } from "./index.ts"
-import { devKit } from "./kit.ts"
+import { devKit, UNKNOWN_FLAGS } from "./kit.ts"
 import { readyFlow } from "./ready.ts"
 import { syncFlow } from "./sync.ts"
 
@@ -235,6 +235,22 @@ describe("dev flows", () => {
     expect(startWork).toContain("/agent-flows/create-tickets")
     expect(startWork).toContain("ids --plan <create-tickets dir>/match.json")
     expect(skill("create-tickets")).toContain("<dir>/match.json")
+  })
+
+  it("stops on an unknown flag in every skill that takes flags, and only there", () => {
+    const takesFlags = files.filter((f) =>
+      /^argument-hint: .*--/m.test(f.content),
+    )
+    expect(takesFlags.map((f) => f.path)).toEqual([
+      "skills/create-tickets/SKILL.md",
+      "skills/start-work/SKILL.md",
+      "skills/tickets-to-work/SKILL.md",
+    ])
+    for (const file of files) {
+      expect(file.content.includes(UNKNOWN_FLAGS)).toBe(
+        takesFlags.includes(file),
+      )
+    }
   })
 
   it("runs ready's cleanup inline, then publishes between two syncs", () => {
