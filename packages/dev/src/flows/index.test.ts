@@ -204,7 +204,7 @@ describe("dev flows", () => {
   it("finds sync's issue through create-tickets' match mode", () => {
     const sync = files.find((f) => f.path === "skills/sync/SKILL.md")
     expect(sync?.content).toContain(
-      "run the `/agent-flows:create-tickets` skill with `match --branch <branch>",
+      "run the `/dev-flows:create-tickets` skill with `match --branch <branch>",
     )
     const matched = files.find(
       (f) => f.path === "skills/create-tickets/SKILL.md",
@@ -225,14 +225,14 @@ describe("dev flows", () => {
     const skill = (id: string) =>
       files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
     expect(skill("tickets-to-work")).toContain(
-      "run the `/agent-flows:start-work` skill with `<ID> --yes`",
+      "run the `/dev-flows:start-work` skill with `<ID> --yes`",
     )
     const startWork = skill("start-work")
     expect(startWork).toContain(
-      "run the `/agent-flows:create-tickets` skill with the text and `--yes`",
+      "run the `/dev-flows:create-tickets` skill with the text and `--yes`",
     )
     expect(startWork).toContain(
-      "Run the `/agent-flows:create-tickets` skill with `match` and the text",
+      "Run the `/dev-flows:create-tickets` skill with `match` and the text",
     )
     expect(startWork).toContain("/agent-flows/create-tickets")
     expect(startWork).toContain("ids --plan <create-tickets dir>/match.json")
@@ -343,11 +343,11 @@ describe("dev flows", () => {
     const run =
       files.find((f) => f.path === "skills/ready-run/SKILL.md")?.content ?? ""
     const local = run.indexOf(
-      "Run the `/agent-flows:sync` skill with the argument `local`",
+      "Run the `/dev-flows:sync` skill with the argument `local`",
     )
     const ready = run.indexOf("the `prReady` op")
     const remote = run.indexOf(
-      "Run the `/agent-flows:sync` skill with the argument `remote`",
+      "Run the `/dev-flows:sync` skill with the argument `remote`",
     )
     const ci = run.indexOf('ready.ts" ci start --sha <sha>')
     expect(local).toBeGreaterThan(-1)

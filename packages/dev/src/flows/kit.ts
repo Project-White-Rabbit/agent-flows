@@ -4,7 +4,7 @@ import {
   defineCommandCatalog,
 } from "@agent-flows/core"
 
-export const PLUGIN = "agent-flows"
+export const PLUGIN = "dev-flows"
 
 export const devKit = createFlowKit({
   targets: {
@@ -58,7 +58,7 @@ export function flowDir(flow: string): string {
  * it. Every config-reading step uses this, so every flow fails the same way.
  */
 export const REQUIRE_CONFIG =
-  "If it exits with status 2 and prints `\"configured\": false`, stop this command here. Relay its `message`: the repo isn't set up for agent-flows yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `{{cmd}}configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead."
+  "If it exits with status 2 and prints `\"configured\": false`, stop this command here. Relay its `message`: the repo isn't set up for dev-flows yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `{{cmd}}configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead."
 
 /**
  * Prose for a step that takes flags out of the arguments: what to do with one

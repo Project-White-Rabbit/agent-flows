@@ -53,7 +53,7 @@ describe("adapter.ts (as a script)", () => {
     expect(JSON.parse(result.stdout)).toEqual({
       available: false,
       reason:
-        "Linear's adapter needs an API token, and env LINEAR_API_KEY has none. Run the agent-flows configure command to say where the token is on this machine.",
+        "Linear's adapter needs an API token, and env LINEAR_API_KEY has none. Run the dev-flows configure command to say where the token is on this machine.",
     })
   })
 

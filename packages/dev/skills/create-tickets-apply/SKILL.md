@@ -1,10 +1,10 @@
 ---
 name: create-tickets-apply
-description: Apply phase of the /agent-flows:create-tickets flow. Invoked by the create-tickets flow; not run directly
+description: Apply phase of the /dev-flows:create-tickets flow. Invoked by the create-tickets flow; not run directly
 user-invocable: false
 ---
 
-# /agent-flows:create-tickets: Apply
+# /dev-flows:create-tickets: Apply
 
 **Run only when mode is `default`.**
 
@@ -24,7 +24,7 @@ Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/tickets.ts" check --plan <dir>/pla
 3. **`unchanged`:** nothing.
 4. **Blocked by:** once every row is done, for each item's `blockedBy`, the entry's `linkBlocked` op with `<ID>` the item's issue and `<blocker>` the blocking one (a key becomes the id it was filed or matched as).
 
-When an op fails, carry on with the other rows and note it. A row that didn't file stays new in the plan, so running `/agent-flows:create-tickets` again on the same notes picks up where this left off.
+When an op fails, carry on with the other rows and note it. A row that didn't file stays new in the plan, so running `/dev-flows:create-tickets` again on the same notes picks up where this left off.
 
 #### Issue fields
 

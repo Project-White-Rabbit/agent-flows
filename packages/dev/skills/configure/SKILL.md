@@ -3,9 +3,9 @@ description: Set up or update .agent-flows/config.json, the repo's shared dev co
 argument-hint: "[auto | manual] [section | capability ...]"
 ---
 
-# /agent-flows:configure
+# /dev-flows:configure
 
-Record this repository's dev configuration in `.agent-flows/config.json` at the repo root: settings every flow relies on (like the base branch) and the integrations the repo uses, with the ids flows need to reach them. Other agent-flows commands read it instead of guessing or asking every time. The file is committed and shared with the team, so it holds **configuration only**: ids, slugs, branch names. No secrets, and nothing that points at one.
+Record this repository's dev configuration in `.agent-flows/config.json` at the repo root: settings every flow relies on (like the base branch) and the integrations the repo uses, with the ids flows need to reach them. Other dev-flows commands read it instead of guessing or asking every time. The file is committed and shared with the team, so it holds **configuration only**: ids, slugs, branch names. No secrets, and nothing that points at one.
 
 Flows never ask for a vendor. They ask for a **capability**, and use every integration the repo configured for it:
 
@@ -70,9 +70,9 @@ The file is made of **sections**, each an object of fields at a dotted path. Eve
 
 A run goes one of three ways ($ARGUMENTS):
 
-- **Auto** (`/agent-flows:configure auto`): examine this checkout and machine, settle everything that has one clear answer, and ask only about what's ambiguous.
-- **Manual** (`/agent-flows:configure manual`): go through every section one at a time, skipped ones included, and ask about each.
-- **Per section** (`/agent-flows:configure linear vercel`): the manual walk, for just the named sections. A name is a section path or its last part (`integrations.linear` or `linear`), or a capability (`issueTracker`), which stands for every integration that provides it. Only the named sections are detected, shown, and changed, even ones that were skipped or are already configured; the rest of the file stays as it is.
+- **Auto** (`/dev-flows:configure auto`): examine this checkout and machine, settle everything that has one clear answer, and ask only about what's ambiguous.
+- **Manual** (`/dev-flows:configure manual`): go through every section one at a time, skipped ones included, and ask about each.
+- **Per section** (`/dev-flows:configure linear vercel`): the manual walk, for just the named sections. A name is a section path or its last part (`integrations.linear` or `linear`), or a capability (`issueTracker`), which stands for every integration that provides it. Only the named sections are detected, shown, and changed, even ones that were skipped or are already configured; the rest of the file stays as it is.
 
 With neither a mode nor names, configure asks which mode to run.
 
@@ -123,7 +123,7 @@ The JSON has `mode` (`auto` or `manual`; names alone mean `manual`), `configPath
 Route on the result:
 
 - **`issues` is non-empty (the file is broken)**: show the issues and stop. For each issue, say what's wrong and the fix (a wrong type or a missing required field); with the user's OK, fix it with `write`, or by hand only when `write` refuses because the file is unreadable, then re-run this command. A version newer than the plugin means the user should upgrade the plugin instead
-- **`mode` is `auto`, `plan.upToDate` is true, and no integration is in reach**: say the config is already up to date (any `warnings` and any `conflicts` too) and change nothing. If `plan.moreInstances` isn't empty, add one line per integration naming the instances found, and that `/agent-flows:configure <integration>` adds them → step 6
+- **`mode` is `auto`, `plan.upToDate` is true, and no integration is in reach**: say the config is already up to date (any `warnings` and any `conflicts` too) and change nothing. If `plan.moreInstances` isn't empty, add one line per integration naming the instances found, and that `/dev-flows:configure <integration>` adds them → step 6
 - **`mode` is `manual`**: walk the `requested` sections one at a time → step 3
 - **otherwise (`auto`)**: continue → step 3
 
@@ -133,7 +133,7 @@ How much this step asks depends on the mode.
 
 **Auto: ask only what's ambiguous.** Settle everything with one clear answer yourself, and keep the questions below for real choices:
 
-- Integrations in reach that the plan doesn't add: don't ask about them, and don't skip them. List them in confirm as available but not added, so `/agent-flows:configure manual` or `/agent-flows:configure <integration>` can pick them up later.
+- Integrations in reach that the plan doesn't add: don't ask about them, and don't skip them. List them in confirm as available but not added, so `/dev-flows:configure manual` or `/dev-flows:configure <integration>` can pick them up later.
 - `use`: record each capability's default level without asking, and leave out `(opt-in)` capabilities. Ask only when the repo points somewhere else (its agent instructions say sync files issues, an opt-in capability no other integration covers).
 - Tokens: when an integration's usual variable is already set (`access.api.ready`), the token is found; don't ask. Ask only when one is needed and none is found.
 - Lookups: a lookup with exactly one result is the answer. Ask when it returns several (two Vercel projects, several Linear teams) or none.

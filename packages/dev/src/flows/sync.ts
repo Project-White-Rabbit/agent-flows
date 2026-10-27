@@ -56,7 +56,7 @@ export const syncFlow: Flow = devKit.defineFlow({
   title: "{{cmd}}sync",
   frontmatter: {
     description:
-      "Commit, catch up to the base branch, push, and keep the draft PR and its issue in step with the branch. Only for the named agent-flows sync workflow, not generic commit or push requests.",
+      "Commit, catch up to the base branch, push, and keep the draft PR and its issue in step with the branch. Only for the named dev-flows sync workflow, not generic commit or push requests.",
     argumentHint: { deriveFromModes: true, suffix: "[ISSUE-ID]" },
   },
   commands: DEV_COMMANDS.defineCommands({
