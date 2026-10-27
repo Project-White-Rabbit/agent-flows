@@ -4,6 +4,7 @@ import {
   DEV_COMMANDS,
   devKit,
   REQUIRE_CONFIG,
+  STACK_PARENT,
   USE_INTEGRATIONS,
 } from "./kit.ts"
 
@@ -128,8 +129,8 @@ Stop the whole flow and tell the user if any part of this step leaves something 
    - **Source control:** keep the entry whose repository (from its \`values\`) is this checkout's \`origin\` in \`git remote -v\`. With none, stop: \`No configured source-control repository is this checkout's origin. Run {{cmd}}configure sourceControl, then re-run.\` With one at \`level\` \`read\`, stop too: \`The team uses <entry> read-only, so ready can't push, mark pull requests ready, or resolve review threads. Run {{cmd}}configure <integration> to change that.\`
    - **Stacking:** the first entry, if any.
 3. **Pull request:** the source-control entry's \`currentPr\` op: \`<pr>\` is its number, or none.
-4. **Parent:** the stacking entry's \`parent\` op when there is one and it succeeds; else the pull request's base branch; else \`<base>\`.
-5. **Scope:** \`{{command:ready}} plan --base <parent>\` fetches the parent and prints JSON: \`mergeBase\` (keep it as \`<mergeBase>\` for the whole flow, so a base that moves meanwhile doesn't change the scope), \`ahead\`, \`dirty\`, \`changed\` (every file the pull request will hold: committed since the merge base, uncommitted, and untracked), \`packages\` (each touched package's directory, manifest, how to run its scripts, and its fix and check scripts), \`instructions\` (the agent instruction files at the root and above each changed file), \`commands\` (the config's \`ready\` section, with \`{base}\` filled in), and \`logDir\`. If it fails because HEAD is detached, stop and tell the user to check out a branch.
+4. **Parent:** ${STACK_PARENT}
+5. **Scope:** \`{{command:ready}} plan --base <landed, else parent>\` fetches the parent and prints JSON: \`mergeBase\` (keep it as \`<mergeBase>\` for the whole flow, so a base that moves meanwhile doesn't change the scope), \`ahead\`, \`dirty\`, \`changed\` (every file the pull request will hold: committed since the merge base, uncommitted, and untracked), \`packages\` (each touched package's directory, manifest, how to run its scripts, and its fix and check scripts), \`instructions\` (the agent instruction files at the root and above each changed file), \`commands\` (the config's \`ready\` section, with \`{base}\` filled in), and \`logDir\`. If it fails because HEAD is detached, stop and tell the user to check out a branch.
 6. **Anything to publish?** With no pull request, \`ahead\` 0, and \`dirty\` false, stop: \`Nothing to publish: no pull request, and no work ahead of <parent>.\`
 
 Read every file in \`instructions\` you haven't already: they're where the repo says what must change together and how to check it, and they win over anything below.
@@ -170,7 +171,7 @@ On success that shows up to 20 warning and error lines from anywhere in the log,
 
 ### 1e. Rescan
 
-Run \`{{command:ready}} plan --base <parent>\` again. When the edits above touched packages that weren't in \`packages\` before, run 1d for them. This rescan is what keeps a stale first plan from skipping files the cleanup itself changed.`,
+Run \`{{command:ready}} plan --base <landed, else parent>\` again. When the edits above touched packages that weren't in \`packages\` before, run 1d for them. This rescan is what keeps a stale first plan from skipping files the cleanup itself changed.`,
           next: {
             byMode: {
               default: "run/sync-local",

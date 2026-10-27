@@ -3,6 +3,7 @@ import { configureFlow } from "./configure.ts"
 import { createTicketsFlow } from "./create-tickets.ts"
 import { evaluateFlow } from "./evaluate.ts"
 import { type DevTargetName, devKit } from "./kit.ts"
+import { mergeFlow } from "./merge.ts"
 import { readyFlow } from "./ready.ts"
 import { startWorkFlow } from "./start-work.ts"
 import { syncFlow } from "./sync.ts"
@@ -12,6 +13,7 @@ export const DEV_FLOWS = [
   configureFlow,
   createTicketsFlow,
   evaluateFlow,
+  mergeFlow,
   readyFlow,
   startWorkFlow,
   syncFlow,

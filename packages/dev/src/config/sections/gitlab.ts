@@ -65,6 +65,13 @@ const KEEP_DRAFT =
 const MERGE_STATUS =
   "`has_conflicts` true is conflicting; a `detailed_merge_status` of `need_rebase` is behind, and `checking`, `unchecked`, or `preparing` is pending; anything else is clean"
 
+const MERGE_STATE =
+  "a `detailed_merge_status` of `mergeable` is ready; `conflict` is conflicting; `need_rebase` is behind; `checking`, `unchecked`, `preparing`, or `approvals_syncing` is pending; anything else (`ci_must_pass`, `not_approved`, `discussions_not_resolved`, `draft_status`, …) is blocked, with that status as the reason"
+
+// GitLab sets merge commit or fast-forward per project, not per merge request.
+const MERGE_METHOD =
+  "`squash` true for <method> `squash`, else false: GitLab merges by the project's merge method (a merge commit, or fast-forward), so for `merge` or `rebase` say which it used"
+
 const STATUSES =
   "`status` `success` passes; `failed` fails, or is skipping when `allow_failure` is true; `canceled` is cancelled; `skipped` and `manual` are skipping; anything else is pending. Its `link` is `target_url`, and its `log` the job id at the end of a `target_url` ending `/-/jobs/<id>` (none for an outside service's status)"
 
@@ -117,6 +124,11 @@ export const gitlab: IntegrationSpec = {
         cli: `\`glab mr view <N> ${REPO} --output json\`: ${MR_FIELDS}`,
         api: `${API}/merge_requests/<N>"\`: ${MR_FIELDS}`,
       },
+      branchPr: {
+        mcp: `The GitLab MCP's merge request search for project \`{project}\` with source branch \`<branch>\`, any state, the most recent: ${MR_FIELDS}`,
+        cli: `\`glab api 'projects/{project:encoded}/merge_requests?source_branch=<branch>&state=all&order_by=updated_at&per_page=1' --hostname {host|gitlab.com}\`, the first: ${MR_FIELDS}. An empty list means none`,
+        api: `${API}/merge_requests?source_branch=<branch>&state=all&order_by=updated_at&per_page=1"\`, the first: ${MR_FIELDS}. An empty list means none`,
+      },
       prDiff: {
         mcp: "The GitLab MCP's merge request diffs tool for project `{project}` !<N>",
         cli: `\`glab mr diff <N> ${REPO} --raw\``,
@@ -143,6 +155,18 @@ export const gitlab: IntegrationSpec = {
         mcp: `The GitLab MCP's merge request read tool for project \`{project}\` !<N>: ${MERGE_STATUS}`,
         cli: `\`glab mr view <N> ${REPO} --output json\`: ${MERGE_STATUS}`,
         api: `${API}/merge_requests/<N>"\`: ${MERGE_STATUS}`,
+      },
+      prMergeState: {
+        mcp: `The GitLab MCP's merge request read tool for project \`{project}\` !<N>: ${MERGE_STATE}`,
+        cli: `\`glab mr view <N> ${REPO} --output json\`: ${MERGE_STATE}`,
+        api: `${API}/merge_requests/<N>"\`: ${MERGE_STATE}`,
+      },
+      // CLI and API first: they pin the head with `sha`. Not `glab mr merge`,
+      // which sets auto-merge by default.
+      prMerge: {
+        cli: `\`glab api -X PUT 'projects/{project:encoded}/merge_requests/<N>/merge' --hostname {host|gitlab.com} -F squash=<true|false> -f sha=<sha> -F should_remove_source_branch=false\`, with ${MERGE_METHOD}. 405 or 422 is refused, with the reason in \`message\`; 409 is a moved head`,
+        api: `\`PUT\` ${API_BARE}/merge_requests/<N>/merge\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`sha\` <sha>, \`should_remove_source_branch\` false, and ${MERGE_METHOD}. 405 or 422 is refused, with the reason in \`message\`; 409 is a moved head`,
+        mcp: `The GitLab MCP's merge tool for project \`{project}\` !<N>, with \`sha\` <sha> when it takes one (else check the head is <sha> just before), not removing the source branch, and ${MERGE_METHOD}`,
       },
       prReady: {
         mcp: "The GitLab MCP's update merge request tool for project `{project}` !<N>, with its title without the `Draft: ` prefix",

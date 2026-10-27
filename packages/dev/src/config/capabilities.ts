@@ -28,7 +28,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
       {
         id: "write",
         description:
-          "Also push branches, open and edit draft pull requests (sync), mark them ready, and resolve review threads (ready)",
+          "Also push branches, open and edit draft pull requests (sync), mark them ready, resolve review threads (ready), and merge them (merge)",
       },
     ],
     defaultLevel: "write",
@@ -37,6 +37,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
         "Which arguments name one of this host's pull requests: a bare number, or the host's pull request URL for this repository",
       currentPr: `The open pull request for the checked-out branch: ${PR_FIELDS}. No pull request, or the CLI missing or signed out, means there is none`,
       prMetadata: `Pull request <N>: ${PR_FIELDS}`,
+      branchPr: `The most recent pull request whose head is branch <branch>, open, merged, or closed: ${PR_FIELDS}. None means there is none`,
       prDiff: "Pull request <N>'s full unified diff",
       prFiles: "Pull request <N>'s changed file paths, one per line",
       prCommits: "Pull request <N>'s commit subjects, one per line",
@@ -46,6 +47,10 @@ export const CAPABILITIES: CapabilitySpec[] = [
         "Set pull request <N>'s title to <title> and its body to the file <body-file>, leaving its draft or ready state alone",
       prMergeability:
         "Whether pull request <N> merges cleanly into its base: `clean`, `conflicting`, `behind` (the base moved and the host wants it caught up), or `pending` (the host is still computing it)",
+      prMergeState:
+        "Whether the host would merge pull request <N> now: `ready` (checks it doesn't require may still be failing), `blocked` with the reasons it gives (a required check, an approval, a rule, a draft), `conflicting`, `behind` (the base moved and the host requires it caught up), or `pending` (the host is still computing it)",
+      prMerge:
+        "Merge pull request <N> into its base by <method> (`squash`, `merge` for a merge commit, or `rebase`), only while its head is still commit <sha>, deleting no branch and bypassing no rule. A host that can't honor <method> per pull request says what it does instead; a refusal (a rule, a required check, a moved head) prints the host's reason",
       prReady:
         "Mark pull request <N> ready for review. One that's already ready stays as it is",
       checks: `Every CI check and commit status on commit <sha>, all pages, as JSON: ${CHECKS_SHAPE}. An empty list means none has reported yet`,
@@ -68,8 +73,16 @@ export const CAPABILITIES: CapabilitySpec[] = [
         "Rebase the checked-out branch onto the latest commit of its parent (the fetched remote trunk, when the parent is trunk), stopping on conflicts",
       continue:
         "Carry on with an interrupted restack once its conflicts are resolved and staged",
+      reparent:
+        "Move the checked-out branch off <old>, its parent that has already merged, onto <onto>: replay only the branch's own commits (none of <old>'s, which <onto> already holds, squashed or not) onto the latest <onto> (the fetched remote one, when <onto> is trunk), record <onto> as its parent, and stop on conflicts",
+      rename:
+        "Rename the checked-out branch to <name>, keeping its place in the stack. A branch the tool doesn't track is renamed with git",
       submit:
         "Push the checked-out branch and open its pull request as a draft when it has none, leaving an existing pull request's title, body, and draft or ready state alone",
+      downstack:
+        '`{"chain": [<branch>...], "above": <n>, "size": <n>}`: `chain` the checked-out branch\'s ancestors in its stack as the tool records them, trunk left out, bottom first and ending with the checked-out branch; `above` how many branches stack on top of it; `size` how many its whole stack holds. A branch the tool doesn\'t track is a chain of one, with `above` 0 and `size` 1',
+      mergeStack:
+        "Merge the pull requests of every branch in the checked-out branch's `downstack` chain, bottom first, up to and including it, retargeting and restacking each next branch as the one below it lands. Stops at the first one that can't merge, printing why. The host's or the tool's own merge method applies",
     },
   },
   {
