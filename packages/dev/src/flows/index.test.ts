@@ -19,6 +19,8 @@ describe("dev flows", () => {
       "skills/create-tickets-apply/SKILL.md",
       "skills/evaluate/SKILL.md",
       "skills/evaluate-run/SKILL.md",
+      "skills/merge/SKILL.md",
+      "skills/merge-run/SKILL.md",
       "skills/ready/SKILL.md",
       "skills/ready-run/SKILL.md",
       "skills/start-work/SKILL.md",
@@ -285,6 +287,40 @@ describe("dev flows", () => {
           draft → <end>
           help → <end>"
     `)
+  })
+
+  it("finds a stacked branch's parent one way in every flow that reads it", () => {
+    const withParent = files
+      .filter((f) => f.content.includes("check it hasn't already merged"))
+      .map((f) => f.path)
+    expect(withParent).toEqual([
+      "skills/evaluate-run/SKILL.md",
+      "skills/merge/SKILL.md",
+      "skills/ready/SKILL.md",
+      "skills/sync-local/SKILL.md",
+    ])
+    for (const file of files) {
+      expect(file.content).not.toContain("`parent` op when there is one")
+    }
+  })
+
+  it("merges only the commit CI passed on, and cleans up only after", () => {
+    const run =
+      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+    const ci = run.indexOf('ready.ts" ci start --sha <sha>')
+    const state = run.indexOf("The `prMergeState` op")
+    const merge = run.indexOf(
+      "the `prMerge` op with <N>, the method, and `<sha>`",
+    )
+    const merged = run.indexOf("its state must be merged")
+    const closeOut = run.indexOf("skill with the argument `remote`")
+    const remove = run.indexOf("git push origin --delete <branch>")
+    expect(ci).toBeGreaterThan(-1)
+    expect(state).toBeGreaterThan(ci)
+    expect(merge).toBeGreaterThan(state)
+    expect(merged).toBeGreaterThan(merge)
+    expect(closeOut).toBeGreaterThan(merged)
+    expect(remove).toBeGreaterThan(closeOut)
   })
 
   it("bookends ready's publish with sync local and sync remote", () => {
