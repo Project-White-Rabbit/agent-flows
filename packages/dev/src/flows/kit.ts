@@ -61,6 +61,15 @@ export const REQUIRE_CONFIG =
   "If it exits with status 2 and prints `\"configured\": false`, stop this command here. Relay its `message`: the repo isn't set up for agent-flows yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `{{cmd}}configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead."
 
 /**
+ * Prose for a step that takes flags out of the arguments: what to do with one
+ * the command doesn't take. Flags are read, not parsed, so without this a
+ * mistyped flag is silently dropped. Only the entry skill's flag step uses it:
+ * phases get the arguments already checked.
+ */
+export const UNKNOWN_FLAGS =
+  "Any other argument that starts with `--` is a flag this command doesn't take: name it, print the usage block from `help`, and stop, rather than running without it. A `--` inside pasted notes, a quoted value, or a command the notes quote (`git push --force`) is part of that text, not a flag."
+
+/**
  * Prose for using what `configure.ts integrations` returns. Flows name
  * capabilities and ops, never a vendor or its CLI, so a repo's choice of
  * integrations (and how many) changes nothing in the skill.
