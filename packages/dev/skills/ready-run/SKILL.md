@@ -31,7 +31,7 @@ Skip the push when the branch's remote has this exact commit: `git fetch origin 
 
 ### Pull request
 
-When there's still none (no stacking integration, or one whose `submit` didn't open it): the `prCreate` op with `<base>` `<parent>`, a title in the repo's convention (its agent instructions, then the shape of recent subjects on the base, `git log -20 --format=%s <parent>`), and a body file holding one line saying what the branch does. The remote sync below writes the real body. Quote the title for the shell: single quotes, with any `'` written as `'\''`.
+When there's still none (no stacking integration, or one whose `submit` didn't open it): the `prCreate` op with `<base>` `<parent>`, a title in the repo's convention (its agent instructions, then the shape of recent subjects on the base, `git log -20 --format=%s <parent>`), and an empty body file. The remote sync below writes the body; anything put there now would survive it as text outside sync's block. Quote the title for the shell: single quotes, with any `'` written as `'\''`.
 
 Then the `prMergeability` op: `pending` → wait 3 seconds and ask again, up to 3 times, then treat it as clean; `conflicting` or `behind` → run the `/agent-flows:sync` skill with `local` once more, push again, and ask again. Still not clean: stop and show the user what the op returned.
 
