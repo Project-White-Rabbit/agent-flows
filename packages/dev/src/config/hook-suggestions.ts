@@ -34,6 +34,9 @@ const CHECK_FILE =
   /(?:check|verify)[-_]?(?:version|changelog|migrations?)|(?:version|changelog|migrations?)[-_]?(?:check|verify|gate)/
 const TEARDOWN_FILE = /(?:server|services|stack)[-_]?(?:down|stop)|teardown/
 
+/** A branch's resources go once it lands, or once it's thrown away. */
+const TEARDOWN_POINTS = ["merge.after", "close.after"] as const
+
 /** CI lines worth running before cleanup, and ones that must never run locally. */
 const CI_CHECK = /version|changelog|migrat/i
 const CI_UNSAFE =
@@ -171,11 +174,17 @@ export function suggestHooks(ctx: DetectContext): HookSuggestion[] {
           evidence: `${where} has a \`${name}\` script`,
         })
       } else if (TEARDOWN_NAME.test(name)) {
-        out.push({
-          point: "merge.after",
-          hook: { name, on: "success", run: scriptCommand(runner, dir, name) },
-          evidence: `${where} has a \`${name}\` script; check it takes no arguments, or which branch to tear down`,
-        })
+        for (const point of TEARDOWN_POINTS) {
+          out.push({
+            point,
+            hook: {
+              name,
+              on: "success",
+              run: scriptCommand(runner, dir, name),
+            },
+            evidence: `${where} has a \`${name}\` script; check it takes no arguments, or which branch to tear down`,
+          })
+        }
       }
     }
   }
@@ -192,11 +201,13 @@ export function suggestHooks(ctx: DetectContext): HookSuggestion[] {
         evidence: `${file} looks like a check; see what arguments it takes (\`{base}\` is the merge base)`,
       })
     } else if (TEARDOWN_FILE.test(base)) {
-      out.push({
-        point: "merge.after",
-        hook: { name: base, on: "success", run: fileCommand(file) },
-        evidence: `${file} looks like teardown; see what arguments it takes (\`{branch}\` is the merged branch)`,
-      })
+      for (const point of TEARDOWN_POINTS) {
+        out.push({
+          point,
+          hook: { name: base, on: "success", run: fileCommand(file) },
+          evidence: `${file} looks like teardown; see what arguments it takes (\`{branch}\` is the ${point === "merge.after" ? "merged" : "closed"} branch)`,
+        })
+      }
     }
   }
 

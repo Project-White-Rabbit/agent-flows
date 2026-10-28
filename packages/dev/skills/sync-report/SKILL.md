@@ -29,7 +29,7 @@ Otherwise lead with anything that needs the user's attention (an unresolved conf
 
 - **Mode** that ran, and what was skipped and why (the local git work in `remote` mode or on `runLocal: false`; 1a and the remote writes in `local` mode or on `runRemote: false`).
 - **Branch:** existing or created; what was committed; whether it caught up to the base (and any conflicts resolved, by file: a resolution nobody sees is one nobody checked); whether it was pushed.
-- **PR:** URL, draft or ready, existing or created, and its mergeability.
-- **Issue:** id, URL, and state (and, when it was closed and stayed closed, the state sync would have set); existing, found by the search (and which issue matched), created, or created as a sub-issue (of which); or none, with no issue tracker configured. The fields set or changed (priority, labels, estimate, cycle, project), and a closed issue the search found for the same work.
+- **PR:** URL (and its URL in the stacking tool's app, when `submit` printed one), draft or ready, existing or created, and its mergeability; and a `submit` that failed, with the push it fell back to.
+- **Issue:** id, URL, and state (and, when it was closed and stayed closed, the state sync would have set); existing, found by the search (and which issue matched), created, or created as a sub-issue (of which); updated, or left alone with `--leave-issue`; or none, with no issue tracker configured. The fields set or changed (priority, labels, estimate, cycle, project), and a closed issue the search found for the same work.
 - **Session:** the shared URL, or skipped or failed, and why.
 - **Errors:** refs linked, and any resolved.

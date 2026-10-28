@@ -1,7 +1,7 @@
 import type { Flow } from "@agent-flows/core"
 import { ISSUE_FIELD_RULES } from "./issues.ts"
 import {
-  CONFIGURE_INTEGRATIONS,
+  CONFIGURE_GET_AND_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
   flowDir,
@@ -18,8 +18,11 @@ const PLAN_EXAMPLE = `{
     { "key": "sync", "title": "Sync planning with the dev workflow", "priority": "high", "assignee": "Sam", "project": "Dev tools",
       "description": "What the work is and when it's done.\\n\\n- [ ] Pick the next task from a coding agent\\n- [ ] Post issue changes to chat",
       "label": "Feature", "defaults": ["project"] },
-    { "key": "bot", "title": "Answer issue questions in chat", "cycle": "next", "blockedBy": ["sync"] }
-  ]
+    { "key": "bot", "title": "Answer issue questions in chat", "cycle": "next", "blockedBy": ["sync"] },
+    { "key": "login", "title": "Fix login for Acme", "priority": "urgent", "dueDate": "2026-10-30", "blocker": true }
+  ],
+  "options": { "<entry>": { "people": [{ "name": "Sam Lee" }], "projects": ["Dev tools"], "labels": ["Feature"], "cycles": [{ "id": "40", "startsAt": "2026-10-19", "endsAt": "2026-10-26", "current": true }] } },
+  "refs": { "<ID>": { "found": true, "title": "...", "closed": false, "priority": "high", "subIssues": [] } }
 }`
 
 export const createTicketsFlow: Flow = devKit.defineFlow({
@@ -36,10 +39,10 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
   },
   commands: DEV_COMMANDS.defineCommands({
     hooks: HOOKS_COMMAND,
-    configure: CONFIGURE_INTEGRATIONS,
+    configure: CONFIGURE_GET_AND_INTEGRATIONS,
     tickets: {
       description:
-        "`check` checks the plan and prints the table to confirm (or `PROBLEM` lines); `record` saves an issue apply just filed into the plan",
+        "`check` checks the plan against the team's rules and prints the table to confirm (or `PROBLEM` lines); `record` saves an issue apply just filed into the plan; `notes` and `planning-line` shape the planning document's section and each issue's link to it",
       args: "<subcommand>",
     },
   }),
@@ -68,7 +71,7 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
   invariants: [
     "**Act through the integrations' ops.** Issues are searched, filed, updated, and linked only through the ops `configure.ts integrations` returns, run as given.",
     "**File only what the notes describe.** Don't invent work, and don't split an item into sub-issues the notes don't ask for.",
-    "**Existing issues keep their title, description, and parent.** An update sets only the fields the plan changes.",
+    "**Existing issues keep their title, description, and parent,** apart from the blocker mark on the title, the `> Planning:` line in the description, and a parent the plan moves them to. An update sets only what the plan changes.",
     "**Nothing is written before the confirmation** (or `--yes`), and nothing at all in `match` mode.",
     hooksInvariant("create-tickets"),
   ],
@@ -92,7 +95,7 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
 >   - \`{{cmd}}create-tickets match [--branch <branch>] <text>\` -- only find the issues that already describe the work. Files and changes nothing. Sync uses it to find a branch's issue.
 >   - \`help\` -- show this and exit
 >
-> Priority, labels, estimate, cycle, project, assignee, and due date come from the notes, then the repo's agent instructions, then the issue tracker's config. It needs an issue tracker (\`{{cmd}}configure issueTracker\`), at \`track\` to file.`,
+> Priority, labels, estimate, cycle, project, assignee, and due date come from the notes, then the repo's agent instructions, then the issue tracker's config. Names the tracker doesn't know (people, projects, labels, cycles, and blocked-by issues) are reported before anything is filed. The config's \`tickets\` section adds the team's rules: due dates required at some priorities, a parent ranked by its sub-issues, a blocker mark on titles, and a planning document per cycle that records the notes and links each issue back. New issues are filed in the todo state. It needs an issue tracker (\`{{cmd}}configure issueTracker\`), at \`track\` to file.`,
           next: null,
         },
         {
@@ -109,7 +112,8 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
    - **A URL:** read the page with this session's tools for that site (an MCP server's fetch or read tool; search for deferred ones before deciding there are none), else a plain web fetch. When nothing can read it (it needs a sign-in no tool has), ask the person to paste the page and stop until they do.
    - **Pasted notes** (often a flat list with no headings, copied from a chat channel or a doc) **or a sentence:** use the text as given.
    - **Nothing:** ask for the notes or a link, and stop.
-3. **Where the plan goes:** \`<dir>\` is ${flowDir("create-tickets")} (create it), so the plan never lands in the tree. The plan is \`<dir>/plan.json\` in default mode and \`<dir>/match.json\` in \`match\` mode, so looking never overwrites a notes plan or the issues it recorded as filed.`,
+3. **Where the plan goes:** \`<dir>\` is ${flowDir("create-tickets")} (create it), so the plan never lands in the tree. The plan is \`<dir>/plan.json\` in default mode and \`<dir>/match.json\` in \`match\` mode, so looking never overwrites a notes plan or the issues it recorded as filed. In default mode, write the notes as you read them, unedited, to \`<dir>/notes.md\`: the planning document records them as they are.
+4. **The team's rules:** \`{{command:configure}} get tickets.planningDoc tickets.blockerMark tickets.dueDateRequired tickets.parentFollowsSubIssues --optional\`. \`null\` means the team doesn't use that rule. \`tickets.ts check\` applies the last three itself; you need them to draft (a blocker, a date to ask for) and \`planningDoc\` to apply.`,
           next: "main/draft",
         },
         {
@@ -128,10 +132,11 @@ ${PLAN_EXAMPLE}
 | \`key\` | Short and unique. \`parent\` and \`blockedBy\` refer to keys, or to an existing issue's id. |
 | \`title\` | Plain words saying what the work does, never an issue id. |
 | \`description\` | What the work is and when it's done, then its action items as a checklist (\`- [ ] ...\`). |
-| \`parent\` | Usually left out: each planned item is one issue however many pull requests it takes, and its action items go in its checklist, never into sub-issues. In flat notes with no headings, fold lines into one item when they're clearly parts of the same work; otherwise each line is its own item. Set it only when the notes name an existing issue the work belongs under (matching may add one too). |
-| \`priority\` | \`urgent\`, \`high\`, \`medium\`, or \`low\`, from how the notes rank the work, read through the agent instructions' scale (a team's P0 might be \`urgent\`). On a new item the notes don't rank, the tracker entry's \`values.priority\` or the agent instructions' default, listed in \`defaults\`; with neither, leave it out. |
+| \`parent\` | Usually left out: each planned item is one issue however many pull requests it takes, and its action items go in its checklist, never into sub-issues. In flat notes with no headings, fold lines into one item when they're clearly parts of the same work; otherwise each line is its own item. Set it only when the notes name an existing issue the work belongs under (matching may add one too). On a matched item, a parent other than the issue's own moves it there. |
+| \`priority\` | \`urgent\`, \`high\`, \`medium\`, \`low\`, or \`none\`, from how the notes rank the work, read through the agent instructions' scale (a team's P0 might be \`high\`, and its lowest rank, an audit say, \`none\`). On a matched item, set it from how the notes rank the work even when the issue already has it, so an issue the notes moved doesn't keep its old rank. On a new item the notes don't rank, the tracker entry's \`values.priority\` or the agent instructions' default, listed in \`defaults\`; with neither, leave it out. With \`tickets.parentFollowsSubIssues\`, the check raises a parent to its most urgent open sub-issue. |
 | \`cycle\` | When the work happens: \`current\`, \`next\`, a cycle number, or a \`YYYY-MM-DD\` date inside it, from the notes ("this week", "next week", "after the launch"). Otherwise as the issue fields below say, listed in \`defaults\`. |
-| \`dueDate\` | \`YYYY-MM-DD\`, only from the notes (or the agent instructions, when they require one for some work: ask for it at the confirmation). \`null\` clears a matched issue's date; leaving it out keeps it. |
+| \`dueDate\` | \`YYYY-MM-DD\`, only from the notes (or the agent instructions or \`tickets.dueDateRequired\`, when they require one for some work: ask for it at the confirmation). \`null\` clears a matched issue's date; leaving it out keeps it. |
+| \`blocker\` | \`true\` only when the work stops a customer from making progress, and only with \`tickets.blockerMark\`: the title gets the mark. Work that holds up a teammate or another issue isn't a blocker: use \`blockedBy\` on the issue it holds up. |
 | \`assignee\` | The person the notes name (a first name is enough). Leave it out for the person running this. One person per issue. |
 | \`project\` | The one the notes name for the area, else the entry's \`values.project\`, listed in \`defaults\`. |
 | \`label\` | One label from the set the agent instructions or the entry's \`values.labels\` give, by the kind of work. Leave it out with no set. |
@@ -142,6 +147,8 @@ ${PLAN_EXAMPLE}
 | \`match\`, \`existing\` | Leave them out: matching sets them. |
 
 Don't invent work the notes don't mention.
+
+**What the tracker knows:** in default mode, run the filing entry's \`fieldOptions\` op once and put its JSON in the plan's \`options\`, under the entry's \`instance\` (else its \`integration\`); for an item filed in another entry, that entry's too. \`tickets.ts check\` then reports a person, project, label, or cycle the tracker doesn't have, with the names it does, and checks due dates against when cycles start. When the op is \`unsupported\` or no variant works here, leave \`options\` out: names go unchecked, so say so at the confirmation.
 
 **Running again on the same notes:** when the plan file already exists with the same \`source\`, start from it. Its items with a \`match\` are issues filed or matched last time; keep those matches, so a re-run only updates.
 
@@ -155,11 +162,17 @@ Don't invent work the notes don't mention.
           refName: "find matches",
           body: `For each item, run every entry's \`searchIssues\` op: once with the title, then once with each checklist line or sentence that names a distinct piece of the work (up to three), since an issue filed under another name may match on one line alone. Judge each candidate against the whole item (its description and checklist, and with \`--branch\`, the branch's work), not the title alone. Decide without asking:
 
-- **The same work, open:** set \`"match": "<ID>"\`, then load it with the entry's \`getIssue\` op and set \`existing\` from it: \`title\`, \`priority\`, \`cycle\`, \`dueDate\`, \`assignee\`, \`project\`, \`parent\`, and \`closed: false\`. With \`--branch\`, it's a match only when no pull request is attached and its description has no \`> Branch:\` line naming another branch; otherwise it's someone else's piece of the same work: the next case.
+- **The same work, open:** set \`"match": "<ID>"\`, then load it with the entry's \`getIssue\` op and set \`existing\` from it: \`title\`, \`url\`, \`priority\`, \`cycle\` and \`cycleStart\` (when its cycle starts), \`dueDate\`, \`assignee\`, \`project\` (\`null\` when it has none and the tracker has projects), \`parent\`, \`subIssues\` (its open sub-issues: \`id\`, \`title\`, \`priority\`, \`cycle\`, \`cycleStart\`, \`dueDate\`), and \`closed: false\`. Read its parent too: when it sits under the wrong one, or under none where an open issue covers the work as a whole, set \`parent\` to move it. With \`--branch\`, it's a match only when no pull request is attached and its description has no \`> Branch:\` line naming another branch; otherwise it's someone else's piece of the same work: the next case.
 - **Part of a larger open issue** (it covers the work as a whole, like a project's main issue), or with \`--branch\`, the same work under another pull request or branch: set \`"parent": "<ID>"\` and leave \`match\` out, so the item is filed as a sub-issue of it rather than beside it.
 - **Closed** (done or canceled in the last 90 days) **and the same work:** it's already done. Drop the item from the plan, and name the issue in the confirmation. With \`--branch\`, keep the item new and name the closed issue in the result: a closed issue is never a branch's issue.
 - **In an entry at \`link\`:** never a match, since it can't be updated here. When it's the same work, drop the item and name the issue in the confirmation as already tracked there. With \`--branch\`, keep the item and list the issue as \`also tracked\`.
 - **A loose overlap, or nothing fits:** leave the item new. Take a match only when it's clearly the same work.
+
+**Open issues in the item's project:** when an item names a project (or gets one by default), run the entry's \`projectIssues\` op for it once per project, and judge those issues against the item too, even when the words barely overlap: an issue that covers the work under another name shows up there. When the op is \`unsupported\`, skip it.
+
+For each candidate you weigh, look at its parent and its open sub-issues (\`getIssue\`): a parent that already covers the work as a whole is where a new item belongs (\`parent\`), and an open sub-issue may be the match itself.
+
+**Issues the plan names but doesn't hold:** every \`parent\` or \`blockedBy\` that is an issue id rather than a plan key, load with \`getIssue\` and record in the plan's \`refs\` under its id: \`found\` (false when the tracker has none), \`title\`, \`closed\`, \`priority\`, and \`subIssues\` as above. \`tickets.ts check\` reports one that isn't there.
 
 Two items that match the same issue are one piece of work: merge them into one item. When no variant of \`searchIssues\` works here, leave every item new and say the search was skipped.
 
@@ -200,14 +213,16 @@ search skipped: <why>                      only when no variant of searchIssues 
 {{command:tickets}} check --plan <dir>/plan.json
 \`\`\`
 
-It writes nothing. \`PROBLEM\` lines (exit 1) block filing: fix what you can in the plan and run it again, and put anything only the person can answer into the confirmation question. Otherwise it prints the table, one row per issue to file, update, or leave as is, in the order apply files them (\`row N\` points at an issue filed in the same run), then a \`SUMMARY\` line and any \`CHECK\` lines.
+It writes nothing. \`PROBLEM\` lines (exit 1) block filing: a name the tracker doesn't have (fix it with one it lists), an issue the plan names but hasn't loaded or that doesn't exist, a due date the team's rules require, a due date before its cycle starts, a parent loop. Fix what you can in the plan and run it again, and put anything only the person can answer (a due date) into the confirmation question. Otherwise it prints the table, one row per issue to file, update, or leave as is, in the order apply files them (\`row N\` points at an issue filed in the same run), then a \`SUMMARY\` line and any \`CHECK\` lines.
 
 Show the table and its \`SUMMARY\` line exactly as printed, then:
 
 - The fields marked \`(default)\` came from a default rather than the notes, so they get checked.
 - Each item dropped because a closed issue already did the work, and each issue already tracked in an entry at \`link\`, by id and title.
 - How you read any weekday deadline (for example: "Mon EOD" read as today, Monday, with its date).
-- Each \`CHECK\` line as a row of a short table: the issue, what's wrong, and the fix you propose (a new date, or \`null\`). They don't block filing, but each needs an answer first.
+- Each \`CHECK\` line as a row of a short table: the issue, what's wrong, and the fix you propose: a new date or \`null\` for an overdue date (the issue's own, or an open sub-issue's), a lower priority for each sub-issue that forces its parent above the rank the notes gave it (or keeping the higher rank on purpose), and a project for a matched issue with none. They don't block filing, but each needs an answer first. Urgent issues the notes don't mention aren't a problem: plenty of work comes up outside planning, so don't list or ask about them.
+- Values marked \`(sub-issues)\` came from the issue's sub-issues (\`tickets.parentFollowsSubIssues\`): a parent takes its most urgent sub-issue's priority and, with no cycle, its earliest sub-issue's cycle. A row for an issue outside the plan is a parent its new sub-issue moves up.
+- Names left unchecked, when \`options\` is out of the plan.
 - Anything else only the person can answer, such as a due date the agent instructions require.
 
 Then ask once: file these, or what should change? For changes, edit the plan, run the same command, and show the new table. Fold the answers to \`CHECK\` lines into the plan the same way, so the table you file from has none left unanswered.
@@ -230,17 +245,19 @@ Then ask once: file these, or what should change? For changes, edit the plan, ru
           commandCalls: ["tickets"],
           body: `After a yes (or with \`--yes\` and nothing to ask). \`<dir>\` and the tracker entries are from {{skill-ref:main}}.
 
-Run \`{{command:tickets}} check --plan <dir>/plan.json\` once more for the final row order, then go through the rows in order. An item files in its \`tracker\` entry, else the first entry at \`track\`.
+Run \`{{command:tickets}} check --plan <dir>/plan.json\` once more for the final row order, then go through the rows in order. An item files in its \`tracker\` entry, else the first entry at \`track\`. Each row's values are the ones the table shows: its title (with the blocker mark), and its priority and cycle (with what came from sub-issues).
 
-1. **\`file\`:** the entry's \`createIssue\` op with the title, the description, \`<parent>\` (a parent key becomes the id that item was filed or matched as), and \`<fields>\` from the issue fields below. Right after each one, before the next row, save it so a re-run updates it rather than filing it twice:
+0. **The planning document,** when \`tickets.planningDoc\` is true: \`{{command:tickets}} notes --plan <dir>/plan.json --notes <dir>/notes.md --out <dir>/section.md\` prints the document's \`title\` and the section's \`key\`. Run the filing entry's \`recordNotes\` op with \`<title>\`, \`<section-file>\` \`<dir>/section.md\`, and \`<key>\`, and keep the document's title and URL it prints. It records the notes before anything is filed, so they're kept even if filing fails. When the op is \`unsupported\` or fails, carry on without the document and its links, and say so in the report.
+1. **\`file\`:** the entry's \`createIssue\` op with the title, the description, \`<parent>\` (a parent key becomes the id that item was filed or matched as), \`<state>\` \`todo\`, and \`<fields>\` from the issue fields below. With the planning document, write the description to \`<dir>/<key>.md\` and run \`{{command:tickets}} planning-line --plan <dir>/plan.json --notes <dir>/notes.md --description <dir>/<key>.md --title <doc title> --url <doc URL>\` first, and file the file's text: it puts a \`> Planning:\` line linking the document on top. Right after each one, before the next row, save it so a re-run updates it rather than filing it twice:
 
    \`\`\`bash
    {{command:tickets}} record --plan <dir>/plan.json --key <key> --id <ID> --url <URL>
    \`\`\`
 
-2. **\`update\`:** the entry's \`updateIssue\` op with only \`<fields>\`, the ones the plan changes. Leave the title, description, and state out: they stay as they are.
+2. **\`update\`:** the entry's \`updateIssue\` op with only what the row changes: \`<fields>\` the plan changes, \`<parent>\` when the row's parent reads \`<old> → <new>\`, and \`<title>\` when it gains the blocker mark. With the planning document, also write the issue's description (from \`getIssue\`) to \`<dir>/<key>.md\` and run the same \`planning-line\` command on it; when it prints \`CHANGED\`, pass the file's text as \`<description>\`. Leave the state out, and the title and description otherwise: they stay as they are. A row for an issue outside the plan sets only its priority.
 3. **\`unchanged\`:** nothing.
 4. **Blocked by:** once every row is done, for each item's \`blockedBy\`, the entry's \`linkBlocked\` op with \`<ID>\` the item's issue and \`<blocker>\` the blocking one (a key becomes the id it was filed or matched as).
+5. **The planning document's issues,** when step 0 recorded it: run the same \`notes\` command again (the plan now holds every issue filed), and the \`recordNotes\` op again with the new section, which replaces the one step 0 wrote.
 
 When an op fails, carry on with the other rows and note it. A row that didn't file stays new in the plan, so running \`{{cmd}}create-tickets\` again on the same notes picks up where this left off.
 
@@ -256,6 +273,7 @@ Lead with anything that needs attention: a failed op (what failed and why), a sk
 
 - Each issue filed, updated, or left unchanged, as a link: \`[<ID>: <title>](<URL>)\`, grouped by what happened.
 - How many blocked-by links were made.
+- The planning document, as a link, and whether it was created or updated; or why there's none.
 - Items dropped because a closed issue did the work, and issues already tracked in an entry at \`link\`.`,
           next: null,
         },

@@ -92,6 +92,12 @@ describe("integration registry", () => {
             variants.length,
             `${path} ${op} has no variant`,
           ).toBeGreaterThan(0)
+          // An unsupported op says why, and nothing else.
+          if (typeof impl !== "string" && "unsupported" in impl) {
+            expect(variants.length, `${path} ${op}`).toBe(1)
+            expect(impl.unsupported.trim(), `${path} ${op}`).not.toBe("")
+            continue
+          }
           for (const [kind, how] of variants) {
             // A variant needs its access declared, so it can be probed.
             if (kind !== "any") {

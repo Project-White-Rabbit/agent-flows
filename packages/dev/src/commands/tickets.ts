@@ -1,14 +1,27 @@
-// The mechanical half of the create-tickets flow: the plan's shape, the table
-// the person confirms, and the issues apply has filed. Everything
-// vendor-specific (searching, filing, linking) stays in the skill, which
-// reaches it through the configured issue tracker's ops and writes what it
-// learns into the plan.
+// The mechanical half of the create-tickets flow: the plan's shape, the rules
+// the team files by (the config's `tickets` section), the table the person
+// confirms, the issues apply has filed, and the planning document's text.
+// Everything vendor-specific (searching, filing, linking) stays in the skill,
+// which reaches it through the configured issue tracker's ops and writes what
+// it learns into the plan.
 //
 // The plan is a JSON file in the worktree's private git dir. Recording each
 // filed issue in it means a re-run after a partial failure updates those
 // issues instead of filing them twice.
 
 import fs from "node:fs"
+import { getAt } from "../config/config.ts"
+import {
+  type FiledIssue,
+  planningLine,
+  planningTitle,
+  renderSection,
+  sourceKey,
+  upsertPlanningLine,
+  upsertSection,
+} from "../config/planning.ts"
+import { ISSUE_PRIORITIES } from "../config/sections/tickets.ts"
+import { loadConfig, repoRoot } from "./configure.ts"
 import {
   type Flags,
   isMain,
@@ -18,24 +31,71 @@ import {
   requiredFlag,
   runMain,
   runSubcommand,
+  UsageError,
 } from "./lib.ts"
 
-export const PRIORITIES = ["urgent", "high", "medium", "low"] as const
+/** The tracker's priorities, most urgent first; `none` is a team's lowest rank. */
+export const PRIORITIES = ISSUE_PRIORITIES
 
 /** The fields an item can set on an issue, in table order. */
 const FIELDS = ["priority", "cycle", "dueDate", "assignee", "project"] as const
 type Field = (typeof FIELDS)[number]
 
+/** An open sub-issue of a matched or referenced issue, as `getIssue` read it. */
+export type SubIssue = {
+  id: string
+  title?: string
+  priority?: string | null
+  cycle?: string | null
+  /** When its cycle starts, `YYYY-MM-DD`. */
+  cycleStart?: string | null
+  dueDate?: string | null
+}
+
 /** A matched issue as the tracker's `getIssue` op returned it. */
 export type Existing = {
   title?: string
+  url?: string
   /** The issue is done or canceled. */
   closed?: boolean
   /** In a tracker entry the team only links to, so it can't be updated. */
   readOnly?: boolean
   /** Its parent issue's id. */
   parent?: string | null
+  /** When its cycle starts, `YYYY-MM-DD`. */
+  cycleStart?: string | null
+  /** Its open sub-issues. */
+  subIssues?: SubIssue[]
 } & Partial<Record<Field, string | null>>
+
+/** An issue outside the plan that an item names as its parent or blocker. */
+export type Ref = {
+  /** `getIssue` found it. */
+  found: boolean
+  title?: string
+  closed?: boolean
+  priority?: string | null
+  subIssues?: SubIssue[]
+}
+
+/** A person the tracker can assign, as its `fieldOptions` op lists them. */
+export type Person = { name: string; displayName?: string; email?: string }
+
+/** A cycle (a sprint, an iteration): its number or name, and its dates. */
+export type Cycle = {
+  id: string
+  startsAt: string
+  endsAt: string
+  current?: boolean
+}
+
+/** What the tracker's fields can be set to: its `fieldOptions` op. */
+export type TrackerOptions = {
+  people?: Person[]
+  projects?: string[]
+  labels?: string[]
+  cycles?: Cycle[]
+}
 
 export type PlanItem = {
   key: string
@@ -46,6 +106,8 @@ export type PlanItem = {
   /** An existing issue's id, or `new`. */
   match?: string
   url?: string
+  /** Set by `record`: apply filed it in this plan's runs. */
+  filed?: boolean
   /** A plan key, or an existing issue's id. */
   parent?: string
   blockedBy?: string[]
@@ -57,6 +119,8 @@ export type PlanItem = {
   project?: string
   label?: string
   estimate?: number | string
+  /** It stops a customer: the title gets `tickets.blockerMark`. */
+  blocker?: boolean
   /** Fields set from a default rather than read from the notes. */
   defaults?: string[]
   existing?: Existing
@@ -65,11 +129,33 @@ export type PlanItem = {
 export type Plan = {
   source?: { title?: string; url?: string }
   items: PlanItem[]
+  /** Each tracker entry's `fieldOptions`, by entry name; an item without `tracker` uses the first. */
+  options?: Record<string, TrackerOptions>
+  /** Issues outside the plan that items name as parent or blocker, by id. */
+  refs?: Record<string, Ref>
+}
+
+/** The config's `tickets` section: how the team files and ranks work. */
+export type Rules = {
+  dueDateRequired?: string[]
+  parentFollowsSubIssues?: boolean
+  blockerMark?: string
 }
 
 export type Action = "file" | "update" | "unchanged"
 
-export type Row = { row: number; item: PlanItem; action: Action }
+/**
+ * An item as it will be filed: the plan's item with what the rules derive
+ * (a parent's priority and cycle from its sub-issues, the blocker mark).
+ */
+export type Planned = PlanItem & {
+  /** Fields the rules set, not the notes: `priority` and `cycle` from sub-issues. */
+  derived?: Field[]
+  /** The title to set on a matched issue: its own with the blocker mark. */
+  retitle?: string
+}
+
+export type Row = { row: number; item: Planned; action: Action }
 
 export type Checked = {
   problems: string[]
@@ -84,6 +170,12 @@ function isNew(item: PlanItem): boolean {
   return item.match === undefined || item.match === "new"
 }
 
+/** Lower is more urgent; an unknown or missing priority ranks with `none`. */
+function urgency(priority: string | null | undefined): number {
+  const index = PRIORITIES.indexOf(priority as never)
+  return index >= 0 ? index : PRIORITIES.length - 1
+}
+
 function changes(item: PlanItem): Field[] {
   return FIELDS.filter(
     (f) =>
@@ -92,28 +184,44 @@ function changes(item: PlanItem): Field[] {
   )
 }
 
-export function actionOf(item: PlanItem): Action {
+function reparents(item: PlanItem): boolean {
+  return (
+    !isNew(item) &&
+    item.parent !== undefined &&
+    item.parent !== (item.existing?.parent ?? undefined)
+  )
+}
+
+export function actionOf(item: Planned): Action {
   if (isNew(item)) {
     return "file"
   }
   const relates = (item.blockedBy?.length ?? 0) > 0
   const other = item.label !== undefined || item.estimate !== undefined
-  return changes(item).length > 0 || relates || other ? "update" : "unchanged"
+  return changes(item).length > 0 ||
+    relates ||
+    other ||
+    reparents(item) ||
+    item.retitle !== undefined
+    ? "update"
+    : "unchanged"
 }
 
 /**
  * Items in the order apply files them, each parent in the plan before its
  * sub-issues, and the keys whose parent chain loops back on itself.
  */
-export function parentsFirst(items: PlanItem[]): {
-  ordered: PlanItem[]
+export function parentsFirst<T extends PlanItem>(
+  items: T[],
+): {
+  ordered: T[]
   looped: string[]
 } {
   const byKey = new Map(items.map((item) => [item.key, item]))
-  const ordered: PlanItem[] = []
+  const ordered: T[] = []
   const placed = new Set<string>()
   const looped = new Set<string>()
-  const place = (item: PlanItem, trail: Set<string>): void => {
+  const place = (item: T, trail: Set<string>): void => {
     if (placed.has(item.key) || looped.has(item.key)) {
       return
     }
@@ -150,13 +258,13 @@ function shapeProblems(plan: Plan): string[] {
       problems.push(`item ${index + 1}: missing key`)
       return
     }
+    if (isNew(item) && !item.title?.trim()) {
+      problems.push(`${key}: a new issue needs a title`)
+    }
     if (seen.has(key)) {
       problems.push(`${key}: key used twice`)
     }
     seen.add(key)
-    if (isNew(item) && !item.title?.trim()) {
-      problems.push(`${key}: a new issue needs a title`)
-    }
     if (
       item.priority !== undefined &&
       !PRIORITIES.includes(item.priority as never)
@@ -175,21 +283,11 @@ function shapeProblems(plan: Plan): string[] {
         `${key}: cycle must be current, next, a number, or a YYYY-MM-DD date`,
       )
     }
-    if (item.parent === key) {
+    if (item.parent === key || (!isNew(item) && item.parent === item.match)) {
       problems.push(`${key}: an item can't be its own parent`)
     }
     if (item.blockedBy?.includes(key)) {
       problems.push(`${key}: an item can't block itself`)
-    }
-    // Updates keep an issue where it is; only a new one is filed under a parent.
-    if (
-      !isNew(item) &&
-      item.parent !== undefined &&
-      item.parent !== item.existing?.parent
-    ) {
-      problems.push(
-        `${key}: ${item.match} is an existing issue, so it keeps its parent: leave "parent" out`,
-      )
     }
     if (!isNew(item) && item.existing?.closed) {
       problems.push(
@@ -203,6 +301,336 @@ function shapeProblems(plan: Plan): string[] {
     }
   })
   return problems
+}
+
+/** Problems with the issues outside the plan that items name. */
+function refProblems(plan: Plan): string[] {
+  const keys = new Set(plan.items.map((item) => item.key))
+  const problems: string[] = []
+  for (const item of plan.items) {
+    const named: [string, string][] = [
+      ...(item.parent && !keys.has(item.parent) && reparentsOrNew(item)
+        ? [["parent", item.parent] as [string, string]]
+        : []),
+      ...(item.blockedBy ?? [])
+        .filter((ref) => !keys.has(ref))
+        .map((ref) => ["blocked-by", ref] as [string, string]),
+    ]
+    for (const [role, ref] of named) {
+      const found = plan.refs?.[ref]
+      if (!found) {
+        problems.push(
+          `${item.key}: ${role} ${ref} isn't a plan key, and the plan hasn't loaded it: load it with getIssue and record it in "refs"`,
+        )
+      } else if (!found.found) {
+        problems.push(
+          `${item.key}: ${role} ${ref} is neither a plan item nor an issue the tracker has`,
+        )
+      } else if (found.closed && role === "parent") {
+        problems.push(
+          `${item.key}: parent ${ref} is closed: file it under an open issue, or leave "parent" out`,
+        )
+      } else if (found.closed) {
+        problems.push(
+          `${item.key}: ${ref} is closed, so it blocks nothing: drop it from "blockedBy"`,
+        )
+      }
+    }
+  }
+  return problems
+}
+
+function reparentsOrNew(item: PlanItem): boolean {
+  return isNew(item) || reparents(item)
+}
+
+/** Lowercase words, for matching a name the notes wrote to the tracker's. */
+function normalize(text: string): string {
+  return (text.toLowerCase().match(/[a-z0-9]+/g) ?? []).join(" ")
+}
+
+function personMatches(person: Person, wanted: string): boolean {
+  const names = [
+    person.name,
+    person.displayName ?? "",
+    (person.email ?? "").split("@")[0] as string,
+    person.name.split(" ")[0] as string,
+  ]
+  return names.some((name) => name && normalize(name) === wanted)
+}
+
+/** The cycle a plan's `cycle` names, from the tracker's current and upcoming ones. */
+export function resolveCycle(
+  value: string,
+  cycles: Cycle[],
+): Cycle | undefined {
+  const sorted = [...cycles].sort((a, b) =>
+    a.startsAt.localeCompare(b.startsAt),
+  )
+  const current = sorted.findIndex((cycle) => cycle.current)
+  if (value === "current") {
+    return current >= 0 ? sorted[current] : undefined
+  }
+  if (value === "next") {
+    return current >= 0 ? sorted[current + 1] : undefined
+  }
+  if (DATE.test(value)) {
+    return sorted.find(
+      (cycle) =>
+        cycle.startsAt.slice(0, 10) <= value &&
+        value < cycle.endsAt.slice(0, 10),
+    )
+  }
+  return sorted.find((cycle) => cycle.id === value)
+}
+
+function optionsFor(plan: Plan, item: PlanItem): TrackerOptions | undefined {
+  const options = plan.options ?? {}
+  return item.tracker
+    ? options[item.tracker]
+    : options[Object.keys(options)[0] ?? ""]
+}
+
+/** Names the tracker doesn't know: people, projects, labels, and cycles. */
+function nameProblems(plan: Plan): string[] {
+  const problems: string[] = []
+  const list = (names: string[]) => names.join(" | ") || "none"
+  for (const item of plan.items) {
+    const options = optionsFor(plan, item)
+    if (!options) {
+      continue
+    }
+    const { key } = item
+    if (item.assignee && options.people) {
+      const wanted = normalize(item.assignee)
+      const found = options.people.filter((p) => personMatches(p, wanted))
+      if (found.length !== 1 && wanted !== "me") {
+        problems.push(
+          `${key}: assignee "${item.assignee}" matches ${found.length} people (people: ${list(options.people.map((p) => p.name))})`,
+        )
+      }
+    }
+    for (const [field, kind, names] of [
+      ["project", "project", options.projects],
+      ["label", "label", options.labels],
+    ] as const) {
+      const value = item[field]
+      if (value && names) {
+        const exact = names.filter((n) => normalize(n) === normalize(value))
+        if (exact.length !== 1) {
+          problems.push(
+            `${key}: ${kind} "${value}" matches ${exact.length} ${kind}s (${kind}s: ${list(names)})`,
+          )
+        }
+      }
+    }
+    if (item.cycle && options.cycles) {
+      if (!resolveCycle(item.cycle, options.cycles)) {
+        problems.push(
+          `${key}: cycle "${item.cycle}" matches no current or upcoming cycle (cycles: ${list(options.cycles.map((c) => `${c.id} (${c.startsAt.slice(0, 10)})`))})`,
+        )
+      }
+    }
+  }
+  return problems
+}
+
+/**
+ * The plan as it will be filed: the rules applied to each item, problems that
+ * block filing, checks that need an answer, and updates to parents outside
+ * the plan that its new sub-issues outrank.
+ */
+function applyRules(
+  plan: Plan,
+  ordered: PlanItem[],
+  rules: Rules,
+  today: string,
+): { items: Planned[]; problems: string[]; checks: string[] } {
+  const problems: string[] = []
+  const checks: string[] = []
+  const items: Planned[] = ordered.map((item) => structuredClone(item))
+  const byKey = new Map(items.map((item) => [item.key, item]))
+  const inPlan = new Set(items.filter((i) => !isNew(i)).map((i) => i.match))
+  const priorityOf = (item: Planned) =>
+    item.priority ?? item.existing?.priority ?? undefined
+  const cycleOf = (item: Planned) =>
+    item.cycle ?? item.existing?.cycle ?? undefined
+  const startOf = (item: Planned): string | undefined => {
+    const cycle = cycleOf(item)
+    if (!cycle) {
+      return undefined
+    }
+    const cycles = optionsFor(plan, item)?.cycles
+    const found = cycles ? resolveCycle(cycle, cycles) : undefined
+    if (found) {
+      return found.startsAt.slice(0, 10)
+    }
+    return item.cycle === undefined
+      ? (item.existing?.cycleStart ?? undefined)
+      : undefined
+  }
+  // A plan item's sub-issues: items filed under it, and its open sub-issues
+  // the plan doesn't touch.
+  const children = (item: Planned) => {
+    const id = isNew(item) ? undefined : item.match
+    return {
+      planned: items.filter(
+        (child) =>
+          child !== item &&
+          (child.parent === item.key ||
+            (id !== undefined &&
+              (child.parent ?? child.existing?.parent) === id)),
+      ),
+      open: (item.existing?.subIssues ?? []).filter(
+        (sub) => !inPlan.has(sub.id),
+      ),
+    }
+  }
+
+  const mark = rules.blockerMark
+  for (const item of items) {
+    if (!item.blocker) {
+      continue
+    }
+    if (!mark) {
+      problems.push(
+        `${item.key}: "blocker" needs tickets.blockerMark in the config, the mark its title gets: set it, or leave "blocker" out`,
+      )
+    } else if (isNew(item) && item.title && !item.title.includes(mark)) {
+      item.title = `${mark} ${item.title.trim()}`
+    } else if (
+      !isNew(item) &&
+      item.existing?.title &&
+      !item.existing.title.includes(mark)
+    ) {
+      item.retitle = `${mark} ${item.existing.title.trim()}`
+    }
+  }
+
+  // Sub-issues before parents, so a nested parent sees its children's result.
+  const updates = new Map<string, Planned>()
+  if (rules.parentFollowsSubIssues) {
+    const forced: string[] = []
+    for (const item of [...items].reverse()) {
+      const { planned, open } = children(item)
+      const kids = [
+        ...planned.map((c) => ({
+          id: isNew(c) ? c.key : (c.match as string),
+          priority: priorityOf(c),
+          cycle: cycleOf(c),
+          start: startOf(c),
+        })),
+        ...open.map((s) => ({
+          id: s.id,
+          priority: s.priority ?? undefined,
+          cycle: s.cycle ?? undefined,
+          start: s.cycleStart ?? undefined,
+        })),
+      ]
+      if (kids.length === 0) {
+        continue
+      }
+      const top = Math.min(...kids.map((k) => urgency(k.priority)))
+      const own = priorityOf(item)
+      if (top < urgency(own)) {
+        const forcing = kids.filter((k) => urgency(k.priority) === top)
+        if (
+          item.priority !== undefined &&
+          !item.defaults?.includes("priority")
+        ) {
+          forced.unshift(
+            `${isNew(item) ? item.key : item.match}: the plan sets ${item.priority}, but open sub-issues ${forcing.map((k) => `${k.id} (${k.priority})`).join(", ")} force it to ${PRIORITIES[top]}: lower those (add each to the plan with "match" and "priority"), or keep ${PRIORITIES[top]} on purpose`,
+          )
+        }
+        item.priority = PRIORITIES[top]
+        item.derived = [...(item.derived ?? []), "priority"]
+      }
+      const ownCycle =
+        item.cycle !== undefined && !item.defaults?.includes("cycle")
+          ? item.cycle
+          : (item.existing?.cycle ?? undefined)
+      const dated = kids.filter((k) => k.cycle && k.start)
+      if (!ownCycle && dated.length > 0) {
+        const earliest = dated.reduce((a, b) =>
+          (a.start as string) <= (b.start as string) ? a : b,
+        )
+        item.cycle = earliest.cycle
+        item.derived = [...(item.derived ?? []), "cycle"]
+      }
+    }
+    checks.push(...forced)
+    // A parent outside the plan that a new sub-issue outranks moves up too.
+    for (const item of items) {
+      const ref =
+        item.parent && !byKey.has(item.parent)
+          ? plan.refs?.[item.parent]
+          : undefined
+      if (!ref?.found || !item.parent || !reparentsOrNew(item)) {
+        continue
+      }
+      const id = item.parent
+      const wanted = Math.min(
+        urgency(priorityOf(item)),
+        urgency(updates.get(id)?.priority),
+        ...(ref.subIssues ?? [])
+          .filter((s) => !inPlan.has(s.id))
+          .map((s) => urgency(s.priority)),
+      )
+      if (wanted < urgency(ref.priority)) {
+        updates.set(id, {
+          key: id,
+          match: id,
+          priority: PRIORITIES[wanted],
+          derived: ["priority"],
+          existing: { title: ref.title, priority: ref.priority ?? null },
+        })
+      }
+    }
+  }
+
+  for (const item of items) {
+    const due =
+      item.dueDate !== undefined ? item.dueDate : item.existing?.dueDate
+    const priority = priorityOf(item)
+    const { planned, open } = children(item)
+    const isParent = planned.length + open.length > 0
+    if (
+      priority &&
+      rules.dueDateRequired?.includes(priority) &&
+      !due &&
+      !isParent
+    ) {
+      problems.push(
+        `${item.key}: every ${priority} issue needs a due date (tickets.dueDateRequired): set "dueDate", or ask for one`,
+      )
+    }
+    const start = startOf(item)
+    if (due && start && due < start) {
+      problems.push(
+        `${item.key}: due ${due} is before its cycle ${cycleOf(item)} starts (${start}): move the date or the cycle`,
+      )
+    }
+  }
+
+  for (const item of items) {
+    checks.push(...dueChecks(item, today))
+    if (isNew(item)) {
+      continue
+    }
+    for (const sub of children(item).open) {
+      if (sub.dueDate && sub.dueDate < today) {
+        checks.push(
+          `${sub.id}, a sub-issue of ${item.match}, is due ${sub.dueDate}, before today (${today}): add it to the plan with "match": "${sub.id}" and a new "dueDate", or null to clear it`,
+        )
+      }
+    }
+    if (item.existing?.project === null && item.project === undefined) {
+      checks.push(
+        `${item.match} has no project and the notes name none: set "project"`,
+      )
+    }
+  }
+  return { items: [...items, ...updates.values()], problems, checks }
 }
 
 function dueChecks(item: PlanItem, today: string): string[] {
@@ -226,10 +654,14 @@ function dueChecks(item: PlanItem, today: string): string[] {
   return []
 }
 
-export function checkPlan(plan: Plan, today: string): Checked {
-  const problems = shapeProblems(plan)
-  if (problems.length > 0) {
-    return { problems, checks: [], rows: [] }
+export function checkPlan(
+  plan: Plan,
+  today: string,
+  rules: Rules = {},
+): Checked {
+  const shape = shapeProblems(plan)
+  if (shape.length > 0) {
+    return { problems: shape, checks: [], rows: [] }
   }
   const { ordered, looped } = parentsFirst(plan.items)
   if (looped.length > 0) {
@@ -241,10 +673,18 @@ export function checkPlan(plan: Plan, today: string): Checked {
       rows: [],
     }
   }
+  const named = [...refProblems(plan), ...nameProblems(plan)]
+  if (named.length > 0) {
+    return { problems: named, checks: [], rows: [] }
+  }
+  const { items, problems, checks } = applyRules(plan, ordered, rules, today)
+  if (problems.length > 0) {
+    return { problems, checks: [], rows: [] }
+  }
   return {
     problems: [],
-    checks: ordered.flatMap((item) => dueChecks(item, today)),
-    rows: ordered.map((item, i) => ({
+    checks,
+    rows: items.map((item, i) => ({
       row: i + 1,
       item,
       action: actionOf(item),
@@ -257,7 +697,7 @@ function cell(text: string | undefined | null): string {
 }
 
 /** `old → new` for a field the plan changes, the value for one it keeps. */
-function fieldCell(item: PlanItem, field: Field): string {
+function fieldCell(item: Planned, field: Field): string {
   const planned = item[field]
   const existing = item.existing?.[field]
   let text: string
@@ -267,6 +707,9 @@ function fieldCell(item: PlanItem, field: Field): string {
     text = planned ?? ""
   } else {
     text = `${existing || "none"} → ${planned ?? "none"}`
+  }
+  if (text && item.derived?.includes(field)) {
+    return `${text} (sub-issues)`
   }
   return item.defaults?.includes(field) && text ? `${text} (default)` : text
 }
@@ -283,6 +726,12 @@ export function renderTable(rows: Row[]): string {
       ? `row ${target.row}`
       : (target.item.match as string)
   }
+  const parentCell = (item: Planned): string => {
+    if (!reparents(item)) {
+      return item.parent ? ref(item.parent) : (item.existing?.parent ?? "")
+    }
+    return `${item.existing?.parent || "none"} → ${ref(item.parent as string)}`
+  }
   const lines = [
     "| # | Action | Issue | Title | Parent | Priority | Cycle | Due | Assignee | Project | Blocked by |",
     "|---|---|---|---|---|---|---|---|---|---|---|",
@@ -292,8 +741,8 @@ export function renderTable(rows: Row[]): string {
       String(row),
       action,
       isNew(item) ? "new" : (item.match as string),
-      cell(item.title ?? item.existing?.title),
-      item.parent ? ref(item.parent) : "",
+      cell(item.retitle ?? item.title ?? item.existing?.title),
+      parentCell(item),
       ...FIELDS.map((f) => cell(fieldCell(item, f))),
       (item.blockedBy ?? []).map(ref).join(", "),
     ]
@@ -328,10 +777,33 @@ export function recordFiled(
     throw new Error(`the plan has no item \`${key}\``)
   }
   item.match = id
+  item.filed = true
   if (url) {
     item.url = url
   }
   return plan
+}
+
+/** The plan's issues as the planning document lists them, once each is filed or matched. */
+export function filedIssues(plan: Plan): FiledIssue[] {
+  return plan.items
+    .filter((item) => !isNew(item))
+    .map((item) => ({
+      id: item.match as string,
+      title: item.existing?.title ?? item.title ?? "",
+      url: item.url ?? item.existing?.url,
+      action: item.filed
+        ? "filed"
+        : actionOf(item) === "update"
+          ? "updated"
+          : "unchanged",
+    }))
+}
+
+/** The current cycle's start, from the first tracker entry's options. */
+function currentCycleStart(plan: Plan): string | undefined {
+  const first = Object.values(plan.options ?? {})[0]
+  return first?.cycles?.find((cycle) => cycle.current)?.startsAt
 }
 
 function today(): string {
@@ -340,16 +812,48 @@ function today(): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
 
+/** The config's `tickets` section, from the repo this runs in. */
+export function readRules(root: string): Rules {
+  const config = loadConfig(root).config
+  const section = config ? getAt(config, "tickets") : undefined
+  if (!section || typeof section !== "object") {
+    return {}
+  }
+  const s = section as Record<string, unknown>
+  return {
+    ...(Array.isArray(s.dueDateRequired)
+      ? { dueDateRequired: s.dueDateRequired as string[] }
+      : {}),
+    ...(s.parentFollowsSubIssues === true
+      ? { parentFollowsSubIssues: true }
+      : {}),
+    ...(typeof s.blockerMark === "string"
+      ? { blockerMark: s.blockerMark }
+      : {}),
+  }
+}
+
 type Args = Flags
 
 function readPlan(file: string): Plan {
   return readJson<Plan>(file)
 }
 
+function readText(file: string): string {
+  try {
+    return fs.readFileSync(file, "utf8")
+  } catch (error) {
+    throw new UsageError(
+      `can't read ${file}: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
 function check(args: Args): void {
   const checked = checkPlan(
     readPlan(requiredFlag(args, "plan")),
     args.get("today") ?? today(),
+    readRules(repoRoot()),
   )
   if (checked.problems.length > 0) {
     console.log(checked.problems.map((p) => `PROBLEM ${p}`).join("\n"))
@@ -377,19 +881,70 @@ function ids(args: Args): void {
   console.log(found.length > 0 ? found.join(" ") : "NONE")
 }
 
+function notes(args: Args): void {
+  const plan = readPlan(requiredFlag(args, "plan"))
+  const text = readText(requiredFlag(args, "notes"))
+  const day = args.get("today") ?? today()
+  const source = plan.source ?? {}
+  const key = sourceKey(source, text)
+  const section = renderSection(day, source, key, text, filedIssues(plan))
+  const out = args.get("out")
+  if (out) {
+    fs.writeFileSync(out, `${section}\n`)
+  }
+  const document = args.get("document")
+  printJson({
+    title: planningTitle(currentCycleStart(plan), day),
+    key,
+    ...(out ? { section: out } : { section }),
+    ...(document
+      ? { content: upsertSection(readText(document), key, section) }
+      : {}),
+  })
+}
+
+function planning(args: Args): void {
+  const plan = readPlan(requiredFlag(args, "plan"))
+  const file = requiredFlag(args, "description")
+  const text = readText(requiredFlag(args, "notes"))
+  const source = plan.source ?? {}
+  const line = planningLine(
+    requiredFlag(args, "title"),
+    requiredFlag(args, "url"),
+    source,
+    sourceKey(source, text),
+  )
+  const before = readText(file)
+  const after = upsertPlanningLine(before, line)
+  fs.writeFileSync(file, after)
+  console.log(before.trim() === after.trim() ? "UNCHANGED" : "CHANGED")
+}
+
 const USAGE = `Usage: tickets.ts <command>
 
   check --plan <file> [--today YYYY-MM-DD]
-                  Check the plan without writing anything. Prints PROBLEM
-                  lines and exits 1 when it can't be filed; otherwise the
-                  table (rows in the order apply files them, parents first),
-                  a SUMMARY line, and CHECK lines that need an answer first.
+                  Check the plan, by the config's \`tickets\` rules, without
+                  writing anything. Prints PROBLEM lines and exits 1 when it
+                  can't be filed; otherwise the table (rows in the order apply
+                  files them, parents first, then parents outside the plan its
+                  sub-issues move up), a SUMMARY line, and CHECK lines that
+                  need an answer first.
   record --plan <file> --key <key> --id <id> [--url <url>]
                   Save an issue apply just filed as the item's match, so a
                   re-run updates it instead of filing it again.
   ids --plan <file>
                   The issues the plan filed, updated, or matched, each once,
                   space-separated, or NONE.
+  notes --plan <file> --notes <file> [--out <file>] [--document <file>] [--today YYYY-MM-DD]
+                  The planning document's title and this run's section (the
+                  notes as written, and the plan's issues), as JSON with the
+                  source key that finds the section again. --out writes the
+                  section to a file; --document, the document's current text,
+                  adds \`content\`: the document with the section in place.
+  planning-line --plan <file> --notes <file> --description <file> --title <doc title> --url <doc url>
+                  Put the \`> Planning:\` line linking the document into the
+                  description file, replacing one it has. Prints CHANGED or
+                  UNCHANGED.
 
 Exits 2 on bad arguments or a plan it can't read.`
 
@@ -397,6 +952,8 @@ const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   check,
   record,
   ids,
+  notes,
+  "planning-line": planning,
 }
 
 export function main(argv: string[]): void {

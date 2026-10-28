@@ -195,8 +195,13 @@ export type AccessSpec = {
  * How an integration does one op: one string when it's the same whatever the
  * access (a URL shape), else one per access kind it supports, in the order to
  * try them (usually `ACCESS_KINDS` order; an op lists a more exact way first).
+ * An op the tool has nothing for is `{ unsupported: <why> }` alone, so flows
+ * skip what needs it and say so rather than improvise.
  */
-export type OpImpl = string | Partial<Record<VariantKind, string>>
+export type OpImpl =
+  | string
+  | Partial<Record<VariantKind, string>>
+  | { unsupported: string }
 
 /**
  * A way to run an op: one of the access kinds, or `script`, which resolution
@@ -248,6 +253,8 @@ export type Adapter = {
   needs?: "api" | "cli"
   /** Argument names, each passed as `--name <value>`. */
   args?: string[]
+  /** Arguments it takes when the op is given them, and does without. */
+  optional?: string[]
   /** What it prints, as JSON. Throw to fail. */
   run(input: AdapterInput): Promise<unknown>
 }

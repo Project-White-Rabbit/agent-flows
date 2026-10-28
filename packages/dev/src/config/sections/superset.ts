@@ -30,13 +30,13 @@ export const superset: IntegrationSpec = {
   provides: {
     workspaces: {
       workspaces: {
-        cli: "`superset ws list --local --json`, keeping the ones with `projectId` `{project}` and no `archivedAt`. Each has `id`, `name`, `branch`, and `tags` (its sidebar section, empty for none). This session runs in the one whose `id` is `$SUPERSET_WORKSPACE_ID`",
+        cli: "`superset ws list --local --json`, keeping the ones with `projectId` `{project}` (with <project>, that project's `id`, as for `createWorkspace`) and no `archivedAt`. Each has `id`, `name`, `branch`, and `tags` (its sidebar section, empty for none). This session runs in the one whose `id` is `$SUPERSET_WORKSPACE_ID`",
       },
       renameWorkspace: {
         cli: "`superset ws update <id> --local --json --name <name>`, adding `--tag <section>` for a section or `--clear-tags` for `none` (a tag files the workspace in the sidebar section of that name, making it)",
       },
       createWorkspace: {
-        cli: '`superset ws create --local --json --project {project} --name <name> --branch <branch> --base-branch <base> --agent {agent|claude} --prompt "$(cat <prompt-file>)"`, adding `--skip-branch-prefix` when <exact> is `yes` (otherwise the branch goes under the project\'s branch prefix) and `--tag <section>` when a section is given (a tag files the workspace in the sidebar section of that name, making it). It prints JSON whose `workspace` (or the top level) has `id`, `branch`, and `worktreePath`',
+        cli: "`superset ws create --local --json --project {project} --name <name> --branch <branch> --base-branch <base> --agent {agent|claude} --prompt \"$(cat <prompt-file>)\"`. With <project>, pass in place of `{project}` the `id` of the project in `superset projects list --local --json` whose `name` or `id` is <project> (none: say so, listing the names, and open nothing), and for <base> that project's default branch, from `git -C <its path> symbolic-ref --short refs/remotes/origin/HEAD` without the `origin/`. Add `--skip-branch-prefix` when <exact> is `yes` (otherwise the branch goes under the project's branch prefix) and `--tag <section>` when a section is given (a tag files the workspace in the sidebar section of that name, making it). It prints JSON whose `workspace` (or the top level) has `id`, `branch`, and `worktreePath`",
       },
     },
   },

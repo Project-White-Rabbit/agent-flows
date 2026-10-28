@@ -119,21 +119,38 @@ export async function probeAccess(
   return report
 }
 
-/** Every integration's report, probed in parallel, by section path. */
+/** The key an instance's own report is under: `integrations.linear:<instance>`. */
+export function accessKey(sectionPath: string, instance?: string): string {
+  return instance ? `${sectionPath}:${instance}` : sectionPath
+}
+
+/**
+ * Every integration's report, probed in parallel, by section path; and, for
+ * an instance with a token of its own (`linear:<instance>`), by
+ * `accessKey(path, instance)` too.
+ */
 export async function probeAll(
   specs: IntegrationSpec[],
   probe: Probe,
-  /** Recorded token sources, by integration id (`linear`). */
+  /** Recorded token sources, by integration id (`linear`) or instance (`linear:<name>`). */
   tokens: Record<string, TokenSource> = {},
 ): Promise<Record<string, AccessReport>> {
+  const targets: [string, IntegrationSpec, TokenSource | undefined][] = []
+  for (const spec of specs) {
+    const id = spec.path.split(".").at(-1) as string
+    targets.push([spec.path, spec, tokens[id]])
+    for (const [key, source] of Object.entries(tokens)) {
+      if (key.startsWith(`${id}:`)) {
+        targets.push([
+          accessKey(spec.path, key.slice(id.length + 1)),
+          spec,
+          source,
+        ])
+      }
+    }
+  }
   const reports = await Promise.all(
-    specs.map((spec) =>
-      probeAccess(
-        spec.access,
-        probe,
-        tokens[spec.path.split(".").at(-1) as string],
-      ),
-    ),
+    targets.map(([, spec, source]) => probeAccess(spec.access, probe, source)),
   )
-  return Object.fromEntries(specs.map((spec, i) => [spec.path, reports[i]]))
+  return Object.fromEntries(targets.map(([key], i) => [key, reports[i]]))
 }

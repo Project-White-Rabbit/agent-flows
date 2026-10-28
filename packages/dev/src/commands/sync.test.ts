@@ -479,6 +479,13 @@ describe("sync.ts (as a script)", () => {
     git("switch", "-q", "-c", "feature")
   }
 
+  it("prints the issue a sync recorded for the branch, without writing", () => {
+    init()
+    expect(json(["issue"])).toEqual({ branch: "feature", issue: null })
+    json(["finish", "--base", "main", "--pr", "none", "--issue", "ENG-7"])
+    expect(json(["issue"])).toEqual({ branch: "feature", issue: "ENG-7" })
+  })
+
   it("gates on what changed since finish recorded the last sync", () => {
     init()
     const survey = ["survey", "default", "--base", "main", "--pr", "none"]

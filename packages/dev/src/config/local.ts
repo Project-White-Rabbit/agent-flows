@@ -65,6 +65,27 @@ export function writeLocal(root: string, settings: LocalSettings): string {
   return file
 }
 
+/**
+ * Where a token is recorded: `linear`, or `linear:<instance>` for one
+ * instance of an integration configured more than once (a second workspace
+ * with its own token). An instance without its own uses the integration's.
+ */
+export function tokenKey(integration: string, instance?: string): string {
+  return instance ? `${integration}:${instance}` : integration
+}
+
+/** The recorded source for an integration, or for one of its instances. */
+export function tokenFor(
+  tokens: Record<string, TokenSource>,
+  integration: string,
+  instance?: string,
+): TokenSource | undefined {
+  return (
+    (instance ? tokens[tokenKey(integration, instance)] : undefined) ??
+    tokens[integration]
+  )
+}
+
 /** An env var name: what `{ env }` may hold, so it's safe in `$NAME`. */
 export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 

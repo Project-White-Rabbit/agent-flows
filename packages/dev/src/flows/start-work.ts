@@ -39,7 +39,7 @@ export const startWorkFlow: Flow = devKit.defineFlow({
     description:
       "File issues from notes and open a workspace with a coding agent on each, or start work on issues already filed. Not for syncing a branch.",
     argumentHint:
-      "[issue ids | notes URL | pasted notes] [--start-only] [--reuse [--no-ticket]] [--confirm] [--section <name> | --section-by-rank | --no-section] [--in <integration>] [--yes] [help]",
+      "[issue ids | notes URL | pasted notes] [--start-only] [--reuse [--no-ticket]] [--confirm] [--section <name> | --section-by-rank | --no-section] [--in <integration>] [--project <name>] [--yes] [help]",
   },
   commands: DEV_COMMANDS.defineCommands({
     hooks: HOOKS_COMMAND,
@@ -89,7 +89,7 @@ Invoking it is the go-ahead, so it asks nothing before filing or starting, excep
 {{cmd}}start-work  [issue ids | notes URL | pasted notes]
                          [--start-only] [--reuse [--no-ticket]] [--confirm]
                          [--section <name> | --section-by-rank | --no-section]
-                         [--in <integration>] [--yes] [help]
+                         [--in <integration>] [--project <name>] [--yes] [help]
 
 Opens one workspace per issue, each on its own branch with a coding agent
 already working on it, without asking first.
@@ -114,6 +114,9 @@ already working on it, without asking first.
   - --no-section: puts the workspaces in no section
   - --in <integration>: opens them with that workspaces integration, when the
     repo configured more than one
+  - --project <name>: opens them in another project of the workspaces
+    integration (another repository it manages), on that repository's
+    default branch, for work tracked here that lands there
   - --yes: the caller already has the go-ahead; never asks, even with
     --confirm
 Skips closed issues and issues that already have a workspace. Adds a
@@ -129,7 +132,7 @@ integration (a workspace app, or plain git worktrees); set it up with
           kind: "action",
           title: "Find the issues",
           commandCalls: ["configure", "tickets"],
-          body: `1. **Flags.** Take \`--start-only\`, \`--reuse\`, \`--no-ticket\`, \`--confirm\`, \`--section <name>\`, \`--section-by-rank\`, \`--no-section\`, \`--in <integration>\`, and \`--yes\` out of \`{{argsToken}}\`, and keep them for the later steps. ${UNKNOWN_FLAGS} Read plain words the same way: "don't file anything" or "only start them" is \`--start-only\`; "ask me first" is \`--confirm\`; "do it here", "in this workspace", or "reuse this worktree" is \`--reuse\`; "no ticket" or "just rename this" is \`--no-ticket\`, which turns on \`--reuse\`; "put them in Bugs" is \`--section Bugs\`; "sort them into sections by priority" is \`--section-by-rank\`. "Just file them" means this isn't the command: run \`{{cmd}}create-tickets\` with the notes instead, and stop. When more than one of the three section flags is there, say only one can be given, and stop. \`--no-ticket\` can't be combined with issue ids, \`--start-only\`, or \`--section-by-rank\` (there's no issue to rank): say so and stop. \`--yes\` means the caller (such as \`{{cmd}}tickets-to-work\`) already has the person's go-ahead: ignore \`--confirm\` and ask nothing.
+          body: `1. **Flags.** Take \`--start-only\`, \`--reuse\`, \`--no-ticket\`, \`--confirm\`, \`--section <name>\`, \`--section-by-rank\`, \`--no-section\`, \`--in <integration>\`, \`--project <name>\`, and \`--yes\` out of \`{{argsToken}}\`, and keep them for the later steps. ${UNKNOWN_FLAGS} Read plain words the same way: "don't file anything" or "only start them" is \`--start-only\`; "ask me first" is \`--confirm\`; "do it here", "in this workspace", or "reuse this worktree" is \`--reuse\`; "no ticket" or "just rename this" is \`--no-ticket\`, which turns on \`--reuse\`; "put them in Bugs" is \`--section Bugs\`; "open it in the web repo" or "in the <name> project" is \`--project <name>\`; "sort them into sections by priority" is \`--section-by-rank\`. "Just file them" means this isn't the command: run \`{{cmd}}create-tickets\` with the notes instead, and stop. When more than one of the three section flags is there, say only one can be given, and stop. \`--no-ticket\` can't be combined with issue ids, \`--start-only\`, or \`--section-by-rank\` (there's no issue to rank), and \`--reuse\` can't be combined with \`--project\` (this workspace is in this repository): say so and stop. \`--yes\` means the caller (such as \`{{cmd}}tickets-to-work\`) already has the person's go-ahead: ignore \`--confirm\` and ask nothing.
 2. **Integrations.** \`{{command:configure}} integrations workspaces issueTracker\` (with \`--reuse\`, also \`{{command:configure}} integrations stacking --optional\`: its first entry, if any, renames the branch) and \`{{command:configure}} get repo.baseBranch\`. ${REQUIRE_CONFIG} ${USE_INTEGRATIONS}
    - New workspaces open with the \`workspaces\` entry \`--in\` names (by \`instance\` or \`integration\`), else the first one. Every \`workspaces\` entry is read for workspaces already open.
    - An issue belongs to the \`issueTracker\` entry whose \`issueRef\` it matches. Only an entry at \`level\` \`track\` gets its issues' branch line and state changed; at \`link\` they are only read.
@@ -151,7 +154,7 @@ integration (a workspace app, or plain git worktrees); set it up with
           kind: "action",
           title: "Decide what starts",
           commandCalls: ["work"],
-          body: `1. **Read each issue** with its tracker entry's \`getIssue\` op, and **every open workspace** with each \`workspaces\` entry's \`workspaces\` op. Write them to \`<dir>/start.json\`:
+          body: `1. **Read each issue** with its tracker entry's \`getIssue\` op, and **every open workspace** with each \`workspaces\` entry's \`workspaces\` op (with \`--project\`, also the chosen entry's \`workspaces\` op with \`<project>\`, so an issue already open there isn't started twice). Write them to \`<dir>/start.json\`:
 
    \`\`\`json
    ${INPUT_EXAMPLE.split("\n").join("\n   ")}
@@ -179,7 +182,7 @@ integration (a workspace app, or plain git worktrees); set it up with
           commandCalls: ["work"],
           body: `Go through the lines in order, without asking (with \`--confirm\`, after the yes). When an op fails, note it and carry on with the next issue.
 
-1. **\`START\`:** the chosen \`workspaces\` entry's \`createWorkspace\` op, with \`<name>\` \`<ID>: <title>\`, \`<branch>\` and \`<exact>\` from the line, \`<base>\` the configured \`repo.baseBranch\`, \`<section>\` the line's (leave it out for \`none\`), and \`<prompt-file>\` the line's \`prompt\`. Note the branch it prints: that's the issue's branch from now on, prefix and all. When it prints a command that starts the agent instead of starting one, keep that command for the report.
+1. **\`START\`:** the chosen \`workspaces\` entry's \`createWorkspace\` op, with \`<name>\` \`<ID>: <title>\`, \`<branch>\` and \`<exact>\` from the line, \`<base>\` the configured \`repo.baseBranch\` (with \`--project\`, \`<project>\` its name and \`<base>\` that repository's default branch, as the op says), \`<section>\` the line's (leave it out for \`none\`), and \`<prompt-file>\` the line's \`prompt\`. Note the branch it prints: that's the issue's branch from now on, prefix and all. When it prints a command that starts the agent instead of starting one, keep that command for the report.
 2. **The issue** (a \`START\` that opened, or an \`EXISTS\` with \`branch-line=add\` or \`state=move\`), when its tracker entry is at \`track\`: write the description \`getIssue\` returned to \`<dir>/<ID>.md\`, then
 
    \`\`\`bash

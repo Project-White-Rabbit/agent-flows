@@ -151,10 +151,18 @@ function checkField(
       ? undefined
       : `${where} must be true or false`
   }
-  return Array.isArray(value) &&
-    value.every((v) => typeof v === "string" && v.trim() !== "")
+  if (
+    !Array.isArray(value) ||
+    !value.every((v) => typeof v === "string" && v.trim() !== "")
+  ) {
+    return `${where} must be a list of non-empty strings`
+  }
+  const bad = field.pattern
+    ? value.find((v) => !field.pattern?.regex.test(v))
+    : undefined
+  return bad === undefined
     ? undefined
-    : `${where} must be a list of non-empty strings`
+    : `${where} must list only ${field.pattern?.hint} (not \`${bad}\`)`
 }
 
 const UNKNOWN_NOTE = "kept as is; it may come from a newer plugin"

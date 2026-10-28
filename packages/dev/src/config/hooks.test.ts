@@ -185,5 +185,6 @@ describe("fillVars", () => {
         branch: "x",
       }),
     ).toBe("abc x {other} {outcome}")
+    expect(fillVars("{pr} {prs}", { pr: "12", prs: "11 12" })).toBe("12 11 12")
   })
 })

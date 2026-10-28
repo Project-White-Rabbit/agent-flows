@@ -50,7 +50,11 @@ export const mergeFlow: Flow = devKit.defineFlow({
     "**Never bypass the host:** no admin merge, no auto-merge, no skipping a required check or review, no rerunning someone's CI to get past it.",
     "**Nothing is pushed between the CI pass and the merge.** The merge is pinned to the commit CI passed on; a head that moved since stops it.",
     "**Clean up only after the host says merged.** No branch deletion, issue update, or error resolution for a pull request that isn't merged.",
-    hooksInvariant("merge", { afterPoint: true, extra: "--branch <branch>" }),
+    hooksInvariant("merge", {
+      afterPoint: true,
+      extra:
+        "--branch <branch> --pr <N> --prs '<the numbers of every pull request it lands, bottom first, space-separated>'",
+    }),
   ],
   phases: [
     {
@@ -69,7 +73,7 @@ export const mergeFlow: Flow = devKit.defineFlow({
 ### 1a. Survey
 
 1. **Arguments:** a scope (\`stack\`, \`branch\`, \`no-stack\`) and a method (\`squash\`, \`merge\`, \`no-squash\`, \`rebase\`), each at most once, in any order. Anything else: stop and show the usage, \`{{cmd}}merge [stack | branch] [squash | merge | rebase]\`.
-2. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG}
+2. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then \`{{command:configure}} get ready.ignoreChecks merge.closeIssue --optional\`: \`<ignoreChecks>\`, the CI check patterns the team never waits on (\`null\` for none), and \`<closeIssue>\`, false when the issue tracker closes the issue itself on merge (\`null\` reads as true).
 3. **Integrations:** \`{{command:configure}} integrations sourceControl stacking --optional\`. ${USE_INTEGRATIONS}
    - **Source control:** keep the entry whose repository (from its \`values\`) is this checkout's \`origin\` in \`git remote -v\`. With none, stop: \`No configured source-control repository is this checkout's origin. Run {{cmd}}configure sourceControl, then re-run.\` At \`level\` \`read\`, stop too: \`The team uses <entry> read-only, so merge can't land pull requests. Run {{cmd}}configure <integration> to change that.\`
    - **Stacking:** the first entry, if any.
@@ -106,7 +110,7 @@ Drafts are fine: the merge step marks them ready.
 
 ### 1e. The repo's \`before\` hooks
 
-\`{{command:hooks}} run merge.before --flow merge --mode default --branch <branch>\`. ${HOOK_RESULTS} Merge lands what's pushed, so hooks here check rather than change: when \`git status --porcelain\` prints anything after them, stop as gate 2 of 1b does.`,
+\`{{command:hooks}} run merge.before --flow merge --mode default --branch <branch> --pr <N> --prs '<numbers>'\`, \`<numbers>\` every pull request it lands, bottom first (only \`<N>\` for \`branch\`). ${HOOK_RESULTS} Merge lands what's pushed, so hooks here check rather than change: when \`git status --porcelain\` prints anything after them, stop as gate 2 of 1b does.`,
           next: "run/sync",
         },
       ],
@@ -138,19 +142,25 @@ Otherwise run the \`{{cmd}}sync\` skill with no arguments: invoke it, don't redo
 
 When pull request <N> is a draft, the \`prReady\` op. For \`stack\`, the same for every other draft in the chain: a draft can't merge, so one left below would stop the chain partway.
 
+### The repo's \`beforeCi\` hooks
+
+\`{{command:hooks}} run merge.beforeCi --flow merge --mode default --branch <branch> --pr <N> --prs '<numbers>'\`. ${HOOK_RESULTS} These are for a commit that must land with the merge (a changelog entry): a hook may commit and push it, so CI below runs on it, and the repo's CI can check only what it adds. After them, \`git status --porcelain\` must print nothing (a hook that left changes uncommitted: stop, as gate 2 of 1b does).
+
 ### Wait for CI
 
 \`git fetch origin <branch>\`. \`<sha>\` is \`git rev-parse HEAD\`; when it isn't \`git rev-parse origin/<branch>\`, stop: \`<branch> has commits that aren't pushed. Run {{cmd}}sync, then re-run {{cmd}}merge.\` What merges is the pushed head, so that's what CI must pass on.
 
+Merge waits only on the checks the base requires: the \`checks\` op given \`<base>\` (the pull request's base branch) says which, and \`--required-only\` waits on just those (all of them when the op can't say). Checks matching \`<ignoreChecks>\` aren't waited on either: pass \`--ignore-check '<pattern>'\` for each, on every \`ci wait\` and \`ci record\` below. The host still refuses a merge a required check blocks, so the merge state below stays the authority.
+
 Run \`{{command:ready}} ci start --sha <sha>\`, then wait for the checks: with a \`script\` variant of the \`checks\` op that runs here,
 
 \`\`\`bash
-{{command:ready}} ci wait --sha <sha> --timeout ${CI_TIMEOUT} --command '<the checks op's script variant, with <sha> filled in>'
+{{command:ready}} ci wait --sha <sha> --timeout ${CI_TIMEOUT} --required-only [--ignore-check '<pattern>']... --command '<the checks op's script variant, with <sha> and <base> filled in>'
 \`\`\`
 
-It polls every 30 seconds, prints \`[ready-ci]\` progress to stderr and the final report to stdout. Relay its progress in one line at least once a minute. When the host limits how long one command runs, add \`--max-wait <a bit under that limit>\` and run it again until it settles; the deadline stays the one \`ci start\` set. Without a \`script\` variant, every 30 seconds run the \`checks\` op for \`<sha>\`, write its JSON to a file, and run \`{{command:ready}} ci record --sha <sha> --file <file> --timeout ${CI_TIMEOUT}\`, until it says \`settled\` or \`timedOut\`.
+It polls every 30 seconds, prints \`[ready-ci]\` progress to stderr and the final report to stdout. Relay its progress in one line at least once a minute. When the host limits how long one command runs, add \`--max-wait <a bit under that limit>\` and run it again until it settles; the deadline stays the one \`ci start\` set. Without a \`script\` variant, every 30 seconds run the \`checks\` op for \`<sha>\` and \`<base>\`, write its JSON to a file, and run \`{{command:ready}} ci record --sha <sha> --file <file> --timeout ${CI_TIMEOUT} --required-only\` (with the \`--ignore-check\` flags), until it says \`settled\` or \`timedOut\`.
 
-The report's \`noChecks\` means the repo runs no CI on the commit: go on. \`timedOut\`: stop with the pull request open, listing \`pending\`. Settled with \`failures\` (failed or cancelled checks): go on to the merge state below, which says whether the host needs them; keep their names for the report.
+The report's \`noChecks\` means nothing it waits on runs on the commit (no CI, or every check reported is optional or ignored): go on. Keep \`optional\` and \`ignored\` for the report. \`timedOut\`: stop with the pull request open, listing \`pending\`. Settled with \`failures\` (failed or cancelled checks): go on to the merge state below, which says whether the host needs them; keep their names for the report.
 
 ### Merge state
 
@@ -175,7 +185,7 @@ For \`stack\`, instead: the stacking entry's \`mergeStack\` op. It can take minu
 
 ### Close out
 
-Run the \`{{cmd}}sync\` skill with the argument \`remote\`. With the pull request merged, it moves the issue to done and resolves the errors the pull request fixed, as far as each integration's \`level\` allows. A failure here goes in the report; the merge stands.
+Run the \`{{cmd}}sync\` skill with the argument \`remote\` (and \`--leave-issue\` when \`<closeIssue>\` is false: the tracker closes the issue itself on merge, so sync leaves it alone). With the pull request merged, it moves the issue to done and resolves the errors the pull request fixed, as far as each integration's \`level\` allows. A failure here goes in the report; the merge stands.
 
 ### Delete the remote branch
 
@@ -192,8 +202,9 @@ Only after the host said merged. When \`above\` is more than 0, keep it: the pul
 - **Merged:** the pull request's number and URL; for a chain, every pull request bottom first, the current branch marked.
 - **Scope:** \`branch\` or \`stack\`, and how it was decided (an argument, the user's answer, or nothing below this branch). Branches still open above this one, and that \`{{cmd}}sync\` on each restacks them.
 - **Method:** the method and why; for a chain, \`set by the stacking tool or the host\`, and a method argument that wasn't used.
-- **CI:** the commit it passed on (short sha), how long it waited, and any failed checks the host didn't require.
-- **Close-out:** the issue and its state, errors resolved, and any to resolve by hand, from the remote sync.
+- **CI:** the commit it passed on (short sha), how long it waited, the checks it didn't wait on (not required by the base, or ignored by \`ready.ignoreChecks\`), and any failed checks the host didn't require.
+- **Hooks:** what the \`beforeCi\` hooks committed and pushed, if anything.
+- **Close-out:** the issue and its state (or left to the tracker, with \`merge.closeIssue\` false), errors resolved, and any to resolve by hand, from the remote sync.
 - **Remote branch:** deleted, already gone, or kept (and why).
 - **Local:** still on \`<branch>\`; deleting it and its worktree is the user's call.`,
           next: null,

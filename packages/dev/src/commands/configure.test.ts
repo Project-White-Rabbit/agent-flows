@@ -426,6 +426,78 @@ describe("configure.ts (as a script)", () => {
     })
   })
 
+  it("reads optional values as null, and gives a second account its own token", () => {
+    init()
+    run(
+      ["write"],
+      JSON.stringify({
+        sections: {
+          repo: { baseBranch: "main" },
+          tickets: { blockerMark: "🛑", dueDateRequired: ["high"] },
+          "integrations.linear": [
+            { name: "ours", teamKey: "ENG", use: { issueTracker: "track" } },
+            {
+              name: "shared",
+              teamKey: "OPS",
+              mention: "Acme",
+              use: { issueTracker: "link" },
+            },
+          ],
+        },
+      }),
+    )
+    const got = run([
+      "get",
+      "tickets.blockerMark",
+      "tickets.planningDoc",
+      "--optional",
+    ])
+    expect(got.status).toBe(0)
+    expect(json(got)).toEqual({
+      values: { "tickets.blockerMark": "🛑", "tickets.planningDoc": null },
+    })
+    expect(run(["get", "tickets.planningDoc"]).status).toBe(2)
+
+    expect(json(run(["token", "linear", "--env", "OUR_KEY"])).written).toBe(
+      true,
+    )
+    expect(
+      json(run(["token", "linear:shared", "--env", "SHARED_KEY"])).integration,
+    ).toBe("linear:shared")
+    expect(run(["token", "linear:Bad Name", "--env", "X"]).status).not.toBe(0)
+    const { integrations } = json(
+      run(["integrations", "issueTracker"], undefined, { SHARED_KEY: "s" }),
+    )
+    expect(
+      integrations.issueTracker.map(
+        (i: {
+          instance: string
+          access: { api: { source: string; ready: boolean } }
+        }) => [i.instance, i.access.api.source, i.access.api.ready],
+      ),
+    ).toEqual([
+      ["ours", "env OUR_KEY", false],
+      ["shared", "env SHARED_KEY", true],
+    ])
+  })
+
+  it("refuses a ticket rule outside the tracker's priorities", () => {
+    init()
+    const result = run(
+      ["write"],
+      JSON.stringify({
+        sections: {
+          repo: { baseBranch: "main" },
+          tickets: { dueDateRequired: ["P0"] },
+        },
+      }),
+    )
+    expect(result.status).toBe(1)
+    expect(json(result).issues).toEqual([
+      "tickets.dueDateRequired must list only `urgent`, `high`, `medium`, `low`, or `none` (not `P0`)",
+    ])
+  })
+
   it("configures an integration more than once, one entry per instance", () => {
     init()
     const written = json(

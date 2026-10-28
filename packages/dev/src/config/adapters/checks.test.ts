@@ -127,3 +127,41 @@ describe("gitlabChecks", () => {
     ])
   })
 })
+
+describe("required checks", () => {
+  it("marks GitHub's required checks, and waits on one that hasn't started", () => {
+    const checks = githubChecks(
+      [
+        {
+          id: 1,
+          name: "ci-required",
+          status: "completed",
+          conclusion: "success",
+        },
+        { id: 2, name: "preview", status: "in_progress", conclusion: null },
+      ],
+      [{ context: "license", state: "success" }],
+      new Set(["ci-required", "license", "e2e"]),
+    )
+    expect(checks.map((c) => [c.name, c.state, c.required])).toEqual([
+      ["ci-required", "pass", true],
+      ["e2e", "pending", true],
+      ["license", "pass", true],
+      ["preview", "pending", false],
+    ])
+  })
+
+  it("requires every GitLab job but one allowed to fail, only with a base", () => {
+    const statuses = [
+      { id: 1, name: "test", status: "success" },
+      { id: 2, name: "flaky", status: "failed", allow_failure: true },
+    ]
+    expect(gitlabChecks(statuses, "main").map((c) => c.required)).toEqual([
+      false,
+      true,
+    ])
+    expect(gitlabChecks(statuses).every((c) => c.required === undefined)).toBe(
+      true,
+    )
+  })
+})

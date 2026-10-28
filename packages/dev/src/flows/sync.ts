@@ -98,7 +98,7 @@ export const syncFlow: Flow = devKit.defineFlow({
   invariants: [
     "**Act through the integrations' ops.** Pull requests, stacks, issues, and error issues are reached only through the ops `configure.ts integrations` returns, run as given. Plain `git` is fine for everything local.",
     "**Never change a pull request's draft or ready state.** Sync opens pull requests as drafts and leaves an existing one's state alone; marking it ready is the author's call.",
-    "**Never rewrite pushed history yourself.** Without a stacking integration, catch up with `git merge`, never `git rebase`, so a push never needs force. With one, its `restack` and `submit` ops own the rebase and the push.",
+    "**Never rewrite pushed history yourself.** Without a stacking integration, catch up with `git merge`, never `git rebase`, so a push never needs force. With one, its `restack` and `submit` ops own the rebase and the push, and when `submit` fails, a `--force-with-lease` push of what it rebased is the only force allowed.",
     "**Never use destructive escapes** (`git reset --hard`, `git rebase --abort`, `git stash`, `git push --force` without `--force-with-lease`) to get out of a conflict.",
     "**Stage everything** with `git add -A` for a commit; for conflict resolution, stage each file with `git add <file>`, never `-A`.",
     "**Don't prompt** for anything inferable from the branch, commits, diff, session, or config.",
@@ -126,7 +126,7 @@ export const syncFlow: Flow = devKit.defineFlow({
 >   - \`remote\` -- remote only: refresh the PR and its issue. No commits, catch-up, or push; never creates a PR.
 >   - \`help\` -- show this and exit
 >
-> Pass an issue id (\`{{cmd}}sync ENG-123\`) to link the branch to that issue.
+> Pass an issue id (\`{{cmd}}sync ENG-123\`) to link the branch to that issue. \`--leave-issue\` (merge passes it when the tracker closes issues itself) links the issue but never files or changes one.
 >
 > A re-run with nothing changed since the last sync (no new commits, clean tree, base not advanced, PR state unchanged) stops at the no-op gate.
 >
@@ -141,7 +141,7 @@ export const syncFlow: Flow = devKit.defineFlow({
           title: "Survey",
           refName: "survey",
           commandCalls: ["configure", "sync"],
-          body: `Parse the argument for a mode keyword (\`local\`, \`remote\`, \`help\`) and an optional issue id. No keyword means default mode.
+          body: `Parse the argument for a mode keyword (\`local\`, \`remote\`, \`help\`), an optional issue id, and \`--leave-issue\`. No keyword means default mode. With \`--leave-issue\` (\`{{cmd}}merge\` passes it when the issue tracker closes the issue itself on merge), find and link the issue as usual, but file none (skip 8 of 1a and 3b) and leave it as it is (skip 3d).
 
 | Mode | Survey | Local git work | Remote writes |
 |------|--------|-------|--------|
@@ -238,7 +238,7 @@ On conflicts, run \`git status\`, read each conflicted file, and write a resolut
 
 **Default mode only**, and only when \`git rev-list --count <baseRef>..HEAD\` isn't 0.
 
-- **With a stacking integration:** its \`submit\` op.
+- **With a stacking integration:** its \`submit\` op. Keep the stacking tool's URL for the pull request when it prints one, for the report. When it fails for a reason other than a conflict (the tool's own API or sign-in), push the branch anyway: \`git push --force-with-lease -u origin HEAD\` (the stacking tool rewrote the branch, so a plain push would be refused, and the lease refuses to overwrite work pushed since the last fetch). The pull request is then opened in 3c with \`prCreate\` when there's none; say in the report that \`submit\` failed, and why.
 - **Without one:** \`git push -u origin HEAD\`. If it's rejected because the remote branch moved, \`git fetch origin <branch>\`, \`git merge --no-edit origin/<branch>\`, resolve as above, and push again. Never force.
 
 \`local\` mode never pushes.
@@ -347,7 +347,7 @@ ${ISSUE_DESCRIPTION}
 - **Status:** regenerated every sync, 3-8 plain bullets (no checkboxes) across Done and Remaining, about the implementation only, never review, merge, or deploy. When the implementation is complete, Remaining is \`None. Implementation complete; the rest is tracked on the PR.\`
 - Keep any other section a person wrote.
 
-Then the entry's \`updateIssue\` op with the title (keep the existing one unless a new one fits strictly better), the description, \`<state>\` \`workState\`, and \`<fields>\` from the issue fields in 3b.
+Then the entry's \`updateIssue\` op with the title (keep the existing one unless a new one fits strictly better, and keep any mark at its start, such as the team's \`tickets.blockerMark\` (an emoji like 🛑): it flags the issue for the team), the description, \`<state>\` \`workState\`, and \`<fields>\` from the issue fields in 3b.
 
 **A closed issue stays closed.** When the issue's workflow state (from \`getIssue\` in 1a; load it now when 1a didn't) is done or canceled (a duplicate counts as canceled) and \`workState\` is a different stage, leave \`<state>\` out unless the user says to reopen it. Ask once: "<ID> is <state>. Sync would move it to <workState>. Reopen it?" Only an explicit yes passes \`workState\`. A no, no answer, or a run nobody can answer (a scheduled or unattended sync) leaves the state alone, and the report says "<ID> kept at <state>; sync would have moved it to <workState>". Every other write still runs. Never set a state over a done or canceled one without that yes.
 
@@ -385,8 +385,8 @@ Otherwise lead with anything that needs the user's attention (an unresolved conf
 
 - **Mode** that ran, and what was skipped and why (the local git work in \`remote\` mode or on \`runLocal: false\`; 1a and the remote writes in \`local\` mode or on \`runRemote: false\`).
 - **Branch:** existing or created; what was committed; whether it caught up to the base (and any conflicts resolved, by file: a resolution nobody sees is one nobody checked); whether it was pushed.
-- **PR:** URL, draft or ready, existing or created, and its mergeability.
-- **Issue:** id, URL, and state (and, when it was closed and stayed closed, the state sync would have set); existing, found by the search (and which issue matched), created, or created as a sub-issue (of which); or none, with no issue tracker configured. The fields set or changed (priority, labels, estimate, cycle, project), and a closed issue the search found for the same work.
+- **PR:** URL (and its URL in the stacking tool's app, when \`submit\` printed one), draft or ready, existing or created, and its mergeability; and a \`submit\` that failed, with the push it fell back to.
+- **Issue:** id, URL, and state (and, when it was closed and stayed closed, the state sync would have set); existing, found by the search (and which issue matched), created, or created as a sub-issue (of which); updated, or left alone with \`--leave-issue\`; or none, with no issue tracker configured. The fields set or changed (priority, labels, estimate, cycle, project), and a closed issue the search found for the same work.
 - **Session:** the shared URL, or skipped or failed, and why.
 - **Errors:** refs linked, and any resolved.`,
           next: null,

@@ -6,7 +6,7 @@
 import { probeAccess, systemProbe } from "../config/access.ts"
 import { loadAdapters } from "../config/adapters/index.ts"
 import { getAt, INSTANCE_KEY, instancesOf } from "../config/config.ts"
-import { readLocal, readToken } from "../config/local.ts"
+import { readLocal, readToken, tokenFor } from "../config/local.ts"
 import { INTEGRATIONS } from "../config/sections/index.ts"
 import { usesOf, withoutUse } from "../config/use.ts"
 import { loadConfig, NOT_CONFIGURED_EXIT, repoRoot } from "./configure.ts"
@@ -105,7 +105,7 @@ export async function main(argv: string[]): Promise<void> {
       `\`${op}\` needs ${missing.map((a) => `--${a} <${a}>`).join(" ")}`,
     )
   }
-  const recorded = readLocal(root).tokens[integration]
+  const recorded = tokenFor(readLocal(root).tokens, integration, instance)
   const report = await probeAccess(spec.access, systemProbe(), recorded)
   let token: string | undefined
   if (adapter.needs === "api") {

@@ -26,7 +26,7 @@ The source-control and stacking entries, `<base>`, and `<parent>` are from 1a of
 
 Skip the push when the branch's remote has this exact commit: `git fetch origin <branch>` and `git rev-parse HEAD` equals `git rev-parse origin/<branch>`.
 
-- **With a stacking integration:** its `submit` op. It pushes and opens the pull request as a draft when there's none, and leaves an existing one's title, body, and draft or ready state alone. When it says the branch isn't tracked, run its `track` op with `<parent>`, then `submit` again.
+- **With a stacking integration:** its `submit` op. It pushes and opens the pull request as a draft when there's none, and leaves an existing one's title, body, and draft or ready state alone. When it says the branch isn't tracked, run its `track` op with `<parent>`, then `submit` again. When it fails for another reason than a conflict (the tool's own API or sign-in), push anyway with `git push --force-with-lease -u origin HEAD` (the stacking tool rebased the branch, and the lease refuses to overwrite work pushed since the last fetch), and say so in the report. Keep the stacking tool's URL for the pull request when it prints one.
 - **Without one:** `git push -u origin HEAD`. If it's rejected because the remote branch moved, `git fetch origin <branch>`, `git merge --no-edit origin/<branch>`, resolve as sync does, and push again. Never force.
 
 ### Pull request
@@ -132,7 +132,7 @@ Lead with anything that needs the user's attention: every stop bucket and stalle
 - **Mode** that ran (`default`, `loop`, or `draft`), the steps it skipped, and the CI check patterns it ignored, each with where it came from (the config or a flag).
 - **Local cleanup:** clean, fixed N things (what changed together, tests written, check fixes), or surfaced N for the user; the packages checked and with which commands.
 - **Sync (local):** committed, caught up (and any conflicts resolved, by file), or nothing to do.
-- **Publish:** pushed or already published; pull request opened or existing; marked ready, already ready, or left a draft in `draft` mode; its mergeability.
-- **Sync (remote):** the pull request and issue URLs, and the issue's state.
+- **Publish:** pushed or already published (and a `submit` that failed, with the push it fell back to); pull request opened or existing, with its URL in the stacking tool's app when `submit` printed one; marked ready, already ready, or left a draft in `draft` mode; its mergeability.
+- **Sync (remote):** the pull request and issue URLs, the issue's state, and whether sync created the issue (and as a sub-issue of which) or updated an existing one, from its report.
 - **CI:** in `loop` mode, the passes it waited on, the fix pushes, the final state of the checks, and which exit it took; otherwise, what the one pass fixed and pushed, and what's left for the next run. Pass and fail counts for the last settled commit, and the checks it ignored. With `ci` skipped: `CI: skipped`.
-- **Review threads:** `Automated review: N open / M resolved this run`, always, even when both are 0, and the number of people's threads still open. With `reviews` skipped: `Automated review: skipped`.
+- **Review threads:** `Automated review: N open / M resolved this run`, always, even when both are 0, then one line per automated reviewer with threads on the pull request, named by its first comment's author (a bug-finding bot, say): `<reviewer>: N open / M resolved`. Then the number of people's threads still open. With `reviews` skipped: `Automated review: skipped`.

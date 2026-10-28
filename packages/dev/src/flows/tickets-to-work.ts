@@ -69,8 +69,9 @@ export const ticketsToWorkFlow: Flow = devKit.defineFlow({
                               [--in <integration>] [help]
 
 Goes through your open issues that have no pull request, workspace, or git
-worktree yet, most urgent first (then the ones blocking other work, then
-the earliest due), and asks about each one:
+worktree yet, most urgent first (then the ones whose title has the team's
+blocker mark, then the ones blocking other work, then the earliest due),
+and asks about each one:
   - Start: opens a workspace with a coding agent on it and moves the issue
     to in progress ({{cmd}}start-work)
   - Skip: leaves it for later
@@ -108,7 +109,7 @@ An issue with open sub-issues is left out: its sub-issues are the work.
    {{command:work}} list --input <dir>/issues.json [--priority <ranks>] [--limit <n>] [--ranks <names>]
    \`\`\`
 
-   ${RANKS}. It prints one \`TICKET\` line per issue with no work started yet (no open sub-issues, no pull request, and no workspace or git worktree on its branch), already in the order to go through them, then \`COUNT <n>\` (the issues printed) and \`TOTAL <n>\` (before \`--priority\` and \`--limit\`). Exit code 2 is an unknown \`--priority\` rank (say which ones exist, and stop) or bad input (fix \`issues.json\` and run it again).
+   ${RANKS}. It reads the config's \`tickets.blockerMark\` itself, and marks an issue whose title has it \`blocker\`. It prints one \`TICKET\` line per issue with no work started yet (no open sub-issues, no pull request, and no workspace or git worktree on its branch), already in the order to go through them, then \`COUNT <n>\` (the issues printed) and \`TOTAL <n>\` (before \`--priority\` and \`--limit\`). Exit code 2 is an unknown \`--priority\` rank (say which ones exist, and stop) or bad input (fix \`issues.json\` and run it again).
 
 When \`COUNT\` is 0, say there is nothing waiting and stop; when \`TOTAL\` is above 0, say instead that the filters left out all \`TOTAL\` issues, and stop. Otherwise say how many issues there are, and when \`COUNT\` is less than \`TOTAL\`, how many the filters left out.`,
           next: "main/decide",
@@ -117,7 +118,7 @@ When \`COUNT\` is 0, say there is nothing waiting and stop; when \`TOTAL\` is ab
           id: "decide",
           kind: "action",
           title: "Decide each issue",
-          body: `Take the issues in the printed order, one at a time. Each gets its own question, asked {{askUser}}as one question per call: never several issues in one question, never an issue decided for the person, and never a question skipped because the answer looks obvious. The question names the issue: its id and title, then its priority, its due date (saying when it's past), its state, whether it blocks other work, and its link. It offers all four options, Stop included, so the person can end the run from any issue:
+          body: `Take the issues in the printed order, one at a time. Each gets its own question, asked {{askUser}}as one question per call: never several issues in one question, never an issue decided for the person, and never a question skipped because the answer looks obvious. The question names the issue: its id and title, then its priority, its due date (saying when it's past), its state, whether it stops a customer (\`blocker\`) or blocks other work, and its link. It offers all four options, Stop included, so the person can end the run from any issue:
 
 - **Start:** open a workspace with a coding agent on it and move the issue to in progress.
 - **Skip:** leave it and move on.

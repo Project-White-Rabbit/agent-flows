@@ -27,6 +27,7 @@ import {
   type HookSuggestion,
   suggestHooks,
 } from "../config/hook-suggestions.ts"
+import { INSTANCE_NAME } from "../config/instances.ts"
 import {
   coverage,
   findCapability,
@@ -38,6 +39,7 @@ import {
   describeSource,
   readLocal,
   type TokenSource,
+  tokenKey,
   writeLocal,
 } from "../config/local.ts"
 import { INTEGRATIONS, SECTIONS } from "../config/sections/index.ts"
@@ -153,7 +155,10 @@ function requireConfig(root: string): RawConfig | undefined {
  * only through this, so they all fail the same way: by sending the user to
  * configure instead of guessing.
  */
-function get(root: string, paths: string[]): void {
+function get(root: string, args: string[]): void {
+  // Optional settings read as null when unset, rather than stopping the flow.
+  const optional = args.includes("--optional")
+  const paths = args.filter((a) => a !== "--optional")
   if (paths.length === 0) {
     throw new Error("get needs at least one path, e.g. `get repo.baseBranch`")
   }
@@ -172,7 +177,7 @@ function get(root: string, paths: string[]): void {
     ? (config.skipped as string[])
     : []
   const missing = paths.filter((p) => readPath(config, p) === undefined)
-  if (missing.length > 0) {
+  if (missing.length > 0 && !optional) {
     notConfigured(
       {
         configPath: path.join(root, CONFIG_PATH),
@@ -188,7 +193,9 @@ function get(root: string, paths: string[]): void {
     return
   }
   printJson({
-    values: Object.fromEntries(paths.map((p) => [p, readPath(config, p)])),
+    values: Object.fromEntries(
+      paths.map((p) => [p, readPath(config, p) ?? null]),
+    ),
   })
 }
 
@@ -289,7 +296,9 @@ async function integrations(root: string, args: string[]): Promise<void> {
  * git dir: never the token, and never in the committed config.
  */
 function token(root: string, args: string[]): void {
-  const [name, kind, value] = args
+  const [target, kind, value] = args
+  // `linear:<instance>`: a token for one instance, over the integration's.
+  const [name, instance] = (target ?? "").split(":")
   const spec = INTEGRATIONS.find(
     (s) => s.path === `integrations.${name}` || s.path === name,
   )
@@ -302,7 +311,12 @@ function token(root: string, args: string[]): void {
         .join(", ")}`,
     )
   }
-  const id = spec.path.split(".").at(-1) as string
+  if (instance !== undefined && !INSTANCE_NAME.test(instance)) {
+    throw new Error(
+      `\`${instance}\` isn't an instance name: lowercase letters, digits, ".", "_", or "-"`,
+    )
+  }
+  const id = tokenKey(spec.path.split(".").at(-1) as string, instance)
   const local = readLocal(root)
   if (kind === "--clear") {
     delete local.tokens[id]
@@ -321,7 +335,7 @@ function token(root: string, args: string[]): void {
     source = { command: value }
   } else {
     throw new Error(
-      "token <integration> --env <NAME> | --file <path> | --command <command> | --clear",
+      "token <integration>[:<instance>] --env <NAME> | --file <path> | --command <command> | --clear",
     )
   }
   const issues = checkSource(source)
@@ -481,14 +495,18 @@ const HELP = `Usage: configure.ts <command>
                   plans only those, including ones skipped before. manual with
                   no names plans every section the same way. Prints the mode
                   (names alone mean manual; none at all, no mode).
-  get <path>...   Print {"values": {"<path>": value}} for sections or fields
+  get <path>... [--optional]
+                  Print {"values": {"<path>": value}} for sections or fields
                   (repo.baseBranch, integrations.linear). A field of an
                   integration configured as a list prints one {name, value}
                   per instance. Exits ${NOT_CONFIGURED_EXIT} with
                   {"configured": false} when the config is missing, invalid, or
-                  doesn't set a path.
-  token <integration> --env <NAME> | --file <path> | --command <cmd> | --clear
+                  doesn't set a path; with --optional, a path it doesn't set
+                  prints null instead.
+  token <integration>[:<instance>] --env <NAME> | --file <path> | --command <cmd> | --clear
                   Record where the integration's API token is on this machine
+                  (with :<instance>, one instance's own token, for an
+                  integration configured more than once on separate accounts)
                   (an env variable, a file holding it, or a command printing
                   it), in the repo's git dir: shared by its worktrees, never
                   committed. Never the token itself. Flows and adapters read

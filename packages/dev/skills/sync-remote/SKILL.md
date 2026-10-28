@@ -129,7 +129,7 @@ With an issue in an entry at `track` (at `link`, leave the issue alone; the PR's
 - **Status:** regenerated every sync, 3-8 plain bullets (no checkboxes) across Done and Remaining, about the implementation only, never review, merge, or deploy. When the implementation is complete, Remaining is `None. Implementation complete; the rest is tracked on the PR.`
 - Keep any other section a person wrote.
 
-Then the entry's `updateIssue` op with the title (keep the existing one unless a new one fits strictly better), the description, `<state>` `workState`, and `<fields>` from the issue fields in 3b.
+Then the entry's `updateIssue` op with the title (keep the existing one unless a new one fits strictly better, and keep any mark at its start, such as the team's `tickets.blockerMark` (an emoji like 🛑): it flags the issue for the team), the description, `<state>` `workState`, and `<fields>` from the issue fields in 3b.
 
 **A closed issue stays closed.** When the issue's workflow state (from `getIssue` in 1a; load it now when 1a didn't) is done or canceled (a duplicate counts as canceled) and `workState` is a different stage, leave `<state>` out unless the user says to reopen it. Ask once: "<ID> is <state>. Sync would move it to <workState>. Reopen it?" Only an explicit yes passes `workState`. A no, no answer, or a run nobody can answer (a scheduled or unattended sync) leaves the state alone, and the report says "<ID> kept at <state>; sync would have moved it to <workState>". Every other write still runs. Never set a state over a done or canceled one without that yes.
 

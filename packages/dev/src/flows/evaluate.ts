@@ -37,7 +37,7 @@ const GATHER_PROMPT = `You are a data-gathering assistant for a branch/PR evalua
 6. \`git status --porcelain\`
 7. For each file in the combined list (including untracked files), read the full current file with the same rules as above. Untracked files aren't in the diff; their full content is their entire addition.
 
-**Always also read** the agent instruction files (\`CLAUDE.md\`, \`AGENTS.md\`) in directories containing changed files, below the repo root. The root ones are already in the caller's context.
+**Always also read** the agent instructions for the changed files: write every changed path (one per line) to a file in \`$(git rev-parse --absolute-git-dir)/agent-flows/evaluate\`, then run \`{{command:ready}} instructions --files <that file>\`. It lists the \`CLAUDE.md\` and \`AGENTS.md\` files at the root and above each changed file, and the path-scoped rule files (\`.claude/rules/\`, \`.cursor/rules/\`) whose globs match one. Read each it lists except the root's \`CLAUDE.md\` and \`AGENTS.md\`, which are already in the caller's context.
 
 **Always also surface reuse candidates:** for the handful of substantive new functions, helpers, components, hooks, services, or routes the diff introduces (skip one-liners, type-only changes, and tests), search the repo for an existing implementation of the same concept: grep by likely name, signature, or a distinctive string, and check the usual shared homes (\`lib/\`, \`utils/\`, \`shared/\`, shared workspace packages). Record the closest existing abstraction (path and symbol) or "no existing match found". Keep it bounded to the main additions, and don't editorialize.
 
@@ -70,7 +70,7 @@ Return your results using exactly these section headers:
 ...
 
 === AGENT INSTRUCTIONS (<directory>) ===
-<one section per CLAUDE.md / AGENTS.md found below the root; omit if none>
+<one section per instruction or rule file read: each CLAUDE.md / AGENTS.md below the root, and each matching rule file; omit if none>
 
 === REUSE CANDIDATES ===
 <"<new thing> (<path>) -> <existing path:symbol>" or "... -> no existing match found"; omit if no substantive new abstractions>
@@ -93,6 +93,11 @@ export const evaluateFlow: Flow = devKit.defineFlow({
   commands: DEV_COMMANDS.defineCommands({
     hooks: HOOKS_COMMAND,
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
+    ready: {
+      description:
+        "`instructions --files <file>` lists the agent instruction and path-scoped rule files for the changed paths in the file",
+      args: "<subcommand>",
+    },
   }),
   tools: {},
   compile: {
@@ -182,6 +187,7 @@ You now have one of: \`pr:<entry>:<N>\` (explicit argument or clean-tree fallbac
           kind: "action",
           title: "Gather the diff and context",
           refName: "gather-diff",
+          commandCalls: ["ready"],
           body: `Delegate the data-gathering to a subagent on a fast, cheaper model (Sonnet on Claude Code) with this prompt, substituting \`<target>\`, \`<base>\`, \`<base-ref>\`, the PR metadata, and (for \`pr:\` targets) the target entry's \`values\` and, for each of the \`prMetadata\`, \`prDiff\`, \`prFiles\`, and \`prCommits\` ops, the variant you chose by the rule in the {{step-ref:run/identify-target}} step, as a JSON block, all from the {{step-ref:run/identify-target}} step. The subagent runs the commands and file reads against a small context; you analyze the results in the {{step-ref:run/what-it-does}} through {{step-ref:run/report}} steps, without re-sending the whole conversation on every file read.
 
 ~~~~markdown

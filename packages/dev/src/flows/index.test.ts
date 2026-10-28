@@ -13,6 +13,8 @@ describe("dev flows", () => {
 
   it("renders each flow's Claude Code skills", () => {
     expect(files.map((f) => f.path)).toEqual([
+      "skills/close/SKILL.md",
+      "skills/close-run/SKILL.md",
       "skills/configure/SKILL.md",
       "skills/create-tickets/SKILL.md",
       "skills/create-tickets-confirm/SKILL.md",

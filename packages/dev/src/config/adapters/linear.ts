@@ -1,11 +1,15 @@
 // Linear ops as code. findIssue and searchIssues need it: the MCP's search is
 // fuzzy and paginated, while the API filters descriptions exactly and ranks
-// issues by meaning with its own search. assignedIssues reads every page, with
-// each issue's sub-issues, pull requests, and relations, in one call.
+// issues by meaning with its own search. assignedIssues and projectIssues read
+// every page in one call; fieldOptions reads the team's people, projects,
+// labels, and cycles at once; recordNotes finds or makes the cycle's planning
+// document and replaces one section of it.
 //
 // Runtime code: Node built-ins only.
 
+import fs from "node:fs"
 import { hasBranchLine, ISSUE_ID } from "../branch-line.ts"
+import { upsertSection } from "../planning.ts"
 import type { Adapter, AdapterInput } from "../types.ts"
 
 const GRAPHQL = "https://api.linear.app/graphql"
@@ -76,8 +80,79 @@ query AssignedIssues($team: String!, $after: String) {
   }
 }`
 
+const PROJECT_ISSUES = `
+query ProjectIssues($team: String!, $project: String!, $after: String) {
+  issues(
+    first: 100
+    after: $after
+    filter: {
+      team: { key: { eq: $team } }
+      project: { name: { eqIgnoreCase: $project } }
+      state: { type: { in: ["triage", "backlog", "unstarted", "started"] } }
+    }
+  ) {
+    nodes {
+      identifier title url priority dueDate
+      state { name }
+      parent { identifier }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}`
+
+const FIELD_OPTIONS = `
+query FieldOptions($team: String!, $now: DateTimeOrDuration!) {
+  teams(first: 1, filter: { key: { eq: $team } }) {
+    nodes {
+      members(first: 250) { nodes { name displayName email active } }
+      projects(first: 250, filter: { state: { nin: ["completed", "canceled"] } }) {
+        nodes { name }
+      }
+      activeCycle { number }
+      cycles(first: 50, filter: { endsAt: { gt: $now } }) {
+        nodes { number name startsAt endsAt }
+      }
+    }
+  }
+  issueLabels(
+    first: 250
+    filter: { or: [{ team: { key: { eq: $team } } }, { team: { null: true } }] }
+  ) {
+    nodes { name }
+  }
+}`
+
+const PLANNING_PLACE = `
+query PlanningPlace($team: String!, $title: String!) {
+  teams(first: 1, filter: { key: { eq: $team } }) {
+    nodes {
+      id
+      activeCycle { id documents(first: 50) { nodes { id title url } } }
+    }
+  }
+  documents(first: 1, filter: { title: { eq: $title } }) {
+    nodes { id title url }
+  }
+}`
+
+const DOCUMENT = `
+query Document($id: String!) { document(id: $id) { id title url content } }`
+
+const DOCUMENT_UPDATE = `
+mutation DocumentUpdate($id: String!, $content: String!) {
+  documentUpdate(id: $id, input: { content: $content }) {
+    document { title url }
+  }
+}`
+
+const DOCUMENT_CREATE = `
+mutation DocumentCreate($input: DocumentCreateInput!) {
+  documentCreate(input: $input) { document { title url } }
+}`
+
 /** Linear's priority numbers, as the issue tracker's priorities. */
 const PRIORITIES: Record<number, string> = {
+  0: "none",
   1: "urgent",
   2: "high",
   3: "medium",
@@ -214,6 +289,26 @@ function pullRequests(node: Pick<SearchNode, "attachments">): string[] {
     .filter((url) => /\/(pull|merge_requests)\/\d+/.test(url))
 }
 
+/**
+ * For a workspace other products share (`mention`): only issues whose title
+ * or project names this one.
+ */
+export function mentionFilter(mention: unknown): Record<string, unknown> {
+  if (typeof mention !== "string" || !mention.trim()) {
+    return {}
+  }
+  return {
+    and: [
+      {
+        or: [
+          { title: { containsIgnoreCase: mention } },
+          { project: { name: { containsIgnoreCase: mention } } },
+        ],
+      },
+    ],
+  }
+}
+
 export const searchIssues: Adapter = {
   needs: "api",
   args: ["text"],
@@ -238,6 +333,7 @@ export const searchIssues: Adapter = {
             { completedAt: { gt: since } },
             { canceledAt: { gt: since } },
           ],
+          ...mentionFilter(input.values.mention),
         },
       },
     )
@@ -296,5 +392,171 @@ export const assignedIssues: Adapter = {
         description: (node.description ?? "").slice(0, MAX_DESCRIPTION),
       })),
     }
+  },
+}
+
+type Page<T> = {
+  nodes: T[]
+  pageInfo: { hasNextPage: boolean; endCursor: string | null }
+}
+
+type ProjectNode = {
+  identifier: string
+  title: string
+  url: string
+  priority: number
+  dueDate?: string | null
+  state: { name: string }
+  parent?: { identifier: string } | null
+}
+
+export const projectIssues: Adapter = {
+  needs: "api",
+  args: ["project"],
+  async run(input) {
+    const project = input.args.project?.trim()
+    if (!project) {
+      throw new Error("projectIssues needs --project <project>")
+    }
+    const nodes: ProjectNode[] = []
+    let after: string | undefined
+    do {
+      const data = await graphql<{ issues: Page<ProjectNode> }>(
+        input,
+        PROJECT_ISSUES,
+        { team: input.values.teamKey, project, after },
+      )
+      nodes.push(...data.issues.nodes)
+      after = data.issues.pageInfo.hasNextPage
+        ? (data.issues.pageInfo.endCursor ?? undefined)
+        : undefined
+    } while (after)
+    return {
+      issues: nodes.map((node) => ({
+        id: node.identifier,
+        title: node.title,
+        url: node.url,
+        state: node.state.name,
+        priority: PRIORITIES[node.priority] ?? "none",
+        dueDate: node.dueDate ?? null,
+        parent: node.parent?.identifier ?? null,
+      })),
+    }
+  },
+}
+
+type OptionsData = {
+  teams: {
+    nodes: {
+      members: {
+        nodes: {
+          name: string
+          displayName?: string
+          email?: string
+          active: boolean
+        }[]
+      }
+      projects: { nodes: { name: string }[] }
+      activeCycle?: { number: number } | null
+      cycles: {
+        nodes: {
+          number: number
+          name?: string | null
+          startsAt: string
+          endsAt: string
+        }[]
+      }
+    }[]
+  }
+  issueLabels: { nodes: { name: string }[] }
+}
+
+export const fieldOptions: Adapter = {
+  needs: "api",
+  async run(input) {
+    const data = await graphql<OptionsData>(input, FIELD_OPTIONS, {
+      team: input.values.teamKey,
+      now: new Date().toISOString(),
+    })
+    const team = data.teams.nodes[0]
+    if (!team) {
+      throw new Error(`Linear has no team with key ${input.values.teamKey}`)
+    }
+    const current = team.activeCycle?.number
+    return {
+      people: team.members.nodes
+        .filter((m) => m.active)
+        .map(({ name, displayName, email }) => ({ name, displayName, email })),
+      projects: team.projects.nodes.map((p) => p.name),
+      labels: [...new Set(data.issueLabels.nodes.map((l) => l.name))],
+      cycles: [...team.cycles.nodes]
+        .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+        .map((cycle) => ({
+          id: String(cycle.number),
+          ...(cycle.name ? { name: cycle.name } : {}),
+          startsAt: cycle.startsAt.slice(0, 10),
+          endsAt: cycle.endsAt.slice(0, 10),
+          current: cycle.number === current,
+        })),
+    }
+  },
+}
+
+type PlaceData = {
+  teams: {
+    nodes: {
+      id: string
+      activeCycle?: {
+        id: string
+        documents: { nodes: { id: string; title: string; url: string }[] }
+      } | null
+    }[]
+  }
+  documents: { nodes: { id: string; title: string; url: string }[] }
+}
+
+export const recordNotes: Adapter = {
+  needs: "api",
+  args: ["title", "section-file", "key"],
+  async run(input) {
+    const { title, key } = input.args
+    const section = fs.readFileSync(
+      input.args["section-file"] as string,
+      "utf8",
+    )
+    const place = await graphql<PlaceData>(input, PLANNING_PLACE, {
+      team: input.values.teamKey,
+      title,
+    })
+    const team = place.teams.nodes[0]
+    if (!team) {
+      throw new Error(`Linear has no team with key ${input.values.teamKey}`)
+    }
+    const cycle = team.activeCycle
+    const found =
+      cycle?.documents.nodes.find((doc) => doc.title === title) ??
+      place.documents.nodes[0]
+    if (found) {
+      const { document } = await graphql<{
+        document: { content?: string | null }
+      }>(input, DOCUMENT, { id: found.id })
+      const updated = await graphql<{
+        documentUpdate: { document: { title: string; url: string } }
+      }>(input, DOCUMENT_UPDATE, {
+        id: found.id,
+        content: upsertSection(document.content ?? "", key as string, section),
+      })
+      return { ...updated.documentUpdate.document, created: false }
+    }
+    const created = await graphql<{
+      documentCreate: { document: { title: string; url: string } }
+    }>(input, DOCUMENT_CREATE, {
+      input: {
+        title,
+        content: upsertSection("", key as string, section),
+        ...(cycle ? { cycleId: cycle.id } : { teamId: team.id }),
+      },
+    })
+    return { ...created.documentCreate.document, created: true }
   },
 }

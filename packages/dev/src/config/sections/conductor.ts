@@ -33,13 +33,13 @@ export const conductor: IntegrationSpec = {
   provides: {
     workspaces: {
       workspaces: {
-        cli: "`conductor project workspace {projectId} --json --limit 100`, stepping `--offset` while the response reports `hasMore`: each workspace's id, name, branch, and section. This session runs in the one whose id is `$CONDUCTOR_WORKSPACE_ID`",
+        cli: "`conductor project workspace {projectId} --json --limit 100` (with <project>, that project's id, as for `createWorkspace`), stepping `--offset` while the response reports `hasMore`: each workspace's id, name, branch, and section. This session runs in the one whose id is `$CONDUCTOR_WORKSPACE_ID`",
       },
       renameWorkspace: {
         cli: "`conductor workspace rename <id> --name <name>`. For a <section>, find or make it as for `createWorkspace`, then `conductor workspace move <id> --section <section id>`; Conductor can't take a workspace out of every section, so for `none` leave it and say so",
       },
       createWorkspace: {
-        cli: "`conductor workspace create --json --project-id {projectId} --name <name> --session-name <name> --agent {agent|claude} --message-file <prompt-file>`, which opens a cloud workspace: Conductor's CLI can't open local ones, which open only from its app. Conductor names the new branch itself, so <branch> is only a suggestion, except that with <exact> `yes` add `--branch <branch>` to start from that branch. For a <section>, find its id by name in `conductor section list --json`, else make it with `conductor section create <section> --json`, then `conductor workspace move <workspace id> --section <section id>`. It prints the workspace's id, its branch, and a deep link to open it",
+        cli: "With <project>, in place of `{projectId}` the id of the project `conductor project list --json` names <project> (none: say so, listing the names, and open nothing). `conductor workspace create --json --project-id {projectId} --name <name> --session-name <name> --agent {agent|claude} --message-file <prompt-file>`, which opens a cloud workspace: Conductor's CLI can't open local ones, which open only from its app. Conductor names the new branch itself, so <branch> is only a suggestion, except that with <exact> `yes` add `--branch <branch>` to start from that branch. For a <section>, find its id by name in `conductor section list --json`, else make it with `conductor section create <section> --json`, then `conductor workspace move <workspace id> --section <section id>`. It prints the workspace's id, its branch, and a deep link to open it",
       },
     },
   },
