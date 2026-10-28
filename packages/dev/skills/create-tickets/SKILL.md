@@ -17,7 +17,7 @@ The `tickets.ts` command checks the plan and draws the table; you turn the notes
 |---------|-------------|
 | `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), or a failure that stops the command (`stop`) |
 | `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
-| `tickets.ts <subcommand>` | `check` checks the plan against the team's rules and prints the table to confirm (or `PROBLEM` lines); `record` saves an issue apply just filed into the plan; `notes` and `planning-line` shape the planning document's section and each issue's link to it |
+| `tickets.ts <subcommand>` | `match` ranks the tracker's issues against each item and sets the certain matches; `check` checks the plan against the team's rules and prints the table to confirm (or `PROBLEM` lines); `record` saves an issue apply just filed into the plan; `notes` and `planning-line` shape the planning document's section and each issue's link to it |
 
 ## Invariants
 
@@ -84,7 +84,7 @@ Read the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they 
     { "key": "login", "title": "Fix login for Acme", "priority": "urgent", "dueDate": "2026-10-30", "blocker": true }
   ],
   "options": { "<entry>": { "people": [{ "name": "Sam Lee" }], "projects": ["Dev tools"], "labels": ["Feature"], "cycles": [{ "id": "40", "startsAt": "2026-10-19", "endsAt": "2026-10-26", "current": true }] } },
-  "refs": { "<ID>": { "found": true, "title": "...", "closed": false, "priority": "high", "subIssues": [] } }
+  "refs": { "<ID>": { "found": true, "title": "...", "closed": false, "priority": "high", "project": "Dev tools", "subIssues": [] } }
 }
 ```
 
@@ -99,7 +99,7 @@ Read the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they 
 | `dueDate` | `YYYY-MM-DD`, only from the notes (or the agent instructions or `tickets.dueDateRequired`, when they require one for some work: ask for it at the confirmation). `null` clears a matched issue's date; leaving it out keeps it. |
 | `blocker` | `true` only when the work stops a customer from making progress, and only with `tickets.blockerMark`: the title gets the mark. Work that holds up a teammate or another issue isn't a blocker: use `blockedBy` on the issue it holds up. |
 | `assignee` | The person the notes name (a first name is enough). Leave it out for the person running this. One person per issue. |
-| `project` | The one the notes name for the area, else the entry's `values.project`, listed in `defaults`. |
+| `project` | The one the notes name for the area (part of its name is enough when only one project has it), else the entry's `values.project`, listed in `defaults`. A new sub-issue the notes give no project takes its parent's, which the check fills in. |
 | `label` | One label from the set the agent instructions or the entry's `values.labels` give, by the kind of work. Leave it out with no set. |
 | `estimate` | Only when the agent instructions or the entry's `values.estimate` ask for one. |
 | `blockedBy` | Only when the notes say one piece of work waits on another. Work that holds up a teammate is not a reason on its own. |
@@ -119,9 +119,23 @@ Don't invent work the notes don't mention.
 
 **Run only when mode is `default` or `match`.**
 
-For each item, run every entry's `searchIssues` op: once with the title, then once with each checklist line or sentence that names a distinct piece of the work (up to three), since an issue filed under another name may match on one line alone. Judge each candidate against the whole item (its description and checklist, and with `--branch`, the branch's work), not the title alone. Decide without asking:
+**Rank every issue against the plan.** For each entry, run its `recentIssues` op once (every open issue, and every one closed in the last 90 days), and its `searchIssues` op once per item with the item's title. Write them to `<dir>/issues.json`, under each entry's `instance` (else its `integration`):
 
-- **The same work, open:** set `"match": "<ID>"`, then load it with the entry's `getIssue` op and set `existing` from it: `title`, `url`, `priority`, `cycle` and `cycleStart` (when its cycle starts), `dueDate`, `assignee`, `project` (`null` when it has none and the tracker has projects), `parent`, `subIssues` (its open sub-issues: `id`, `title`, `priority`, `cycle`, `cycleStart`, `dueDate`), and `closed: false`. Read its parent too: when it sits under the wrong one, or under none where an open issue covers the work as a whole, set `parent` to move it. With `--branch`, it's a match only when no pull request is attached and its description has no `> Branch:` line naming another branch; otherwise it's someone else's piece of the same work: the next case.
+```json
+{ "<entry>": { "link": false, "issues": [<recentIssues' issues>], "hits": { "<item key>": ["<ID>", "..."] } } }
+```
+
+`link` is true for an entry at `link`, and `hits` each item's search results by id, best first. When `recentIssues` is `unsupported` or fails, put the issues the searches returned in `issues` instead. Then:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/src/commands/tickets.ts" match --plan <dir>/<plan file> --issues <dir>/issues.json [--notes <dir>/notes.md] [--branch <branch>]
+```
+
+`--notes` in default mode, `--branch` in `match` mode with one. It scores every issue by the words it shares with each item's title and each line and sentence of its description, fuses that with the search's ranking, and prints per item an `ITEM` line, then `CANDIDATE` lines, best first (score, `exact title`, `search #N`, `same notes` when the issue was filed from these notes, `closed`), or `NEW` when nothing comes close. On an item with no `match` it sets one in the plan when it's certain, and prints `MATCH exact title` or `MATCH same notes`: the only open issue with the same title, or one filed from the same notes that clearly outscores the rest, in an entry it can update, claimed by no other item (with `--branch`, also with no pull request attached and no `> Branch:` line naming another branch). Keep those matches, set the item's `tracker` when the issue is in an entry other than the first at `track`, and load `existing` for them as below.
+
+**Judge the rest.** For each item without a match, also run every entry's `searchIssues` op with each checklist line or sentence that names a distinct piece of the work (up to three), since an issue filed under another name may match on one line alone. Judge each candidate, the printed ones and these, against the whole item (its description and checklist, and with `--branch`, the branch's work), not the title alone. Decide without asking:
+
+- **The same work, open:** set `"match": "<ID>"`, then load it with the entry's `getIssue` op and set `existing` from it: `title`, `url`, `priority`, `cycle`, `cycleStart` and `cycleEnd` (when its cycle starts and ends), `dueDate`, `assignee`, `project` (`null` when it has none and the tracker has projects), `parent`, `subIssues` (its open sub-issues: `id`, `title`, `priority`, `cycle`, `cycleStart`, `cycleEnd`, `dueDate`), and `closed: false`. Read its parent too: when it sits under the wrong one, or under none where an open issue covers the work as a whole, set `parent` to move it. With `--branch`, it's a match only when no pull request is attached and its description has no `> Branch:` line naming another branch; otherwise it's someone else's piece of the same work: the next case.
 - **Part of a larger open issue** (it covers the work as a whole, like a project's main issue), or with `--branch`, the same work under another pull request or branch: set `"parent": "<ID>"` and leave `match` out, so the item is filed as a sub-issue of it rather than beside it.
 - **Closed** (done or canceled in the last 90 days) **and the same work:** it's already done. Drop the item from the plan, and name the issue in the confirmation. With `--branch`, keep the item new and name the closed issue in the result: a closed issue is never a branch's issue.
 - **In an entry at `link`:** never a match, since it can't be updated here. When it's the same work, drop the item and name the issue in the confirmation as already tracked there. With `--branch`, keep the item and list the issue as `also tracked`.
@@ -131,7 +145,7 @@ For each item, run every entry's `searchIssues` op: once with the title, then on
 
 For each candidate you weigh, look at its parent and its open sub-issues (`getIssue`): a parent that already covers the work as a whole is where a new item belongs (`parent`), and an open sub-issue may be the match itself.
 
-**Issues the plan names but doesn't hold:** every `parent` or `blockedBy` that is an issue id rather than a plan key, load with `getIssue` and record in the plan's `refs` under its id: `found` (false when the tracker has none), `title`, `closed`, `priority`, and `subIssues` as above. `tickets.ts check` reports one that isn't there.
+**Issues the plan names but doesn't hold:** every `parent` or `blockedBy` that is an issue id rather than a plan key, and with `tickets.parentFollowsSubIssues` the parent of each matched item whose priority the plan raises, load with `getIssue` and record in the plan's `refs` under its id: `found` (false when the tracker has none), `title`, `closed`, `priority`, `project` (`null` for none), and `subIssues` as above. `tickets.ts check` reports one that isn't there.
 
 Two items that match the same issue are one piece of work: merge them into one item. When no variant of `searchIssues` works here, leave every item new and say the search was skipped.
 

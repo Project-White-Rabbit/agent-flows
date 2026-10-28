@@ -18,6 +18,29 @@ describe("planning document", () => {
     expect(sourceKey({}, `  ${NOTES.replaceAll("\n", "\n\n")} `)).toBe(key)
   })
 
+  it("keys a page by its id, however its URL is titled or shared", () => {
+    const id = "1a2b3c4d5e6f708192a3b4c5d6e7f809"
+    const key = sourceKey(
+      { url: `https://www.notion.so/acme/Planning-Oct-24-${id}` },
+      NOTES,
+    )
+    expect(key).toBe(id)
+    expect(
+      sourceKey({ url: `https://www.notion.so/Renamed-${id}?pvs=4` }, NOTES),
+    ).toBe(id)
+    // An earlier run keyed the section by the whole URL, which holds the id.
+    const section = renderSection(
+      "2026-10-24",
+      { url: `https://www.notion.so/acme/Planning-${id}` },
+      `https://www.notion.so/acme/Planning-${id}`,
+      NOTES,
+      [],
+    )
+    expect(upsertSection(section, key, "## new\n\nSource: x")).not.toContain(
+      "### Notes",
+    )
+  })
+
   it("titles the document by the week its cycle starts", () => {
     expect(planningTitle("2026-10-19T07:00:00Z", "2026-10-24")).toBe(
       "Planning, week of 2026-10-19",

@@ -118,6 +118,21 @@ describe("planStart", () => {
       planStart(ticket({ priority: "none" }), [], { byRank: true }),
     ).toMatchObject({ section: "No priority" })
   })
+
+  it("puts a workspace in another project in no section unless a flag says", () => {
+    const current: Workspace[] = [
+      { branch: "main", section: "P1", current: true },
+    ]
+    expect(planStart(ticket(), current, { otherProject: true })).toMatchObject({
+      section: null,
+    })
+    expect(
+      planStart(ticket(), current, { otherProject: true, section: "Bugs" }),
+    ).toMatchObject({ section: "Bugs" })
+    expect(
+      planStart(ticket(), current, { otherProject: true, byRank: true }),
+    ).toMatchObject({ section: "High" })
+  })
 })
 
 describe("agentPrompt", () => {
@@ -142,7 +157,7 @@ describe("namesTicket", () => {
 })
 
 describe("queue", () => {
-  it("orders by priority, then blockers, then due date", () => {
+  it("orders by priority, then due date, then blocking other work", () => {
     const issues = [
       assigned("ENG-1", { priority: "low" }),
       assigned("ENG-2", { priority: "high", dueDate: "2026-11-02" }),
@@ -150,15 +165,32 @@ describe("queue", () => {
       assigned("ENG-4", { priority: "high", blocks: true }),
       assigned("ENG-5", { priority: "none" }),
       assigned("ENG-6", { priority: "urgent" }),
+      assigned("ENG-7", { priority: "high" }),
+      assigned("ENG-8", {
+        priority: "high",
+        dueDate: "2026-11-02",
+        blocks: true,
+      }),
     ]
+    // A deadline orders work within a priority; blocking breaks a tie.
     expect(queue(issues, []).map((i) => i.id)).toEqual([
       "ENG-6",
-      "ENG-4",
       "ENG-3",
+      "ENG-8",
       "ENG-2",
+      "ENG-4",
+      "ENG-7",
       "ENG-1",
       "ENG-5",
     ])
+  })
+
+  it("puts a blocker mark before an earlier due date", () => {
+    const issues = [
+      assigned("ENG-1", { priority: "high", dueDate: "2026-11-01" }),
+      assigned("ENG-2", { priority: "high", title: "🛑 Acme can't log in" }),
+    ]
+    expect(queue(issues, [], "🛑").map((i) => i.id)).toEqual(["ENG-2", "ENG-1"])
   })
 
   it("puts issues with the blocker mark first within their priority", () => {
@@ -348,6 +380,22 @@ describe("work.ts", () => {
     expect(out).toContain(`section=none state=move prompt=${prompt}`)
     expect(out).toContain("SKIP ENG-9 not found")
     expect(fs.readFileSync(prompt, "utf8")).toMatch(/^Work on issue ENG-12/)
+  })
+
+  it("takes --project as no section in the other project", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-"))
+    const input = path.join(dir, "start.json")
+    fs.writeFileSync(
+      input,
+      JSON.stringify({
+        tickets: [ticket()],
+        workspaces: [{ branch: "main", section: "P1", current: true }],
+      }),
+    )
+    expect(capture(["plan", "--input", input])).toContain('section="P1"')
+    expect(capture(["plan", "--input", input, "--project"])).toContain(
+      "section=none",
+    )
   })
 
   it("adds a branch line to a description file in place", () => {

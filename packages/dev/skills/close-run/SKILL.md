@@ -30,11 +30,14 @@ Reads only, apart from one `git fetch` and the repo's `close.before` hooks. A ga
    1. The issue a sync recorded for this branch: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" issue` prints `{"branch", "issue"}`.
    2. A ref in the branch name: the leftmost one only. When it doesn't load, don't try the others: cancelling the wrong issue is far worse than missing the right one.
    3. The pull request body's `> Issue:` line (or a `> ` line named for the tracker).
-   4. Each entry's `findIssue` op with `<branch>`: an issue whose description anchors this branch.
 
-   It's `<issue>`, named by the branch. Its attached pull requests other than this branch's are `<otherPrs>`; an open one among them means other work still needs the issue.
+   The first that loads is `<issue>`, named by the branch. Its attached pull requests other than this branch's, open, merged, or closed, are `<otherPrs>`: any one means other work has used the issue.
 
-   **When none of those finds one:** search for it. Each entry's `searchIssues` op with the pull request's title (else the branch name in words), then with each of up to three commit subjects (`git log --format=%s <base>..<branch>`). Keep up to three open issues that plausibly describe this branch's work, best first: `<candidates>`, each with its id, title, URL, state, assignee, attached pull requests, and a one-sentence summary of its description. A searched issue is a guess: it's never changed without the person's answer.
+   **When none of those finds one:** look for it, and keep what turns up as `<candidates>`, never `<issue>`: nothing the branch names ties it to this work, so it's never changed without the person's answer, in `force` mode too.
+   1. Each entry's `findIssue` op with `<branch>`: open issues whose description has a `> Branch:` line for this branch. They come first, marked `anchored`.
+   2. Each entry's `searchIssues` op with the pull request's title (else the branch name in words), then with each of up to three commit subjects (`git log --format=%s <base>..<branch>`): open issues that plausibly describe this branch's work, best first.
+
+   Keep up to three in all, each with its id, title, URL, state, assignee, attached pull requests, and a one-sentence summary of its description.
 
 ### Gates
 
@@ -44,7 +47,7 @@ In order. 1 to 3 refuse; 4 and 5 drop one action and carry on; 6 ends a close wi
 2. **Stacked branches:** `above` is more than 0: stop, `Refusing to close <branch>: <above> branch(es) are stacked on it. Closing it would leave their pull requests pointing at a deleted branch. Close or restack those first.`
 3. **A merged pull request:** stop, `Pull request <N> merged. close is for abandoning work, not finishing it; /dev-flows:sync remote closes out its issue.`
 4. **Already closed:** a closed pull request isn't closed again; an issue already done or canceled isn't changed. Note each for the report.
-5. **Other work on the issue:** `<otherPrs>` has an open pull request: leave `<issue>` open, and say so.
+5. **Other work on the issue:** `<otherPrs>` isn't empty (a merged one counts: the issue may hold work that shipped): leave `<issue>` open, and say so.
 6. **Nothing to do:** no open pull request to close, no remote branch, no issue to change, and no `<candidates>`: print `Nothing to close: no open pull request, no remote branch, and no issue to cancel.` and stop. Without them, the repo's teardown still runs: when `close.after` has hooks, carry on to run them rather than stopping.
 
 A close whose only action is deleting an orphaned remote branch is still a close.
@@ -67,17 +70,17 @@ Show what will run, then go on without asking, except about a searched issue.
 **Warnings**, below them, the first one first:
 
 - `<remoteAhead>` above 0: `origin/<branch> has <remoteAhead> commit(s) the local branch doesn't. Deleting it throws them away.`
-- `<issue> is attached to other open pull requests (<URLs>), so it stays open. Cancel it by hand if all of that work is abandoned too.`
+- `<issue> is attached to other pull requests (<URLs>), so it stays open. Cancel it by hand if all of that work is abandoned too.`
 - No issue found and no `<candidates>`: `The branch names no issue, and none matched it. Cancel one by hand if there is one.`
 - Uncommitted changes: `<n> uncommitted change(s) stay in the working tree.`
 
 ### The searched issue
 
-Only with `<candidates>`. Invoking close doesn't authorize changing an issue the branch never named, so the person picks it.
+Only with `<candidates>`. Invoking close doesn't authorize changing an issue the branch never named (one whose `> Branch:` line names it included: that line can be stale or copied), so the person picks it.
 
 **In `force` mode,** nobody can answer: change none, and list each as `Possible issue, left open: [<ID>: <title>](<URL>)`.
 
-**Otherwise,** show each as a short block: `[<ID>: <title>](<URL>)`, its state and assignee, the one-sentence summary, and `Also attached to <URLs>.` when other pull requests are. Then ask both at once with `AskUserQuestion` :
+**Otherwise,** show each as a short block: `[<ID>: <title>](<URL>)`, its state and assignee, the one-sentence summary, `Its description names this branch.` when it's `anchored`, and `Also attached to <URLs>.` when other pull requests are. Then ask both at once with `AskUserQuestion` :
 
 - `The branch names no issue. Is one of these its issue?`: one option per candidate (`<ID>`, with its title and summary), and `None of these`.
 - `What should happen to it?`: `Cancel it` (the work is abandoned) or `Mark it done` (the work was finished elsewhere).
@@ -102,6 +105,6 @@ Lead with anything that needs attention: a failed write, a failed teardown hook,
 
 - **Pull request:** closed, already closed, none, or failed (and why).
 - **Remote branch:** deleted, already gone, none, or failed.
-- **Issue:** canceled or marked done (as a link), already done or canceled, left open (other open pull requests, or a tracker at `link`), no issue changed (with the candidates' links when the person picked none, or `force` mode skipped the question), or none found.
+- **Issue:** canceled or marked done (as a link), already done or canceled, left open (other pull requests attached, or a tracker at `link`), no issue changed (with the candidates' links when the person picked none, or `force` mode skipped the question), or none found.
 - **Teardown:** each `close.after` hook and how it went.
 - **Local:** `<branch>` and its working tree are still here; deleting them is the person's call.

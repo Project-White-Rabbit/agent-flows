@@ -1,7 +1,7 @@
 // Linear ops as code. findIssue and searchIssues need it: the MCP's search is
 // fuzzy and paginated, while the API filters descriptions exactly and ranks
-// issues by meaning with its own search. assignedIssues and projectIssues read
-// every page in one call; fieldOptions reads the team's people, projects,
+// issues by meaning with its own search. assignedIssues, projectIssues, and
+// recentIssues read every page in one call; fieldOptions reads the team's people, projects,
 // labels, and cycles at once; recordNotes finds or makes the cycle's planning
 // document and replaces one section of it.
 //
@@ -57,17 +57,23 @@ query SearchIssues($term: String!, $first: Int!, $filter: IssueFilter) {
   }
 }`
 
+const RECENT_ISSUES = `
+query RecentIssues($filter: IssueFilter!, $after: String) {
+  issues(first: 100, after: $after, filter: $filter) {
+    nodes {
+      identifier title url description
+      state { name type }
+      parent { identifier title }
+      attachments { nodes { url } }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}`
+
 const ASSIGNED_ISSUES = `
-query AssignedIssues($team: String!, $after: String) {
+query AssignedIssues($filter: IssueFilter!, $after: String) {
   viewer {
-    assignedIssues(
-      first: 100
-      after: $after
-      filter: {
-        team: { key: { eq: $team } }
-        state: { type: { in: ["triage", "backlog", "unstarted", "started"] } }
-      }
-    ) {
+    assignedIssues(first: 100, after: $after, filter: $filter) {
       nodes {
         identifier title url description priority dueDate
         state { name type }
@@ -104,7 +110,7 @@ const FIELD_OPTIONS = `
 query FieldOptions($team: String!, $now: DateTimeOrDuration!) {
   teams(first: 1, filter: { key: { eq: $team } }) {
     nodes {
-      members(first: 250) { nodes { name displayName email active } }
+      members(first: 250) { nodes { name displayName email active app } }
       projects(first: 250, filter: { state: { nin: ["completed", "canceled"] } }) {
         nodes { name }
       }
@@ -309,6 +315,40 @@ export function mentionFilter(mention: unknown): Record<string, unknown> {
   }
 }
 
+/**
+ * Which issues a search covers: the team's, or with `mention` (a workspace
+ * other products share), every team's that names this one.
+ */
+export function searchScope(values: AdapterInput["values"]) {
+  const mention = mentionFilter(values.mention)
+  return "and" in mention ? mention : { team: { key: { eq: values.teamKey } } }
+}
+
+/** Open issues, and ones done or canceled in the last 90 days. */
+function openOrRecent(): Record<string, unknown>[] {
+  const since = new Date(
+    Date.now() - CLOSED_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString()
+  return [
+    { state: { type: { in: OPEN_STATES } } },
+    { completedAt: { gt: since } },
+    { canceledAt: { gt: since } },
+  ]
+}
+
+function searchResult(node: SearchNode, description: number) {
+  return {
+    identifier: node.identifier,
+    title: node.title,
+    url: node.url,
+    state: node.state.name,
+    open: OPEN_STATES.includes(node.state.type),
+    parent: node.parent?.identifier ?? null,
+    pullRequests: pullRequests(node),
+    description: (node.description ?? "").slice(0, description),
+  }
+}
+
 export const searchIssues: Adapter = {
   needs: "api",
   args: ["text"],
@@ -317,38 +357,45 @@ export const searchIssues: Adapter = {
     if (!text) {
       throw new Error("searchIssues needs --text <text>")
     }
-    const since = new Date(
-      Date.now() - CLOSED_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
-    ).toISOString()
     const data = await graphql<{ searchIssues: { nodes: SearchNode[] } }>(
       input,
       SEARCH_ISSUES,
       {
         term: text.slice(0, MAX_SEARCH_TERM),
         first: SEARCH_RESULTS,
-        filter: {
-          team: { key: { eq: input.values.teamKey } },
-          or: [
-            { state: { type: { in: OPEN_STATES } } },
-            { completedAt: { gt: since } },
-            { canceledAt: { gt: since } },
-          ],
-          ...mentionFilter(input.values.mention),
-        },
+        filter: { ...searchScope(input.values), or: openOrRecent() },
       },
     )
     return {
-      issues: data.searchIssues.nodes.map((node) => ({
-        identifier: node.identifier,
-        title: node.title,
-        url: node.url,
-        state: node.state.name,
-        open: OPEN_STATES.includes(node.state.type),
-        parent: node.parent?.identifier ?? null,
-        pullRequests: pullRequests(node),
-        description: (node.description ?? "").slice(0, MAX_DESCRIPTION),
-      })),
+      issues: data.searchIssues.nodes.map((node) =>
+        searchResult(node, MAX_DESCRIPTION),
+      ),
     }
+  },
+}
+
+// Whole descriptions: create-tickets scores every word of them, and finds the
+// `> Planning:` line of an issue filed from the same notes.
+export const recentIssues: Adapter = {
+  needs: "api",
+  async run(input) {
+    const nodes: SearchNode[] = []
+    let after: string | undefined
+    do {
+      const data = await graphql<{ issues: Page<SearchNode> }>(
+        input,
+        RECENT_ISSUES,
+        {
+          filter: { ...searchScope(input.values), or: openOrRecent() },
+          after,
+        },
+      )
+      nodes.push(...data.issues.nodes)
+      after = data.issues.pageInfo.hasNextPage
+        ? (data.issues.pageInfo.endCursor ?? undefined)
+        : undefined
+    } while (after)
+    return { issues: nodes.map((node) => searchResult(node, Infinity)) }
   },
 }
 
@@ -365,7 +412,14 @@ export const assignedIssues: Adapter = {
             pageInfo: { hasNextPage: boolean; endCursor: string | null }
           }
         }
-      }>(input, ASSIGNED_ISSUES, { team: input.values.teamKey, after })
+      }>(input, ASSIGNED_ISSUES, {
+        filter: {
+          team: { key: { eq: input.values.teamKey } },
+          state: { type: { in: OPEN_STATES } },
+          ...mentionFilter(input.values.mention),
+        },
+        after,
+      })
       const page = data.viewer.assignedIssues
       nodes.push(...page.nodes)
       after = page.pageInfo.hasNextPage
@@ -454,6 +508,8 @@ type OptionsData = {
           displayName?: string
           email?: string
           active: boolean
+          /** An app or bot, not a person. */
+          app?: boolean
         }[]
       }
       projects: { nodes: { name: string }[] }
@@ -485,7 +541,7 @@ export const fieldOptions: Adapter = {
     const current = team.activeCycle?.number
     return {
       people: team.members.nodes
-        .filter((m) => m.active)
+        .filter((m) => m.active && !m.app)
         .map(({ name, displayName, email }) => ({ name, displayName, email })),
       projects: team.projects.nodes.map((p) => p.name),
       labels: [...new Set(data.issueLabels.nodes.map((l) => l.name))],

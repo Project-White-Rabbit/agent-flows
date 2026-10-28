@@ -232,6 +232,37 @@ describe("dev flows", () => {
     expect(remote?.content).toContain("Only an explicit yes passes `workState`")
   })
 
+  it("never cancels an issue close only looked up, and keeps one other pull requests used", () => {
+    const run =
+      files.find((f) => f.path === "skills/close-run/SKILL.md")?.content ?? ""
+    expect(run).toContain(
+      "keep what turns up as `<candidates>`, never `<issue>`",
+    )
+    expect(run).toContain("Each entry's `findIssue` op with `<branch>`")
+    expect(run).toContain("in `force` mode too")
+    expect(run).toContain("`<otherPrs>` isn't empty (a merged one counts")
+    expect(run).toContain("open, merged, or closed, are `<otherPrs>`")
+  })
+
+  it("reports the stacking tool's link even when submit printed none", () => {
+    const report =
+      files.find((f) => f.path === "skills/sync-report/SKILL.md")?.content ?? ""
+    expect(report).toContain(
+      "its `prUrl` op with `<url>` the pull request's URL",
+    )
+    expect(report).toContain("with the PR's URL (and the stacking tool's link)")
+  })
+
+  it("ranks every recent issue with tickets.ts match before judging the rest", () => {
+    const main =
+      files.find((f) => f.path === "skills/create-tickets/SKILL.md")?.content ??
+      ""
+    expect(main).toContain("run its `recentIssues` op once")
+    expect(main).toMatch(
+      /tickets\.ts" match --plan <dir>\/<plan file> --issues <dir>\/issues\.json/,
+    )
+  })
+
   it("chains tickets-to-work to start-work, and start-work to create-tickets", () => {
     const skill = (id: string) =>
       files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""

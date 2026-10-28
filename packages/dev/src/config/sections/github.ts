@@ -223,6 +223,10 @@ export const github: IntegrationSpec = {
         cli: "`gh search issues <text> --repo {owner}/{repo} --match title,body --limit 10 --json number,title,url,state,body`: once with `--state open`, and once with `--state closed --closed '>=<the date 90 days ago, YYYY-MM-DD>'`. Load a candidate with `getIssue` for its parent and whether a pull request is attached. Then try two or three shorter queries from the text's key words, since search matches words, not meaning",
         api: `${SEARCH}<the query, URL-encoded>"\`, once with the query \`repo:{owner}/{repo} is:issue is:open <text>\` and once with \`is:closed closed:>=<the date 90 days ago>\` in place of \`is:open\`, the first 10 of each. Load a candidate with \`getIssue\` for its parent and whether a pull request is attached. Then try two or three shorter queries from the text's key words, since search matches words, not meaning`,
       },
+      recentIssues: {
+        cli: "`gh issue list --repo {owner}/{repo} --state open --limit 1000 --json number,title,url,state,body,closedByPullRequestsReferences`, then the same with `--state closed --search 'closed:>=<the date 90 days ago, YYYY-MM-DD>'`. Each issue's id is `#<number>` and its description its `body`; its parent is in `getIssue`, so leave it out here",
+        api: `${SEARCH}<the query, URL-encoded>"\`, once with the query \`repo:{owner}/{repo} is:issue is:open\` and once with \`repo:{owner}/{repo} is:issue is:closed closed:>=<the date 90 days ago>\`, following the \`Link\` header's next pages. Each issue's id is \`#<number>\` and its description its \`body\``,
+      },
       assignedIssues: {
         cli: `\`gh api graphql -f query='${ASSIGNED_QUERY}' -f q='repo:{owner}/{repo} is:issue is:open assignee:@me'\` (add \`-f after=<endCursor>\` for the next page), ${ASSIGNED}`,
         api: `${GRAPHQL} with JSON \`query\` \`${ASSIGNED_QUERY}\` and \`variables\` ${ASSIGNED}`,

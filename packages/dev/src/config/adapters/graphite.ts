@@ -1,7 +1,8 @@
 // Graphite ops as code. `downstack` needs it: the chain is read from
 // Graphite's own record of each branch's parent, which needs no checkout (a
 // stack's other branches are often checked out in other worktrees) and no
-// parsing of `gt log`'s glyphs.
+// parsing of `gt log`'s glyphs. `prUrl` rewrites the host's URL, so the
+// report has Graphite's link even when `gt submit` printed none.
 //
 // Runtime code: Node built-ins only.
 
@@ -121,5 +122,22 @@ export const downstack: Adapter = {
       throw new Error("HEAD is detached: check out a branch first")
     }
     return downstackOf(branch, String(values.trunk), graphiteParents())
+  },
+}
+
+const GITHUB_PR = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/
+
+/** A GitHub pull request's URL in Graphite's app; Graphite reads only GitHub. */
+export function graphitePrUrl(url: string): string | null {
+  const found = url.trim().match(GITHUB_PR)
+  return found
+    ? `https://app.graphite.com/github/pr/${found[1]}/${found[2]}/${found[3]}`
+    : null
+}
+
+export const prUrl: Adapter = {
+  args: ["url"],
+  async run({ args }) {
+    return { url: graphitePrUrl(args.url ?? "") }
   },
 }

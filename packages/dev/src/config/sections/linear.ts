@@ -3,6 +3,7 @@ import {
   fieldOptions,
   findIssue,
   projectIssues,
+  recentIssues,
   recordNotes,
   searchIssues,
 } from "../adapters/linear.ts"
@@ -121,6 +122,7 @@ export const linear: IntegrationSpec = {
   adapters: {
     findIssue,
     searchIssues,
+    recentIssues,
     assignedIssues,
     projectIssues,
     fieldOptions,
@@ -142,14 +144,18 @@ export const linear: IntegrationSpec = {
       },
       // Also an adapter, which ranks with the API's semantic search.
       searchIssues: {
-        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <text>`, and `limit: 10`: once with no state (open issues), once with `state: completed` and once with `state: canceled`, each with `updatedAt: -P90D`. Ask for `fields` `title`, `url`, `status`, `statusType`, `description`, `project`, and `parentId`; load a candidate with `get_issue` to see whether a pull request is attached. Then try two or three shorter queries from the text's key words, since `query` matches words, not meaning. When the entry's `values` set `mention`, keep only issues whose title or project contains it (any case)",
+        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `query: <text>`, and `limit: 10`: once with no state (open issues), once with `state: completed` and once with `state: canceled`, each with `updatedAt: -P90D`. Ask for `fields` `title`, `url`, `status`, `statusType`, `description`, `project`, and `parentId`; load a candidate with `get_issue` to see whether a pull request is attached. Then try two or three shorter queries from the text's key words, since `query` matches words, not meaning. When the entry's `values` set `mention`, search every team (leave `team` out) and keep only issues whose title or project contains it (any case)",
+      },
+      // Also an adapter, which reads every page in one call.
+      recentIssues: {
+        mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `includeArchived: false`, and `limit: 250`, once per open state type (`triage`, `backlog`, `unstarted`, `started`), then once each with `state: completed` and `state: canceled` and `updatedAt: -P90D`, following `cursor` until `hasNextPage` is false, with `fields` `title`, `url`, `status`, `statusType`, `description`, and `parentId`. When the entry's `values` set `mention`, leave `team` out and keep only issues whose title or project contains it (any case)",
       },
       // Also adapters, which read every page, or every list, in one call.
       projectIssues: {
         mcp: "The Linear MCP's `list_issues` with `team: {teamKey}`, `project: <project>`, `includeArchived: false`, and `limit: 250`, once per open state type (`triage`, `backlog`, `unstarted`, `started`), following `cursor` until `hasNextPage` is false, with `fields` `title`, `url`, `status`, `priority`, `dueDate`, and `parentId`",
       },
       fieldOptions: {
-        mcp: "The Linear MCP's `list_users` (active people: `name`, `displayName`, `email`), `list_projects` with `team: {teamKey}` (not completed or canceled), `list_issue_labels` with `team: {teamKey}`, and `list_cycles` with `teamId` the team's and `type: current`, then `type: next` and later ones (each cycle's `number` as `id`, `startsAt`, `endsAt`)",
+        mcp: "The Linear MCP's `list_users` (active people, leaving out apps and bots: `name`, `displayName`, `email`), `list_projects` with `team: {teamKey}` (not completed or canceled), `list_issue_labels` with `team: {teamKey}`, and `list_cycles` with `teamId` the team's and `type: current`, then `type: next` and later ones (each cycle's `number` as `id`, `startsAt`, `endsAt`)",
       },
       // The cycle's document; the MCP can't place one in a cycle, so it goes
       // in the team when the adapter can't run.
