@@ -7,9 +7,11 @@ import { conductor } from "./conductor.ts"
 import { github } from "./github.ts"
 import { gitlab } from "./gitlab.ts"
 import { graphite } from "./graphite.ts"
+import { hooks } from "./hooks.ts"
 import { jira } from "./jira.ts"
 import { linear } from "./linear.ts"
 import { lore } from "./lore.ts"
+import { merge } from "./merge.ts"
 import { neon } from "./neon.ts"
 import { posthog } from "./posthog.ts"
 import { ready } from "./ready.ts"
@@ -38,4 +40,11 @@ export const INTEGRATIONS: IntegrationSpec[] = [
   worktree,
 ]
 
-export const SECTIONS: SectionSpec[] = [repo, sync, ready, ...INTEGRATIONS]
+export const SECTIONS: SectionSpec[] = [
+  repo,
+  sync,
+  ready,
+  merge,
+  hooks,
+  ...INTEGRATIONS,
+]

@@ -11,6 +11,7 @@ Take a branch from "I think I'm done" to "this pull request is ready and green."
 
 | Command | Description |
 |---------|-------------|
+| `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), or a failure that stops the command (`stop`) |
 | `configure.ts <subcommand>` | `get <path>...` prints configured values; `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
 | `ready.ts <subcommand>` | `plan` scopes the branch (merge base, changed files, touched packages and their check scripts, agent instructions, the config's ready commands, and the steps to skip and CI checks to ignore); `ci start`, `ci record`, and `ci wait` track each pushed commit's CI pass: settled, timed out, new failures, and fixes that didn't work |
 
@@ -24,6 +25,7 @@ Take a branch from "I think I'm done" to "this pull request is ready and green."
 - **Never run a command with side effects outside the checkout** to check the branch: nothing that deploys, publishes, migrates or writes to a database, or calls a shared service. Read a script before running it when its name doesn't make that plain.
 - **Never create, edit, or apply a database migration, and never move a dependency or toolchain version** to make a check pass. Those are the team's decisions: surface them.
 - **Only change tests when fixing a failing test**, never source. A test that shows a source bug is the user's to look at.
+- **Run the repo's hooks around this command.** Skip this when the mode is `help`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run before --flow ready --mode <mode>`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run ready.after after --flow ready --mode <mode> --base <mergeBase> --outcome <success, when it did its job, else failure>`, leaving out a flag whose value isn't known yet. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest; a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). An exit of 2 means bad arguments or an invalid config: relay its message and stop. At the end, a `stop` can't happen: report the `failures`. Say in the report which hooks ran at each point, what any task for you changed, and what failed.
 
 ## Modes
 
@@ -81,7 +83,9 @@ level), and a stacking tool when there is one. The config's `ready`
 section can name the fix and check commands; otherwise it runs the
 scripts of each package the branch touches, as the repo's agent
 instructions say. Its `skip` and `ignoreChecks` lists apply to every
-run; the flags add to them.
+run; the flags add to them. Its `before`, `beforePublish`, and
+`after` hooks, and the general ones in the `hooks` section, run
+whatever is skipped.
 ```
 
 ## 1. Local cleanup
@@ -104,6 +108,7 @@ Stop the whole flow and tell the user if any part of this step leaves something 
 4. **Parent:** With a stacking entry, its `parent` op. When that succeeds and names a branch other than `<base>`, check it hasn't already merged: the source-control entry's `branchPr` op for it (with no source-control entry, skip the check). Merged means it landed, so `<parent>` is the base that pull request merged into, and `<landed>` is the old parent: `/dev-flows:sync` moves the branch off it (until then, the branch still holds the landed parent's commits, so compare its own work against `<landed>`, not `<parent>`). Otherwise `<parent>` is the branch the op named. When there's no stacking entry, or its `parent` op fails (the branch isn't tracked): the pull request's base branch when there's a pull request, else `<base>`.
 5. **Scope:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" plan --base <landed, else parent>`, plus each `--skip` and `--ignore-check` from the flags as given (quote each pattern for the shell), fetches the parent and prints JSON: `mergeBase` (keep it as `<mergeBase>` for the whole flow, so a base that moves meanwhile doesn't change the scope), `ahead`, `dirty`, `changed` (every file the pull request will hold: committed since the merge base, uncommitted, and untracked), `packages` (each touched package's directory, manifest, how to run its scripts, and its fix and check scripts), `instructions` (the agent instruction files at the root and above each changed file), `commands` (the config's `ready` section, with `{base}` filled in), `skip` (the steps this run skips: the config's `ready.skip` and the flags'), `ignoreChecks` (the CI check patterns this run ignores: the config's `ready.ignoreChecks` and the flags'), and `logDir`. Keep `skip` and `ignoreChecks` for the whole flow: every step below names the `skip` entry that turns it off. If it fails because HEAD is detached, stop and tell the user to check out a branch; because it can't skip a step, relay its message and the usage block from `help`, and stop.
 6. **Anything to publish?** With no pull request, `ahead` 0, and `dirty` false, stop: `Nothing to publish: no pull request, and no work ahead of <parent>.`
+7. **The repo's `before` hooks:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run ready.before --flow ready --mode <mode> --base <mergeBase>`. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest; a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). An exit of 2 means bad arguments or an invalid config: relay its message and stop. They run whatever `skip` says: they're the repo's own requirements, not ready's steps. When they changed files, run the scope (5) again, with the same flags, so the steps below see them.
 
 Read every file in `instructions` you haven't already: they're where the repo says what must change together and how to check it, and they win over anything below.
 
@@ -146,6 +151,10 @@ On success that shows up to 20 warning and error lines from anywhere in the log,
 ### 1e. Rescan
 
 Skip when `skip` has both `fix` and `checks`: there's nothing to run for new packages. Otherwise run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/ready.ts" plan --base <landed, else parent>` again, with the same flags. When the edits above touched packages that weren't in `packages` before, run 1d for them. This rescan is what keeps a stale first plan from skipping files the cleanup itself changed.
+
+### 1f. Before publishing
+
+`node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run ready.beforePublish --flow ready --mode <mode> --base <mergeBase>`, whatever `skip` says. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest; a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). An exit of 2 means bad arguments or an invalid config: relay its message and stop. Sync commits what they change with the rest. When they changed source files and `skip` doesn't have `checks`, rerun 1d's checks for those packages first.
 
 **Next:**
 

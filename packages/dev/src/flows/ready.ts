@@ -3,6 +3,9 @@ import {
   CONFIGURE_GET_AND_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
+  HOOK_RESULTS,
+  HOOKS_COMMAND,
+  hooksInvariant,
   REQUIRE_CONFIG,
   STACK_PARENT,
   UNKNOWN_FLAGS,
@@ -30,6 +33,7 @@ export const readyFlow: Flow = devKit.defineFlow({
     },
   },
   commands: DEV_COMMANDS.defineCommands({
+    hooks: HOOKS_COMMAND,
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
     ready: {
       description:
@@ -70,6 +74,7 @@ export const readyFlow: Flow = devKit.defineFlow({
     "**Never run a command with side effects outside the checkout** to check the branch: nothing that deploys, publishes, migrates or writes to a database, or calls a shared service. Read a script before running it when its name doesn't make that plain.",
     "**Never create, edit, or apply a database migration, and never move a dependency or toolchain version** to make a check pass. Those are the team's decisions: surface them.",
     "**Only change tests when fixing a failing test**, never source. A test that shows a source bug is the user's to look at.",
+    hooksInvariant("ready", { afterPoint: true, extra: "--base <mergeBase>" }),
   ],
   phases: [
     {
@@ -123,7 +128,9 @@ level), and a stacking tool when there is one. The config's \`ready\`
 section can name the fix and check commands; otherwise it runs the
 scripts of each package the branch touches, as the repo's agent
 instructions say. Its \`skip\` and \`ignoreChecks\` lists apply to every
-run; the flags add to them.
+run; the flags add to them. Its \`before\`, \`beforePublish\`, and
+\`after\` hooks, and the general ones in the \`hooks\` section, run
+whatever is skipped.
 \`\`\``,
           next: null,
         },
@@ -132,7 +139,7 @@ run; the flags add to them.
           kind: "action",
           title: "Local cleanup",
           refName: "local cleanup",
-          commandCalls: ["configure", "ready"],
+          commandCalls: ["configure", "hooks", "ready"],
           body: `Parse the argument for a mode keyword (\`loop\`, \`draft\`, \`help\`). No keyword means default mode.
 
 **Flags:** take \`--skip <steps>\` (comma-separated, may repeat) and \`--ignore-check <pattern>\` (may repeat) out of the arguments, for the plan below. ${UNKNOWN_FLAGS} Read plain words the same way: "don't write tests" is \`--skip tests\`; "skip the local checks" is \`--skip local\`; "don't wait for CI" or "just push it" is \`--skip ci\`; "ignore the review bots" is \`--skip reviews\`; "skip everything" or "just publish it" is \`--skip all\`; "don't wait on the Vercel preview" is \`--ignore-check 'Vercel*'\`.
@@ -149,6 +156,7 @@ Stop the whole flow and tell the user if any part of this step leaves something 
 4. **Parent:** ${STACK_PARENT}
 5. **Scope:** \`{{command:ready}} plan --base <landed, else parent>\`, plus each \`--skip\` and \`--ignore-check\` from the flags as given (quote each pattern for the shell), fetches the parent and prints JSON: \`mergeBase\` (keep it as \`<mergeBase>\` for the whole flow, so a base that moves meanwhile doesn't change the scope), \`ahead\`, \`dirty\`, \`changed\` (every file the pull request will hold: committed since the merge base, uncommitted, and untracked), \`packages\` (each touched package's directory, manifest, how to run its scripts, and its fix and check scripts), \`instructions\` (the agent instruction files at the root and above each changed file), \`commands\` (the config's \`ready\` section, with \`{base}\` filled in), \`skip\` (the steps this run skips: the config's \`ready.skip\` and the flags'), \`ignoreChecks\` (the CI check patterns this run ignores: the config's \`ready.ignoreChecks\` and the flags'), and \`logDir\`. Keep \`skip\` and \`ignoreChecks\` for the whole flow: every step below names the \`skip\` entry that turns it off. If it fails because HEAD is detached, stop and tell the user to check out a branch; because it can't skip a step, relay its message and the usage block from \`help\`, and stop.
 6. **Anything to publish?** With no pull request, \`ahead\` 0, and \`dirty\` false, stop: \`Nothing to publish: no pull request, and no work ahead of <parent>.\`
+7. **The repo's \`before\` hooks:** \`{{command:hooks}} run ready.before --flow ready --mode <mode> --base <mergeBase>\`. ${HOOK_RESULTS} They run whatever \`skip\` says: they're the repo's own requirements, not ready's steps. When they changed files, run the scope (5) again, with the same flags, so the steps below see them.
 
 Read every file in \`instructions\` you haven't already: they're where the repo says what must change together and how to check it, and they win over anything below.
 
@@ -190,7 +198,11 @@ On success that shows up to 20 warning and error lines from anywhere in the log,
 
 ### 1e. Rescan
 
-Skip when \`skip\` has both \`fix\` and \`checks\`: there's nothing to run for new packages. Otherwise run \`{{command:ready}} plan --base <landed, else parent>\` again, with the same flags. When the edits above touched packages that weren't in \`packages\` before, run 1d for them. This rescan is what keeps a stale first plan from skipping files the cleanup itself changed.`,
+Skip when \`skip\` has both \`fix\` and \`checks\`: there's nothing to run for new packages. Otherwise run \`{{command:ready}} plan --base <landed, else parent>\` again, with the same flags. When the edits above touched packages that weren't in \`packages\` before, run 1d for them. This rescan is what keeps a stale first plan from skipping files the cleanup itself changed.
+
+### 1f. Before publishing
+
+\`{{command:hooks}} run ready.beforePublish --flow ready --mode <mode> --base <mergeBase>\`, whatever \`skip\` says. ${HOOK_RESULTS} Sync commits what they change with the rest. When they changed source files and \`skip\` doesn't have \`checks\`, rerun 1d's checks for those packages first.`,
           next: {
             byMode: {
               default: "run/sync-local",

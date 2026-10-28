@@ -4,6 +4,8 @@ import {
   DEV_COMMANDS,
   devKit,
   flowDir,
+  HOOKS_COMMAND,
+  hooksInvariant,
   REQUIRE_CONFIG,
   UNKNOWN_FLAGS,
   USE_INTEGRATIONS,
@@ -40,6 +42,7 @@ export const startWorkFlow: Flow = devKit.defineFlow({
       "[issue ids | notes URL | pasted notes] [--start-only] [--reuse [--no-ticket]] [--confirm] [--section <name> | --section-by-rank | --no-section] [--in <integration>] [--yes] [help]",
   },
   commands: DEV_COMMANDS.defineCommands({
+    hooks: HOOKS_COMMAND,
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
     work: {
       description:
@@ -67,6 +70,7 @@ Invoking it is the go-ahead, so it asks nothing before filing or starting, excep
     "**Act through the integrations' ops.** Issues are read and updated, and workspaces listed and opened, only through the ops `configure.ts integrations` returns, run as given.",
     "**Never start an issue twice.** An issue with a workspace on its branch, in any workspaces integration or any git worktree of this repo, gets no new one.",
     "**Change only an issue's branch line and state.** Its title, the rest of its description, and its fields stay as they are.",
+    hooksInvariant("start-work"),
   ],
   phases: [
     {

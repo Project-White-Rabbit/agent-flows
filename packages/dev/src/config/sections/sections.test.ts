@@ -183,7 +183,12 @@ const SHELL_HOSTILE = [
 ]
 
 function typeOf(value: FieldSpec["example"]): string {
-  return Array.isArray(value) ? "string[]" : typeof value
+  if (Array.isArray(value)) {
+    return value.every((item) => typeof item === "string")
+      ? "string[]"
+      : "hook[]"
+  }
+  return typeof value
 }
 
 describe("sync format", () => {

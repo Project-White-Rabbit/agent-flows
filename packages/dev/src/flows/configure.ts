@@ -89,6 +89,11 @@ export const configureFlow: Flow = devKit.defineFlow({
         "`show` the config, `detect [auto|manual]` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, `write` a patch read from stdin (JSON), or `token <integration> --env|--file|--command <where>` to record where an API token is on this machine",
       args: "<subcommand>",
     },
+    hooks: {
+      description:
+        "`try <point> --hook '<json>'` runs one hook that isn't configured yet, once, without its fix, to check it before it's written",
+      args: "<subcommand>",
+    },
   }),
   tables: {
     sections: {
@@ -134,7 +139,7 @@ A repo can configure any number of integrations for a capability (none, one, or 
 ]
 \`\`\`
 
-The file is made of **sections**, each an object of fields at a dotted path. Every section but \`repo\`, \`sync\`, and \`ready\` is an integration:
+The file is made of **sections**, each an object of fields at a dotted path. Every section but \`repo\`, \`sync\`, \`ready\`, \`merge\`, and \`hooks\` is an integration:
 
 {{table:sections:name,provides,purpose,fields,reach,lookup}}
 
@@ -151,6 +156,8 @@ The file is made of **sections**, each an object of fields at a dotted path. Eve
 \`\`\`
 
 \`version\` is the file format, set by \`write\`. An older file is upgraded when it's read (version 1 called the integrations \`services\`), and the next \`write\` saves it in the current format. \`skipped\` lists integrations the team chose not to configure. Sections and fields this plugin doesn't know (from a newer plugin, or added by hand) are reported as warnings and kept as they are.
+
+A field marked \`[hook[]]\` is a list of **hooks**: the repo's own steps at that point (\`ready.before\`, \`merge.after\`, or \`hooks.before\` and \`hooks.after\` around every command but configure). Each is an object: a unique \`name\` (lowercase letters, digits, \`.\`, \`_\`, \`-\`), then either \`run\` (a command from the repo root: exit 0 passes, exit 2 hands its stderr to the agent as a task, anything else fails; with an optional \`fix\` command run once before checking again, and \`timeout\` in seconds, default 60) or \`prompt\` (a task for the agent at that point). \`paths\` (globs), \`modes\` (the flow's modes, at a flow's own points), and \`on\` (\`success\` or \`failure\`, at an \`after\` point) narrow when it applies. Commands get \`{base}\`, \`{branch}\`, and \`{outcome}\`, and the same as \`AGENT_FLOWS_*\` variables. Detection never adds hooks: the hooks walk (below) offers what the checkout suggests and adds only what the user takes, each in the section of the flow it's for, with that section's other fields in the write, since a write replaces the whole section.
 
 A run goes one of three ways ({{argsToken}}):
 
@@ -215,7 +222,7 @@ Re-running is safe: values already in the file are kept, skipped sections stay s
 
 Pass the mode (typed or picked) and the sections or capabilities the user named, if any, as they typed them. An unknown name fails with the list of known sections, capabilities, and modes: show it and ask which they meant.
 
-The JSON has \`mode\` (\`auto\` or \`manual\`; names alone mean \`manual\`), \`configPath\`, \`exists\`, the current \`config\` (when valid), its \`issues\`, \`requested\` (when you passed names: the section paths they resolved to, with each capability expanded to its integrations), \`coverage\` (per capability, the integrations configured for it), \`detected\` (per section path: guessed \`values\` and the \`evidence\` behind them, from local files and git metadata only), and a \`plan\`:
+The JSON has \`mode\` (\`auto\` or \`manual\`; names alone mean \`manual\`), \`configPath\`, \`exists\`, the current \`config\` (when valid), its \`issues\`, \`requested\` (when you passed names: the section paths they resolved to, with each capability expanded to its integrations), \`coverage\` (per capability, the integrations configured for it), \`detected\` (per section path: guessed \`values\` and the \`evidence\` behind them, from local files and git metadata only), \`hookSuggestions\` (hooks the checkout suggests, not already configured: each with its \`point\`, the \`hook\`, and the \`evidence\`, which says what to check before taking it; offered in the hooks walk, never planned), and a \`plan\`:
 
 - \`changes\`: sections to \`add\`, and empty fields of configured sections to \`fill\`.
 - \`needs\`: required fields still missing after those changes (per instance, with its \`instance\` name, for a list).
@@ -267,6 +274,7 @@ Route on the result:
 - Lookups: a lookup with exactly one result is the answer. Ask when it returns several (two Vercel projects, several Linear teams) or none.
 - Several integrations detected for one capability, \`plan.conflicts\`, and \`plan.moreInstances\`: ask.
 - A section that can't be filled without the user and isn't worth asking about: leave it out of this run rather than skipping it.
+- Hooks: never add any. When \`hookSuggestions\` has some, list them in confirm as available, with \`{{cmd}}configure hooks\` (or \`ready\`, \`merge\`) to set them up.
 
 **Manual: one section at a time.** Go through the \`requested\` sections in the sections table's order. For each, show what's configured (and any of its \`plan.moreInstances\`), what was detected, and how this machine reaches it, then {{askVerb}} whether to configure it, keep it as it is, or skip it, then ask the questions below for that section only before moving on. Recommend keeping what's configured, and configuring what was detected or is in reach.
 
@@ -294,6 +302,14 @@ When detection finds several instances of one integration (\`detected.<path>.ins
 
 Several integrations can provide the same capability (Linear and Jira are both issue trackers). Don't make the user pick just one: when detection finds evidence for more than one, propose each, and when the user named a capability, ask which of its integrations the team uses. They can choose any number; configure those and skip the rest.
 
+**The hooks walk.** For each \`requested\` section with hook fields (\`hooks\`, \`ready\`, \`merge\`; in manual mode, once the user chooses to configure it), go through its points in order: \`hooks\`: \`before\`, \`after\`; \`ready\`: \`before\`, \`beforePublish\`, \`after\`; \`merge\`: \`before\`, \`after\`. For each point:
+
+1. Say in one line when it runs and what it may do (its field's description in the sections table), and list the hooks it has now.
+2. Gather what fits it: the \`hookSuggestions\` for this point, each with its command, its fix, and its evidence; and, for a prompt, rules in the repo's agent instructions about this moment rather than about the code ("after a merge, post in #releases"). Rules about the code stay in the instructions; don't copy them into prompts.
+3. {{askVerb}} with multiple selection: which suggestions to add, whether to add one of the user's own, and, for a point with hooks, which to change or remove. Leaving the point as it is is always an option, and the default.
+4. For a hook of the user's own: a command or a prompt; the command, and a \`fix\` only when there's an obvious one (a version check's bump script); \`paths\`, \`modes\`, or \`on\` only when the user says it applies only sometimes; a \`timeout\` only for a check slower than a minute. Name it after what it does.
+5. Try each new or changed command at a point that isn't an \`after\` one: \`{{command:hooks}} try <point> --hook '<the hook as JSON>'\` (single quotes, with any \`'\` written as \`'\\''\`). It runs the command once, whatever its filters say, and never its fix. \`done\`, with the hook \`passed\`: it works. \`stop\`: show \`stop.output\`. A check that fails on this branch stops every run of its command, so ask whether to keep it (\`fix\` in the output names the fix that would run), change it, or drop it; a command that's missing or takes other arguments is the usual cause. \`agent\`: show the task it would hand over. Exit 2: the hook isn't valid; its message says why. At an \`after\` point nothing is tried, since teardown and notifications have side effects: read the command back to the user instead.
+
 When the user named sections, or in manual mode, touch only the \`requested\` sections (and any *always* section the plan adds because the config lacks it): don't propose, fill, or skip any other section.
 
 A section whose required fields can't be found, or that the user doesn't want, goes in the write's \`skip\` list (sections marked *always* can't be skipped; ask for their values instead), so the next run doesn't propose it again. Never change a value the config already has unless the user asks.`,
@@ -303,7 +319,7 @@ A section whose required fields can't be found, or that the user doesn't want, g
           id: "confirm",
           kind: "branch",
           title: "Confirm",
-          body: `Show one table of what will change: section (with the instance name, for a list), field, new value, and where it came from (detected, looked up, or asked). Then the sections you'll mark skipped, and in auto mode, the integrations in reach that weren't added. Leave out everything that stays the same, and say how many sections are unchanged.
+          body: `Show one table of what will change: section (with the instance name, for a list), field, new value, and where it came from (detected, looked up, or asked). A hook gets a row of its own: its point, its name, what it runs (and its fix) or its prompt, its filters, and what trying it showed. Then the sections you'll mark skipped, and in auto mode, the integrations in reach that weren't added and the hooks the checkout suggests. Leave out everything that stays the same, and say how many sections are unchanged.
 
 Then {{askVerb}}:
 

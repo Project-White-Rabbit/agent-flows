@@ -1,10 +1,11 @@
+import { hookField } from "../hooks.ts"
 import type { SectionSpec } from "../types.ts"
 
 export const ready: SectionSpec = {
   path: "ready",
   name: "Ready checks",
   purpose:
-    "The commands ready runs before it publishes a branch (unset, it runs the scripts of each package the branch touches), the steps it skips, and the CI checks it ignores",
+    "The commands ready runs before it publishes a branch (unset, it runs the scripts of each package the branch touches), the steps it skips, the CI checks it ignores, and the repo's own hooks at its steps",
   fields: [
     {
       key: "fix",
@@ -34,7 +35,10 @@ export const ready: SectionSpec = {
         "CI check names ready neither waits on nor fixes, such as preview deploys or optional coverage. `*` matches any run of characters, case aside. A run's `--ignore-check` adds to these",
       example: ["Vercel*", "codecov/*"],
     },
+    hookField("ready.before"),
+    hookField("ready.beforePublish"),
+    hookField("ready.after"),
   ],
   lookup:
-    "Leave it out to run each touched package's own scripts and every step, and to wait on every CI check. Set `fix` and `checks` when the repo has one command for the whole check (`bun run validate`), or its own script that picks the checks a branch needs; `skip` and `ignoreChecks` when the team never wants a step, or a check is slow or optional (a preview deploy)",
+    "Leave it out to run each touched package's own scripts and every step, and to wait on every CI check. Set `fix` and `checks` when the repo has one command for the whole check (`bun run validate`), or its own script that picks the checks a branch needs; `skip` and `ignoreChecks` when the team never wants a step, or a check is slow or optional (a preview deploy); `before` for a check CI runs that ready would otherwise find only after pushing (a version bump), or a rule that applies only when certain paths change; `beforePublish` and `after` for the repo's own steps at those points",
 }
