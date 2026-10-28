@@ -14,7 +14,7 @@ import { INSTANCE_NAME } from "./instances.ts"
 import { type FieldSpec, HOOK_KEYS, type Hook } from "./types.ts"
 
 /** Values a hook's commands and prompt can use, as `{name}` and in the environment. */
-export const HOOK_VARS = ["base", "branch", "outcome"] as const
+export const HOOK_VARS = ["base", "branch", "outcome", "pr", "prs"] as const
 
 export type HookVar = (typeof HOOK_VARS)[number]
 
@@ -126,6 +126,21 @@ export const HOOK_POINTS: HookPoint[] = [
     example: [{ name: "changelog", run: "./scripts/check-changelog.sh" }],
   },
   {
+    id: "merge.beforeCi",
+    flow: "merge",
+    when: "After merge has synced the branch and marked its pull request ready, before it waits for CI on the commit that lands: for a commit that must land with the merge (a changelog entry), which the hook makes and pushes, so CI runs on it",
+    effects:
+      "Commands may change and push the branch, but not deploy, publish, migrate, or write to any other shared service",
+    failure: "stop",
+    example: [
+      {
+        name: "changelog",
+        prompt:
+          "Add this pull request's changelog entry, commit it, and push it",
+      },
+    ],
+  },
+  {
     id: "merge.after",
     flow: "merge",
     when: "At the end of merge, merged or stopped, just before its report: teardown the repo does itself (a preview server, a database it manages)",
@@ -141,10 +156,37 @@ export const HOOK_POINTS: HookPoint[] = [
       },
     ],
   },
+  {
+    id: "close.before",
+    flow: "close",
+    when: "After close's survey and gates, before it closes the pull request or deletes anything: a check that must pass before the branch's work is thrown away",
+    effects: NO_SHARED_EFFECTS,
+    failure: "stop",
+    example: [
+      { name: "unpushed-data", run: "./scripts/check-exports.sh {branch}" },
+    ],
+  },
+  {
+    id: "close.after",
+    flow: "close",
+    when: "At the end of close, finished or stopped, just before its report: teardown of what the repo set up for the branch itself (a database branch, dev servers, a marker that it's closed)",
+    effects:
+      "Commands may have side effects outside the checkout: that's what teardown is",
+    failure: "report",
+    after: true,
+    example: [
+      {
+        name: "db-branch",
+        on: "success",
+        run: "./scripts/db-branch.sh delete {branch}",
+      },
+    ],
+  },
 ]
 
 /** The flows the general points run around: every flow but configure. */
 export const HOOK_FLOWS = [
+  "close",
   "create-tickets",
   "evaluate",
   "merge",
@@ -158,6 +200,7 @@ export const HOOK_FLOWS = [
 export const FLOW_MODES: Record<string, string[]> = {
   ready: ["default", "loop", "draft"],
   merge: ["default"],
+  close: ["default", "force"],
 }
 
 export function hookPoint(id: string): HookPoint | undefined {
@@ -340,13 +383,16 @@ export function skipReason(
   return undefined
 }
 
-/** `{base}`, `{branch}`, `{outcome}` filled in; unknown or unset ones stay. */
+/**
+ * `{base}`, `{branch}`, `{outcome}`, `{pr}`, and `{prs}` filled in; unknown or
+ * unset ones stay.
+ */
 export function fillVars(
   text: string,
   vars: Partial<Record<HookVar, string>>,
 ): string {
   return text.replace(
-    /\{(base|branch|outcome)\}/g,
+    /\{(base|branch|outcome|prs|pr)\}/g,
     (match, name: HookVar) => vars[name] ?? match,
   )
 }

@@ -73,7 +73,7 @@ const MERGE_METHOD =
   "`squash` true for <method> `squash`, else false: GitLab merges by the project's merge method (a merge commit, or fast-forward), so for `merge` or `rebase` say which it used"
 
 const STATUSES =
-  "`status` `success` passes; `failed` fails, or is skipping when `allow_failure` is true; `canceled` is cancelled; `skipped` and `manual` are skipping; anything else is pending. Its `link` is `target_url`, and its `log` the job id at the end of a `target_url` ending `/-/jobs/<id>` (none for an outside service's status)"
+  "`status` `success` passes; `failed` fails, or is skipping when `allow_failure` is true; `canceled` is cancelled; `skipped` and `manual` are skipping; anything else is pending. Its `link` is `target_url`, and its `log` the job id at the end of a `target_url` ending `/-/jobs/<id>` (none for an outside service's status). With <base>, every one is `required` but a job whose `allow_failure` is true"
 
 const THREADS =
   "Keep the discussions whose first note is `resolvable` and not `resolved`: its `id`, its first note's `position.new_path` and `position.new_line`, and each note's `author.username`, `author.bot`, and `body`"
@@ -167,6 +167,11 @@ export const gitlab: IntegrationSpec = {
         cli: `\`glab api -X PUT 'projects/{project:encoded}/merge_requests/<N>/merge' --hostname {host|gitlab.com} -F squash=<true|false> -f sha=<sha> -F should_remove_source_branch=false\`, with ${MERGE_METHOD}. 405 or 422 is refused, with the reason in \`message\`; 409 is a moved head`,
         api: `\`PUT\` ${API_BARE}/merge_requests/<N>/merge\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`sha\` <sha>, \`should_remove_source_branch\` false, and ${MERGE_METHOD}. 405 or 422 is refused, with the reason in \`message\`; 409 is a moved head`,
         mcp: `The GitLab MCP's merge tool for project \`{project}\` !<N>, with \`sha\` <sha> when it takes one (else check the head is <sha> just before), not removing the source branch, and ${MERGE_METHOD}`,
+      },
+      prClose: {
+        mcp: "The GitLab MCP's update merge request tool for project `{project}` !<N>, with `state_event: close`",
+        cli: `\`glab mr close <N> ${REPO}\``,
+        api: `\`PUT\` ${API_BARE}/merge_requests/<N>\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`state_event\` \`close\``,
       },
       prReady: {
         mcp: "The GitLab MCP's update merge request tool for project `{project}` !<N>, with its title without the `Draft: ` prefix",

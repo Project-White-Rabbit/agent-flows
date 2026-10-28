@@ -39,7 +39,7 @@ On conflicts, run `git status`, read each conflicted file, and write a resolutio
 
 **Default mode only**, and only when `git rev-list --count <baseRef>..HEAD` isn't 0.
 
-- **With a stacking integration:** its `submit` op.
+- **With a stacking integration:** its `submit` op. Keep the stacking tool's URL for the pull request when it prints one, for the report. When it fails for a reason other than a conflict (the tool's own API or sign-in), push the branch anyway: `git push --force-with-lease -u origin HEAD` (the stacking tool rewrote the branch, so a plain push would be refused, and the lease refuses to overwrite work pushed since the last fetch). The pull request is then opened in 3c with `prCreate` when there's none; say in the report that `submit` failed, and why.
 - **Without one:** `git push -u origin HEAD`. If it's rejected because the remote branch moved, `git fetch origin <branch>`, `git merge --no-edit origin/<branch>`, resolve as above, and push again. Never force.
 
 `local` mode never pushes.

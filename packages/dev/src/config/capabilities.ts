@@ -9,14 +9,14 @@ import type { CapabilitySpec } from "./types.ts"
 // The fields sync and create-tickets set on an issue beyond its title and
 // description. Each tracker maps them to its own: a cycle is a sprint elsewhere.
 const ISSUE_FIELDS =
-  "priority (`urgent`, `high`, `medium`, `low`), estimate (on the team's scale), labels (names), cycle (`current`: the one in progress, `next`: the one after it, or a `YYYY-MM-DD` date inside one), project (a name), assignee (a person's name or email), and due date (`YYYY-MM-DD`, or `null` to clear it)"
+  "priority (`urgent`, `high`, `medium`, `low`, or `none`, a team's lowest rank), estimate (on the team's scale), labels (names), cycle (`current`: the one in progress, `next`: the one after it, or a `YYYY-MM-DD` date inside one), project (a name), assignee (a person's name or email), and due date (`YYYY-MM-DD`, or `null` to clear it)"
 
 const PR_FIELDS =
   "number, url, title, body, state, whether it's a draft, base and head branches, additions, deletions, and changed-file count"
 
 // What the `checks` op prints, so `ready.ts ci` can read any host's checks.
 const CHECKS_SHAPE =
-  '`{"checks": [{"name", "state", "link", "log"}]}`, with `state` one of `pass`, `fail`, `pending` (queued or running), `skipping` (skipped, or allowed to fail), or `cancelled`, `link` the check\'s page, and `log` the id `checkLog` reads its log by, left out when the host keeps no log for it (an outside service\'s status)'
+  '`{"checks": [{"name", "state", "link", "log", "required"}]}`, with `state` one of `pass`, `fail`, `pending` (queued or running), `skipping` (skipped, or allowed to fail), or `cancelled`, `link` the check\'s page, `log` the id `checkLog` reads its log by, left out when the host keeps no log for it (an outside service\'s status), and `required` whether <base>\'s rules require it to pass before a merge, set only when <base> is given'
 
 export const CAPABILITIES: CapabilitySpec[] = [
   {
@@ -51,9 +51,11 @@ export const CAPABILITIES: CapabilitySpec[] = [
         "Whether the host would merge pull request <N> now: `ready` (checks it doesn't require may still be failing), `blocked` with the reasons it gives (a required check, an approval, a rule, a draft), `conflicting`, `behind` (the base moved and the host requires it caught up), or `pending` (the host is still computing it)",
       prMerge:
         "Merge pull request <N> into its base by <method> (`squash`, `merge` for a merge commit, or `rebase`), only while its head is still commit <sha>, deleting no branch and bypassing no rule. A host that can't honor <method> per pull request says what it does instead; a refusal (a rule, a required check, a moved head) prints the host's reason",
+      prClose:
+        "Close pull request <N> without merging it, deleting no branch. One that's already closed stays as it is",
       prReady:
         "Mark pull request <N> ready for review. One that's already ready stays as it is",
-      checks: `Every CI check and commit status on commit <sha>, all pages, as JSON: ${CHECKS_SHAPE}. An empty list means none has reported yet`,
+      checks: `Every CI check and commit status on commit <sha>, all pages, as JSON: ${CHECKS_SHAPE}. With <base> (optional), each says whether merging into <base> requires it. An empty list means none has reported yet`,
       checkLog:
         "The last 200 lines of the log of check <log> (a check's `log` from the `checks` op)",
       reviewThreads:
@@ -78,7 +80,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
       rename:
         "Rename the checked-out branch to <name>, keeping its place in the stack. A branch the tool doesn't track is renamed with git",
       submit:
-        "Push the checked-out branch and open its pull request as a draft when it has none, leaving an existing pull request's title, body, and draft or ready state alone",
+        "Push the checked-out branch and open its pull request as a draft when it has none, leaving an existing pull request's title, body, and draft or ready state alone. Prints each pull request's URL, and its URL in the stacking tool's own app when it has one",
       downstack:
         '`{"chain": [<branch>...], "above": <n>, "size": <n>}`: `chain` the checked-out branch\'s ancestors in its stack as the tool records them, trunk left out, bottom first and ending with the checked-out branch; `above` how many branches stack on top of it; `size` how many its whole stack holds. A branch the tool doesn\'t track is a chain of one, with `above` 0 and `size` 1',
       mergeStack:
@@ -104,15 +106,21 @@ export const CAPABILITIES: CapabilitySpec[] = [
     ops: {
       issueRef:
         "Which strings name one of this tracker's issues: an issue id, or the tracker's URL for one",
-      getIssue: `Issue <ID>: its id, title, URL, workflow state, description, ${ISSUE_FIELDS}, parent issue, whether a pull request is attached, and the branch name the tracker suggests for it, when it suggests one. Not found, or archived, means there is none`,
+      getIssue: `Issue <ID>: its id, title, URL, workflow state, description, ${ISSUE_FIELDS}, the date its cycle starts, parent issue, open sub-issues (each with its id, title, priority, cycle and the date it starts, and due date), the pull requests attached (their URLs), and the branch name the tracker suggests for it, when it suggests one. Not found, or archived, means there is none`,
       findIssue:
         "Open issues anchored to branch <branch>, any assignee: their description has a `> Branch:` line naming it, in backticks or bare (as older tools wrote it), reading an issue id in it that the tracker turned into a link as plain text",
       searchIssues:
         "Issues that may already describe the work in <text>, any assignee: open ones, and ones closed in the last 90 days, ranked by the tracker's own search, each with its id, title, URL, workflow state, description, parent issue, and whether a pull request is attached",
+      projectIssues:
+        "Every open issue in project <project>, any assignee, all pages: each with its id, title, URL, workflow state, priority, due date, and parent issue",
+      fieldOptions:
+        '`{"people": [{"name", "displayName", "email"}], "projects": [<name>], "labels": [<name>], "cycles": [{"id", "startsAt", "endsAt", "current"}]}`: the people issues can be assigned to, the open projects, the labels, and the current and upcoming cycles (`id` its number or name, `current` true for the one in progress), as JSON. A field the tracker doesn\'t have is left out',
+      recordNotes:
+        "Put the section in the file <section-file> into the planning document titled <title>, in the current cycle (the team's, when cycles aren't documents' homes), creating it with that title when there's none: replace the `## ` section whose `Source:` line contains <key>, or add it at the end, keeping the rest. Prints the document's title and URL",
       assignedIssues:
         "Every open issue assigned to the current user, all pages: each with its id, title, URL, workflow state, description, priority, due date, whether it has open sub-issues, whether a pull request is attached, and whether it blocks another open issue",
-      createIssue: `File an issue titled <title> with the description <description>, assigned to the current user unless <fields> names an assignee, as a sub-issue of <parent> when one is given, with <fields>: whichever of ${ISSUE_FIELDS} the flow sets, leaving out the rest. Prints its id and URL`,
-      updateIssue: `Set issue <ID>'s title to <title>, its description to <description>, its workflow state to the one matching <state> (\`todo\`, \`in progress\`, \`in review\`, \`done\`, or \`canceled\`), and <fields> as for createIssue. Anything left out (the title, the description, the state, or a field) stays as it is`,
+      createIssue: `File an issue titled <title> with the description <description>, assigned to the current user unless <fields> names an assignee, as a sub-issue of <parent> when one is given, in the workflow state matching <state> when one is given (as for updateIssue; else the tracker's default), with <fields>: whichever of ${ISSUE_FIELDS} the flow sets, leaving out the rest. Prints its id and URL`,
+      updateIssue: `Set issue <ID>'s title to <title>, its description to <description>, its workflow state to the one matching <state> (\`todo\`, \`in progress\`, \`in review\`, \`done\`, or \`canceled\`), its parent to <parent> (moving it from the one it has), and <fields> as for createIssue. Anything left out (the title, the description, the state, the parent, or a field) stays as it is`,
       linkBlocked:
         "Record that issue <ID> is blocked by issue <blocker>, keeping the relations it already has. Linking a pair that's already linked changes nothing",
       prLink:
@@ -126,11 +134,11 @@ export const CAPABILITIES: CapabilitySpec[] = [
       "Open a branch in a workspace of its own, with a coding agent already working on it",
     ops: {
       workspaces:
-        "Every open (not archived) workspace of this repository: each with its id, name, branch, and sidebar section (none when it has none), and whether this session runs in it",
+        "Every open (not archived) workspace of this repository, or of the integration's project <project> when one is given (another repository it manages, by name): each with its id, name, branch, and sidebar section (none when it has none), and whether this session runs in it",
       renameWorkspace:
         "Rename the workspace <id> to <name>. With <section>, file it in that sidebar section, making the section when there's none yet; with <section> `none`, take it out of every section; with no <section>, leave its section as it is. Its git branch is renamed separately",
       createWorkspace:
-        "Open a new workspace of this repository named <name>, on the branch <branch> (made from <base> when it doesn't exist): exactly <branch> when <exact> is `yes`, else under the prefix the integration or the repo puts on new branches. File it in the sidebar section <section> when one is given, making the section when there's none yet. Start a coding agent in it on the prompt in the file <prompt-file>, or, when the integration can't start one, print the command that does. Prints the workspace's id, the branch it's on, and a link or path to open it",
+        "Open a new workspace of this repository, or of the integration's project <project> when one is given (another repository it manages, by name), named <name>, on the branch <branch> (made from <base> when it doesn't exist): exactly <branch> when <exact> is `yes`, else under the prefix the integration or the repo puts on new branches. File it in the sidebar section <section> when one is given, making the section when there's none yet. Start a coding agent in it on the prompt in the file <prompt-file>, or, when the integration can't start one, print the command that does. Prints the workspace's id, the branch it's on, and a link or path to open it",
     },
   },
   {

@@ -54,7 +54,9 @@ export const graphite: IntegrationSpec = {
       rename: {
         cli: "`if gt parent >/dev/null 2>&1; then gt rename --no-interactive <name>; else git branch -m <name>; fi`",
       },
-      submit: { cli: "`gt submit --draft --no-edit --no-interactive`" },
+      submit: {
+        cli: "`gt submit --draft --no-edit --no-interactive`. It prints a line per pull request it pushed, with its URL in Graphite's app (`https://app.graphite.` …); the host's URL is the source-control entry's `currentPr`",
+      },
       // Also an adapter (`adapters/graphite.ts`), run first: it reads the
       // parents Graphite records, without parsing `gt log`.
       downstack: {

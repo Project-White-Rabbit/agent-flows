@@ -17,7 +17,8 @@ The skill is read-only. It never writes to source control, the issue tracker, er
 | Command | Description |
 |---------|-------------|
 | `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), or a failure that stops the command (`stop`) |
-| `configure.ts <subcommand>` | `get <path>...` prints configured values; `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
+| `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
+| `ready.ts <subcommand>` | `instructions --files <file>` lists the agent instruction and path-scoped rule files for the changed paths in the file |
 
 ## Invariants
 

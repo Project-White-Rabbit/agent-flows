@@ -17,9 +17,9 @@ const BRANCH_MATCH =
   "Keep only issues whose description has a `> Branch:` line that is `<branch>` once backticks are dropped and any link is read as its text"
 // The fields sync and create-tickets set beyond summary and description.
 const FIELDS =
-  "`<fields>` as `priority.name` (`Highest` for urgent, `High`, `Medium`, `Low`), `labels`, the story points field for `estimate` when the project has one, the board's sprint for `cycle` when it has one (Jira Software: the active sprint for `current`, the next future one for `next`, the one whose dates hold a date), `assignee.accountId` for `assignee` (from the user search for the name or email), and `duedate`. `project` doesn't apply: the project is `{projectKey}`"
+  "`<fields>` as `priority.name` (`Highest` for urgent, `High`, `Medium`, `Low`; leave it out for `none`, so the project's default applies), `labels`, the story points field for `estimate` when the project has one, the board's sprint for `cycle` when it has one (Jira Software: the active sprint for `current`, the next future one for `next`, the one whose dates hold a date), `assignee.accountId` for `assignee` (from the user search for the name or email), and `duedate`. `project` doesn't apply: the project is `{projectKey}`"
 const FIELD_NAMES =
-  "`priority`, `labels`, `assignee`, `duedate`, `parent`, `issuelinks`, the story points field, and the sprint field"
+  "`priority`, `labels`, `assignee`, `duedate`, `parent`, `subtasks`, `issuelinks`, the story points field, and the sprint field (its `startDate` is when the issue's cycle starts); its open sub-issues are the `subtasks` whose status category isn't Done, each loaded for its priority, due date, and sprint"
 // Setting `labels` replaces them all, so a label change adds and removes.
 const LABEL_UPDATE =
   'for a label change, leave `labels` out and pass `update.labels` as `[{ "add": <new> }, { "remove": <old> }]`, so the issue keeps its other labels'
@@ -120,7 +120,7 @@ export const jira: IntegrationSpec = {
         "`{projectKey}-<n>`, or `https://{site}/browse/{projectKey}-<n>`",
       getIssue: {
         mcp: `The Atlassian MCP's \`getJiraIssue\` for \`<ID>\` on \`{site}\`, with ${FIELD_NAMES}; its URL is \`https://{site}/browse/<ID>\`, and a pull request shows in its development panel`,
-        api: `${REST}/issue/<ID>?fields=summary,description,status,priority,labels,assignee,duedate,parent,issuelinks,*navigable"\`; its URL is \`https://{site}/browse/<ID>\`, and a pull request shows in \`GET /rest/dev-status/latest/issue/summary?issueId=<numeric id>\``,
+        api: `${REST}/issue/<ID>?fields=summary,description,status,priority,labels,assignee,duedate,parent,subtasks,issuelinks,*navigable"\` (${FIELD_NAMES}); its URL is \`https://{site}/browse/<ID>\`, and a pull request shows in \`GET /rest/dev-status/latest/issue/summary?issueId=<numeric id>\``,
       },
       findIssue: {
         mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${JQL}, following \`nextPageToken\` to the last page: \`text ~\` is a fuzzy search, so a match can be on any page. ${BRANCH_MATCH}`,
@@ -135,12 +135,24 @@ export const jira: IntegrationSpec = {
         api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${ASSIGNED_JQL} and \`fields\` ${ASSIGNED_FIELDS}, following \`nextPageToken\` to the last page. Its URL is \`https://{site}/browse/<ID>\`, an open sub-issue is a subtask whose status isn't done, and a pull request shows in \`GET /rest/dev-status/latest/issue/summary?issueId=<numeric id>\``,
       },
       createIssue: {
-        mcp: `The Atlassian MCP's \`createJiraIssue\` on \`{site}\` in project \`{projectKey}\`, issue type \`Task\` (\`Subtask\` with \`parent\` set to \`<parent>\`, when given), assigned to the current user (\`atlassianUserInfo\`) unless \`<fields>\` names an assignee, with ${FIELDS}`,
-        api: `\`POST https://{site}/rest/api/3/issue\` (${AUTH}) with \`fields\`: \`project.key\` \`{projectKey}\`, \`issuetype.name\` \`Task\` (\`Subtask\`, with \`parent.key\` \`<parent>\`, when given), \`summary\`, \`description\` (Atlassian Document Format), \`assignee.accountId\` from \`GET /rest/api/3/myself\` unless \`<fields>\` names an assignee, and ${FIELDS}`,
+        mcp: `The Atlassian MCP's \`createJiraIssue\` on \`{site}\` in project \`{projectKey}\`, issue type \`Task\` (\`Subtask\` with \`parent\` set to \`<parent>\`, when given), assigned to the current user (\`atlassianUserInfo\`) unless \`<fields>\` names an assignee, with ${FIELDS}. With <state>, then \`transitionJiraIssue\` as for \`updateIssue\``,
+        api: `\`POST https://{site}/rest/api/3/issue\` (${AUTH}) with \`fields\`: \`project.key\` \`{projectKey}\`, \`issuetype.name\` \`Task\` (\`Subtask\`, with \`parent.key\` \`<parent>\`, when given), \`summary\`, \`description\` (Atlassian Document Format), \`assignee.accountId\` from \`GET /rest/api/3/myself\` unless \`<fields>\` names an assignee, and ${FIELDS}. With <state>, then its transition as for \`updateIssue\``,
       },
       updateIssue: {
-        mcp: `The Atlassian MCP's \`editJiraIssue\` on \`{site}\` for the summary, the description, and ${FIELDS} (${LABEL_UPDATE}), then \`transitionJiraIssue\` to the transition (\`getTransitionsForJiraIssue\`) ${TRANSITION}`,
-        api: `\`PUT https://{site}/rest/api/3/issue/<ID>\` (${AUTH}) with \`fields.summary\`, \`fields.description\` (Atlassian Document Format), and ${FIELDS} (${LABEL_UPDATE}), then \`POST .../issue/<ID>/transitions\` with the transition (\`GET .../issue/<ID>/transitions\`) ${TRANSITION}`,
+        mcp: `The Atlassian MCP's \`editJiraIssue\` on \`{site}\` for the summary, the description, \`parent\` (\`{ "key": <parent> }\`), and ${FIELDS} (${LABEL_UPDATE}), then \`transitionJiraIssue\` to the transition (\`getTransitionsForJiraIssue\`) ${TRANSITION}`,
+        api: `\`PUT https://{site}/rest/api/3/issue/<ID>\` (${AUTH}) with \`fields.summary\`, \`fields.description\` (Atlassian Document Format), \`fields.parent.key\` <parent> (a sub-task moves only between parents its issue type allows; when Jira refuses, say so), and ${FIELDS} (${LABEL_UPDATE}), then \`POST .../issue/<ID>/transitions\` with the transition (\`GET .../issue/<ID>/transitions\`) ${TRANSITION}`,
+      },
+      projectIssues: {
+        unsupported:
+          "A Jira entry is one project ({projectKey}), so there's no project to narrow to: searchIssues covers it",
+      },
+      fieldOptions: {
+        api: `\`GET https://{site}/rest/api/3/user/assignable/search?project={projectKey}&maxResults=1000\` (${AUTH}) for the people (\`displayName\` as \`name\`, \`emailAddress\` as \`email\`, when visible), \`GET .../rest/api/3/label?maxResults=1000\` for the labels (\`values\`, following \`startAt\` while \`isLast\` is false), and, on Jira Software, \`GET https://{site}/rest/agile/1.0/board?projectKeyOrId={projectKey}\` for its board, then \`GET .../rest/agile/1.0/board/<board id>/sprint?state=active,future\` for the cycles (\`name\` as \`id\`, \`startDate\` and \`endDate\` as \`startsAt\` and \`endsAt\`, \`current\` for the active one; a future sprint with no dates yet is left out). No \`projects\`: the project is {projectKey}`,
+        mcp: "The Atlassian MCP has no tools for a project's labels or sprints: use the API variant, or, when it can't run, `lookupJiraAccountId` for each person the plan names and leave the rest unchecked",
+      },
+      recordNotes: {
+        unsupported:
+          "Jira has no planning document for a sprint, and Confluence isn't part of this integration",
       },
       // Jira reads a Blocks link's inwardIssue as the one that blocks.
       linkBlocked: {

@@ -23,6 +23,8 @@ export type Check = {
   link?: string
   /** The id `checkLog` reads its log by; none for an outside service's status. */
   log?: string
+  /** Merging into the base needs it to pass; unset when no base was given. */
+  required?: boolean
 }
 
 export type Checks = { checks: Check[] }

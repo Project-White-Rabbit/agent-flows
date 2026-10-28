@@ -3,6 +3,7 @@
 // next to these and list it in INTEGRATIONS; nothing else needs to change.
 
 import type { IntegrationSpec, SectionSpec } from "../types.ts"
+import { close } from "./close.ts"
 import { conductor } from "./conductor.ts"
 import { github } from "./github.ts"
 import { gitlab } from "./gitlab.ts"
@@ -20,6 +21,7 @@ import { sentry } from "./sentry.ts"
 import { slack } from "./slack.ts"
 import { superset } from "./superset.ts"
 import { sync } from "./sync.ts"
+import { tickets } from "./tickets.ts"
 import { vercel } from "./vercel.ts"
 import { worktree } from "./worktree.ts"
 
@@ -43,8 +45,10 @@ export const INTEGRATIONS: IntegrationSpec[] = [
 export const SECTIONS: SectionSpec[] = [
   repo,
   sync,
+  tickets,
   ready,
   merge,
+  close,
   hooks,
   ...INTEGRATIONS,
 ]

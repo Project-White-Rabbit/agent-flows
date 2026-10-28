@@ -108,6 +108,7 @@ describe("suggestHooks", () => {
     ).toEqual([
       ["ready.before", "bash scripts/check-version-bump.sh"],
       ["merge.after", "node scripts/server-down.ts"],
+      ["close.after", "node scripts/server-down.ts"],
     ])
   })
 

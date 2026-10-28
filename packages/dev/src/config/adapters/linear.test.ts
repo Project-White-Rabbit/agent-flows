@@ -1,9 +1,16 @@
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { describe, expect, it } from "vitest"
 import type { AdapterInput } from "../types.ts"
 import {
   assignedIssues,
   branchAnchors,
+  fieldOptions,
   findIssue,
+  mentionFilter,
+  projectIssues,
+  recordNotes,
   searchIssues,
 } from "./linear.ts"
 
@@ -257,5 +264,174 @@ describe("linear assignedIssues adapter", () => {
         blocks: true,
       }),
     ])
+  })
+})
+
+describe("linear planning adapters", () => {
+  it("reads every open issue in a project", async () => {
+    const node = (id: string) => ({
+      identifier: id,
+      title: id,
+      url: `https://l/${id}`,
+      priority: 0,
+      dueDate: null,
+      state: { name: "Todo" },
+      parent: { identifier: "ENG-1" },
+    })
+    const { fetch, seen } = fakeLinear(
+      issuePages([[node("ENG-2")], [node("ENG-3")]]),
+    )
+    const result = (await projectIssues.run(
+      input(fetch, { project: "Web" }),
+    )) as {
+      issues: { id: string; priority: string; parent: string }[]
+    }
+    expect(result.issues.map((i) => [i.id, i.priority, i.parent])).toEqual([
+      ["ENG-2", "none", "ENG-1"],
+      ["ENG-3", "none", "ENG-1"],
+    ])
+    expect(seen[1]).toMatchObject({ project: "Web", after: "c1" })
+  })
+
+  it("lists people, projects, labels, and cycles, marking the current one", async () => {
+    const { fetch } = fakeLinear([
+      {
+        teams: {
+          nodes: [
+            {
+              members: {
+                nodes: [
+                  {
+                    name: "Sam Lee",
+                    displayName: "sam",
+                    email: "s@x",
+                    active: true,
+                  },
+                  { name: "Gone", active: false },
+                ],
+              },
+              projects: { nodes: [{ name: "Web" }] },
+              activeCycle: { number: 40 },
+              cycles: {
+                nodes: [
+                  {
+                    number: 41,
+                    startsAt: "2026-10-26T07:00:00Z",
+                    endsAt: "2026-11-02T07:00:00Z",
+                  },
+                  {
+                    number: 40,
+                    startsAt: "2026-10-19T07:00:00Z",
+                    endsAt: "2026-10-26T07:00:00Z",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        issueLabels: {
+          nodes: [{ name: "Bug" }, { name: "Bug" }, { name: "DX" }],
+        },
+      },
+    ])
+    expect(await fieldOptions.run(input(fetch, {}))).toEqual({
+      people: [{ name: "Sam Lee", displayName: "sam", email: "s@x" }],
+      projects: ["Web"],
+      labels: ["Bug", "DX"],
+      cycles: [
+        {
+          id: "40",
+          startsAt: "2026-10-19",
+          endsAt: "2026-10-26",
+          current: true,
+        },
+        {
+          id: "41",
+          startsAt: "2026-10-26",
+          endsAt: "2026-11-02",
+          current: false,
+        },
+      ],
+    })
+  })
+
+  it("replaces its section in the cycle's document, or creates the document in the cycle", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-"))
+    const file = path.join(dir, "section.md")
+    fs.writeFileSync(
+      file,
+      "## 2026-10-24: Sync\n\nSource: pasted notes (k1)\n\nNew",
+    )
+    const args = {
+      title: "Planning, week of 2026-10-19",
+      "section-file": file,
+      key: "k1",
+    }
+    const cycle = (docs: object[]) => ({
+      teams: {
+        nodes: [
+          {
+            id: "team",
+            activeCycle: { id: "cyc", documents: { nodes: docs } },
+          },
+        ],
+      },
+      documents: { nodes: [] },
+    })
+
+    const existing = fakeLinear([
+      cycle([{ id: "doc", title: args.title, url: "https://l/doc" }]),
+      {
+        document: {
+          content:
+            "Intro\n\n## 2026-10-23: Sync\n\nSource: pasted notes (k1)\n\nOld",
+        },
+      },
+      {
+        documentUpdate: {
+          document: { title: args.title, url: "https://l/doc" },
+        },
+      },
+    ])
+    expect(await recordNotes.run(input(existing.fetch, args))).toEqual({
+      title: args.title,
+      url: "https://l/doc",
+      created: false,
+    })
+    expect(existing.seen[2]).toEqual({
+      id: "doc",
+      content:
+        "Intro\n\n## 2026-10-24: Sync\n\nSource: pasted notes (k1)\n\nNew\n",
+    })
+
+    const fresh = fakeLinear([
+      cycle([]),
+      {
+        documentCreate: {
+          document: { title: args.title, url: "https://l/new" },
+        },
+      },
+    ])
+    expect(await recordNotes.run(input(fresh.fetch, args))).toMatchObject({
+      created: true,
+    })
+    expect(fresh.seen[1]).toMatchObject({
+      input: { title: args.title, cycleId: "cyc" },
+    })
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it("narrows a shared workspace's search to issues that mention the product", () => {
+    expect(mentionFilter(undefined)).toEqual({})
+    expect(mentionFilter("Acme")).toEqual({
+      and: [
+        {
+          or: [
+            { title: { containsIgnoreCase: "Acme" } },
+            { project: { name: { containsIgnoreCase: "Acme" } } },
+          ],
+        },
+      ],
+    })
   })
 })

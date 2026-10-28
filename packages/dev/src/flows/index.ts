@@ -1,4 +1,5 @@
 import type { FlowOutputs, GeneratedFile } from "@agent-flows/core"
+import { closeFlow } from "./close.ts"
 import { configureFlow } from "./configure.ts"
 import { createTicketsFlow } from "./create-tickets.ts"
 import { evaluateFlow } from "./evaluate.ts"
@@ -10,6 +11,7 @@ import { syncFlow } from "./sync.ts"
 import { ticketsToWorkFlow } from "./tickets-to-work.ts"
 
 export const DEV_FLOWS = [
+  closeFlow,
   configureFlow,
   createTicketsFlow,
   evaluateFlow,

@@ -35,7 +35,8 @@ export function gitlabState(status: GitlabStatus): CheckState {
   }
 }
 
-export function gitlabChecks(statuses: GitlabStatus[]): Check[] {
+/** With `base`, a job allowed to fail is the only kind a merge doesn't need. */
+export function gitlabChecks(statuses: GitlabStatus[], base?: string): Check[] {
   return sortChecks(
     statuses.map((status) => {
       const job = status.target_url?.match(/\/-\/jobs\/(\d+)/)?.[1]
@@ -44,6 +45,7 @@ export function gitlabChecks(statuses: GitlabStatus[]): Check[] {
         state: gitlabState(status),
         ...(status.target_url ? { link: status.target_url } : {}),
         ...(job ? { log: job } : {}),
+        ...(base ? { required: !status.allow_failure } : {}),
       }
     }),
   )
@@ -52,6 +54,7 @@ export function gitlabChecks(statuses: GitlabStatus[]): Check[] {
 export const checks: Adapter = {
   needs: "cli",
   args: ["sha"],
+  optional: ["base"],
   async run({ values, args }) {
     const project = encodeURIComponent(String(values.project))
     const host = typeof values.host === "string" ? values.host : "gitlab.com"
@@ -70,6 +73,6 @@ export const checks: Adapter = {
         break
       }
     }
-    return { checks: gitlabChecks(statuses) }
+    return { checks: gitlabChecks(statuses, args.base) }
   },
 }

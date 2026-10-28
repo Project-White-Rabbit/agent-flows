@@ -679,6 +679,9 @@ const USAGE = `Usage: sync.ts <command>
                   wrote), leaving the rest of the body alone. --no-markers
                   writes the block without markers, the old one ending at its
                   last-synced line.
+  issue           The issue a sync recorded for the current branch (or an
+                  earlier sync tool left for it), as {"branch", "issue"}, with
+                  issue null when there's none. Reads only.
   finish --base <branch> --pr <pr> [--remote] [--issue <id|none>] [--linked-ref <ref>]...
                   Record this sync so the next one can skip what's unchanged.
                   --remote when the pull request and issue were written (or
@@ -691,11 +694,28 @@ worktrees. A branch with no state yet starts from the issue and error refs
 bitfab-dev's sync left in .bitfab-dev/state.json, when they're for that
 branch, and from that tool's format.`
 
+/**
+ * The issue a sync recorded for the current branch, or one an earlier sync
+ * tool left for it. Reads only: for a flow that needs the branch's issue
+ * without syncing (close).
+ */
+function issue(_args: Args): void {
+  const branch = currentBranch()
+  const stored = readBranchState(stateDir(), branch)
+  const root = git(["rev-parse", "--show-toplevel"])
+  const legacy =
+    stored?.issue || stored?.legacyRead || !root
+      ? undefined
+      : readLegacyState(root, branch)
+  printJson({ branch, issue: stored?.issue ?? legacy?.issue ?? null })
+}
+
 const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   survey,
   facts,
   splice,
   finish,
+  issue,
 }
 
 export function main(argv: string[]): void {

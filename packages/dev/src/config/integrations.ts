@@ -4,7 +4,7 @@
 // each with its values and its ops filled in, so the flow never names a vendor.
 
 import path from "node:path"
-import type { AccessReport } from "./access.ts"
+import { type AccessReport, accessKey } from "./access.ts"
 import type { LoadedAdapter } from "./adapters/index.ts"
 import { CAPABILITIES } from "./capabilities.ts"
 import { getAt, INSTANCE_KEY, instancesOf, type RawConfig } from "./config.ts"
@@ -96,7 +96,10 @@ export function scriptVariant(
   op: string,
   { adapter, source }: LoadedAdapter,
 ): string {
-  const args = (adapter.args ?? []).map((a) => ` --${a} <${a}>`).join("")
+  const args = [
+    ...(adapter.args ?? []).map((a) => ` --${a} <${a}>`),
+    ...(adapter.optional ?? []).map((a) => ` [--${a} <${a}>]`),
+  ].join("")
   const target = instance ? ` --instance ${instance}` : ""
   const needs = adapter.needs
     ? ` It needs ${adapter.needs === "api" ? "the API token (`access.api.ready`)" : "the CLI (`access.cli.ready`)"}.`
@@ -130,7 +133,8 @@ function withScripts(
       if (!loaded) {
         return [op, impl]
       }
-      const rest = typeof impl === "string" ? {} : impl
+      // A repo's adapter for an op the tool has nothing for is the only way.
+      const rest = typeof impl === "string" || "unsupported" in impl ? {} : impl
       return [op, { script: variant(op, loaded), ...rest }]
     }),
   )
@@ -171,30 +175,27 @@ export function resolveCapability(
         if (level === undefined) {
           continue
         }
+        const instance = Array.isArray(entry)
+          ? String(values[INSTANCE_KEY])
+          : undefined
+        const reach =
+          access[accessKey(spec.path, instance)] ?? access[spec.path]
         out.configured.push({
           integration: id,
-          ...(Array.isArray(entry)
-            ? { instance: String(values[INSTANCE_KEY]) }
-            : {}),
+          ...(instance ? { instance } : {}),
           name: spec.name,
           path: spec.path,
           ...(typeof level === "string" ? { level } : {}),
           values: withoutUse(values),
-          ...(access[spec.path] ? { access: access[spec.path] } : {}),
+          ...(reach ? { access: reach } : {}),
           ops: withScripts(
             fillOps(
               spec.provides[capability],
               values,
-              access[spec.path]?.api?.expression ??
+              reach?.api?.expression ??
                 (spec.access.api ? `$${spec.access.api.token[0]}` : undefined),
             ),
-            (op, loaded) =>
-              scriptVariant(
-                id,
-                Array.isArray(entry) ? String(values[INSTANCE_KEY]) : undefined,
-                op,
-                loaded,
-              ),
+            (op, loaded) => scriptVariant(id, instance, op, loaded),
             scripts[spec.path] ?? {},
           ),
         })

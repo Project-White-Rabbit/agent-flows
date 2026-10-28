@@ -248,6 +248,52 @@ describe("recordChecks", () => {
     })
   })
 
+  it("waits only on required checks with requiredOnly, when the checks say which", () => {
+    const checks: Check[] = [
+      { name: "ci-required", state: "pass", required: true },
+      { name: "preview", state: "pending", required: false },
+      { name: "lint", state: "fail", required: false },
+      { name: "Vercel", state: "pending", required: true },
+    ]
+    const { report } = recordChecks(
+      started,
+      "sha1",
+      checks,
+      at(60),
+      undefined,
+      ["Vercel*"],
+      true,
+    )
+    expect(report).toMatchObject({
+      settled: true,
+      green: true,
+      optional: ["preview", "lint"],
+      ignored: ["Vercel"],
+    })
+    // With no `required` on any check, every one counts.
+    const unknown = recordChecks(
+      started,
+      "sha1",
+      [check("lint", "fail")],
+      at(60),
+      undefined,
+      [],
+      true,
+    )
+    expect(unknown.report).toMatchObject({ optional: [], green: false })
+    // Nothing required at all: there's nothing to wait for.
+    const none = recordChecks(
+      started,
+      "sha1",
+      [{ name: "lint", state: "pending", required: false }],
+      at(5),
+      undefined,
+      [],
+      true,
+    )
+    expect(none.report).toMatchObject({ settled: true, noChecks: true })
+  })
+
   it("counts a cancelled check as a failure, never green", () => {
     const { report } = recordChecks(
       started,

@@ -78,6 +78,10 @@ export type HookRequest = {
   /** The branch; else the current one. */
   branch?: string
   outcome?: HookOutcome
+  /** The pull request's number, when the flow has one. */
+  pr?: string
+  /** Every pull request the command lands, bottom first, space-separated. */
+  prs?: string
   /** The `<point>/<name>` a previous call stopped at. */
   after?: string
   /** Don't run fixes: for trying a hook, which mustn't change the checkout. */
@@ -219,6 +223,8 @@ export function runHooks(
         base,
         branch: branch(),
         outcome: request.outcome,
+        pr: request.pr,
+        prs: request.prs,
       }
       if (hook.prompt !== undefined) {
         report.status = "agent"
@@ -238,6 +244,8 @@ export function runHooks(
         AGENT_FLOWS_BASE: base ?? "",
         AGENT_FLOWS_BRANCH: vars.branch,
         AGENT_FLOWS_OUTCOME: request.outcome ?? "",
+        AGENT_FLOWS_PR: request.pr ?? "",
+        AGENT_FLOWS_PRS: request.prs ?? "",
         AGENT_FLOWS_CHANGED_FILES: changedFile,
       }
       const timeout = hook.timeout ?? DEFAULT_TIMEOUT
@@ -392,6 +400,8 @@ function request(
       base: args.flags.get("base"),
       branch: args.flags.get("branch"),
       outcome: outcome as HookOutcome | undefined,
+      pr: args.flags.get("pr"),
+      prs: args.flags.get("prs"),
       after: args.flags.get("after"),
     },
   }
@@ -460,6 +470,9 @@ Flags:
   --base <ref>           The branch's merge base; else from repo.baseBranch
   --branch <name>        The branch; else the current one
   --outcome <outcome>    success or failure; needed at an after point
+  --pr <number>          The pull request's number, for {pr}
+  --prs <numbers>        Every pull request it lands, bottom first, for {prs}
+                         (space-separated; one for a single branch)
   --after <point>/<name> Go on after this hook, where a call stopped
 
 Exit 0 whatever the hooks did; 2 for bad arguments or an invalid config.`

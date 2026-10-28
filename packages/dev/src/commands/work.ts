@@ -16,6 +16,7 @@ import {
   withoutLinkLines,
 } from "../config/branch-line.ts"
 import { worktreePaths } from "../config/sections/worktree.ts"
+import { repoRoot } from "./configure.ts"
 import {
   type Flags,
   isMain,
@@ -28,10 +29,10 @@ import {
   USAGE_EXIT,
   UsageError,
 } from "./lib.ts"
-import { PRIORITIES as TRACKER_PRIORITIES } from "./tickets.ts"
+import { readRules, PRIORITIES as TRACKER_PRIORITIES } from "./tickets.ts"
 
 /** The issue tracker's priorities, most urgent first, then none. */
-export const PRIORITIES = [...TRACKER_PRIORITIES, "none"] as const
+export const PRIORITIES = TRACKER_PRIORITIES
 export type Priority = (typeof PRIORITIES)[number]
 
 /** What each priority is called, in PRIORITIES order, unless `--ranks` says. */
@@ -402,16 +403,27 @@ function listWorktrees(): Workspace[] {
   return result.status === 0 ? gitWorktrees(result.stdout) : []
 }
 
+/** The title carries the team's blocker mark (`tickets.blockerMark`). */
+export function isBlocker(issue: Assigned, mark?: string): boolean {
+  return Boolean(mark && issue.title.includes(mark))
+}
+
 /**
  * Tickets with no work started on them yet, in the order to pick them up:
- * most urgent first, then the ones blocking other work, then the earliest due.
- * One with open sub-issues is left out (they're what gets worked on), and so
- * is one with a pull request or a workspace on its branch.
+ * most urgent first, then the ones whose title carries the blocker mark
+ * (`mark`: they stop a customer), then the ones blocking other work, then the
+ * earliest due. One with open sub-issues is left out (they're what gets worked
+ * on), and so is one with a pull request or a workspace on its branch.
  */
-export function queue(issues: Assigned[], workspaces: Workspace[]): Assigned[] {
+export function queue(
+  issues: Assigned[],
+  workspaces: Workspace[],
+  mark?: string,
+): Assigned[] {
   const order = (issue: Assigned) =>
     [
       PRIORITIES.indexOf(issue.priority ?? "none"),
+      isBlocker(issue, mark) ? 0 : 1,
       issue.blocks ? 0 : 1,
       issue.dueDate ?? "9999-12-31",
     ] as const
@@ -428,7 +440,9 @@ export function queue(issues: Assigned[], workspaces: Workspace[]): Assigned[] {
     )
     .sort((a, b) => {
       const [x, y] = [order(a), order(b)]
-      return x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2])
+      return (
+        x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || x[3].localeCompare(y[3])
+      )
     })
 }
 
@@ -454,10 +468,15 @@ export function parsePriorities(
   })
 }
 
-export function describeTicket(issue: Assigned, ranks?: string[]): string {
+export function describeTicket(
+  issue: Assigned,
+  ranks?: string[],
+  mark?: string,
+): string {
   const state = issue.state ? ` [${issue.state}]` : ""
+  const blocker = isBlocker(issue, mark) ? " blocker" : ""
   const blocks = issue.blocks ? " blocks-other-work" : ""
-  return `TICKET ${issue.id} "${rankName(issue.priority, ranks)}" due=${issue.dueDate ?? "none"}${state}${blocks} "${issue.title}" ${issue.url}`
+  return `TICKET ${issue.id} "${rankName(issue.priority, ranks)}" due=${issue.dueDate ?? "none"}${state}${blocker}${blocks} "${issue.title}" ${issue.url}`
 }
 
 const SWITCHES = new Set(["section-by-rank", "no-section", "yes"])
@@ -572,10 +591,12 @@ function list(args: Args): void {
     requiredFlag(args, "input"),
   )
   const ranks = ranksOf(args)
-  const all = queue(input.issues ?? [], [
-    ...(input.workspaces ?? []),
-    ...listWorktrees(),
-  ])
+  const mark = readRules(repoRoot()).blockerMark
+  const all = queue(
+    input.issues ?? [],
+    [...(input.workspaces ?? []), ...listWorktrees()],
+    mark,
+  )
   const priorities = args.has("priority")
     ? parsePriorities(args.get("priority") as string, ranks)
     : undefined
@@ -588,7 +609,7 @@ function list(args: Args): void {
     .slice(0, limit)
   console.log(
     [
-      ...shown.map((issue) => describeTicket(issue, ranks)),
+      ...shown.map((issue) => describeTicket(issue, ranks, mark)),
       `COUNT ${shown.length}`,
       `TOTAL ${all.length}`,
     ].join("\n"),
@@ -631,8 +652,10 @@ const USAGE = `Usage: work.ts <command>
                   in place. Prints ADDED <file>, or UNCHANGED when it has one.
   list --input <file> [--priority <names>] [--limit <n>] [--ranks <names>]
                   The tickets in <file> ({"issues": [...], "workspaces": [...]})
-                  with no work started yet, in the order to pick them up:
-                    TICKET <ID> "<rank>" due=<date|none> [<state>]
+                  with no work started yet, in the order to pick them up
+                  (by priority, then the config's tickets.blockerMark in the
+                  title, then blocking other work, then due date):
+                    TICKET <ID> "<rank>" due=<date|none> [<state>] [blocker]
                            [blocks-other-work] "<title>" <url>
                   then COUNT <n> (printed) and TOTAL <n> (before --priority
                   and --limit).

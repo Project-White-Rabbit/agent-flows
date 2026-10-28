@@ -161,6 +161,22 @@ describe("queue", () => {
     ])
   })
 
+  it("puts issues with the blocker mark first within their priority", () => {
+    const issues = [
+      assigned("ENG-1", { priority: "high", blocks: true }),
+      assigned("ENG-2", { priority: "high", title: "🛑 Acme can't log in" }),
+      assigned("ENG-3", { priority: "urgent" }),
+    ]
+    expect(queue(issues, [], "🛑").map((i) => i.id)).toEqual([
+      "ENG-3",
+      "ENG-2",
+      "ENG-1",
+    ])
+    expect(describeTicket(issues[1] as Assigned, undefined, "🛑")).toContain(
+      " blocker ",
+    )
+  })
+
   it("leaves out work already started or split up", () => {
     const issues = [
       assigned("ENG-1", { openSubIssues: true }),

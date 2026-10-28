@@ -67,12 +67,12 @@ export const worktree: IntegrationSpec = {
   provides: {
     workspaces: {
       workspaces: {
-        cli: "`git worktree list --porcelain`: one workspace per `worktree <path>` block with a `branch refs/heads/<branch>` line. Its id and name are the path, and it has no section. This session runs in the one whose path is `git rev-parse --show-toplevel`",
+        cli: "`git worktree list --porcelain` (with <project>, a path to another repository's checkout, `git -C <project> worktree list --porcelain`): one workspace per `worktree <path>` block with a `branch refs/heads/<branch>` line. Its id and name are the path, and it has no section. This session runs in the one whose path is `git rev-parse --show-toplevel`",
       },
       renameWorkspace:
         "Nothing to do: a git worktree is known by its path, which stays as it is, and has no name or section of its own",
       createWorkspace: {
-        cli: "In the main checkout (the first `worktree` in `git worktree list --porcelain`), with <path> `{directory}/<branch>` with each `/` in the branch turned into `-`: when <exact> is `no`, first put <branch> under the prefix most of the person's own branches carry (`sam/` in `git for-each-ref --format='%(refname:short)' refs/heads`), when they carry one. Then `git fetch origin`, and `git worktree add <path> <branch>` when the branch exists, else `git worktree add -b <branch> <path> origin/<base>`. Sections don't apply. Git can't start an agent, so print `cd <path> && {agent|claude} \"$(cat <prompt-file>)\"` for the person to run. Prints <path> and the branch",
+        cli: "With <project>, a path to another repository's checkout, run everything below there (`git -C <project>`), and <base> is its default branch (`git -C <project> symbolic-ref --short refs/remotes/origin/HEAD`, without the `origin/`). In the main checkout (the first `worktree` in `git worktree list --porcelain`), with <path> `{directory}/<branch>` with each `/` in the branch turned into `-`: when <exact> is `no`, first put <branch> under the prefix most of the person's own branches carry (`sam/` in `git for-each-ref --format='%(refname:short)' refs/heads`), when they carry one. Then `git fetch origin`, and `git worktree add <path> <branch>` when the branch exists, else `git worktree add -b <branch> <path> origin/<base>`. Sections don't apply. Git can't start an agent, so print `cd <path> && {agent|claude} \"$(cat <prompt-file>)\"` for the person to run. Prints <path> and the branch",
       },
     },
   },

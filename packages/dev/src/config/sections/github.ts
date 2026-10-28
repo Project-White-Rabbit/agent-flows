@@ -22,7 +22,7 @@ const GRAPHQL =
 // One query for everything getIssue reports, since neither `gh issue view`
 // nor the REST issue has the parent and the pull requests that close it.
 const ISSUE_QUERY =
-  "query($owner: String!, $repo: String!, $n: Int!) { repository(owner: $owner, name: $repo) { issue(number: $n) { number title url body state stateReason labels(first: 20) { nodes { name } } assignees(first: 5) { nodes { login } } parent { number } closedByPullRequestsReferences(first: 5, includeClosedPrs: true) { nodes { url } } } } }"
+  "query($owner: String!, $repo: String!, $n: Int!) { repository(owner: $owner, name: $repo) { issue(number: $n) { number title url body state stateReason labels(first: 20) { nodes { name } } assignees(first: 5) { nodes { login } } parent { number } subIssues(first: 50) { nodes { number title state labels(first: 20) { nodes { name } } milestone { dueOn } } } closedByPullRequestsReferences(first: 5, includeClosedPrs: true) { nodes { url } } } } }"
 // assignedIssues in one query: neither `gh issue list` nor REST says whether
 // an issue has open sub-issues, a closing pull request, or blocks another.
 const ASSIGNED_QUERY =
@@ -30,7 +30,7 @@ const ASSIGNED_QUERY =
 const ASSIGNED =
   "with `q` `repo:{owner}/{repo} is:issue is:open assignee:@me`, following `endCursor` while `hasNextPage`. Its id is `#<number>` and its state `open`; it has open sub-issues when `subIssuesSummary.completed` is below `total`, and blocks another issue when `issueDependenciesSummary.blocking` is above 0. Its priority comes from a priority label (`P0` to `P3`, `priority: high`), else `none`, and its due date from its milestone's `dueOn`, else none"
 const ISSUE_NOT_FOUND =
-  "`Could not resolve to an Issue` (a pull request's number, or none) means there is none. Its project is separate, since reading projects needs the `read:project` token scope: `gh issue view <N> --repo {owner}/{repo} --json projectItems`, only when a flow needs it; when that fails, treat the project as unknown and leave it alone"
+  "Its open sub-issues are the `subIssues` whose `state` is `OPEN`, their priority from a priority label and due date from the milestone's `dueOn`, as for assignedIssues. `Could not resolve to an Issue` (a pull request's number, or none) means there is none. Its project is separate, since reading projects needs the `read:project` token scope: `gh issue view <N> --repo {owner}/{repo} --json projectItems`, only when a flow needs it; when that fails, treat the project as unknown and leave it alone"
 
 const BRANCH_MATCH =
   "Keep only issues whose body has a `> Branch:` line that is `<branch>` once backticks are dropped and any link is read as its text"
@@ -172,6 +172,11 @@ export const github: IntegrationSpec = {
         api: `\`PUT\` ${API_BARE}/pulls/<N>/merge\` (header \`Authorization: Bearer {token}\`) with JSON \`merge_method\` <method> and \`sha\` <sha>: 405 is refused, with the reason in \`message\`; 409 is a moved head`,
         mcp: "The GitHub MCP's `merge_pull_request` for {owner}/{repo} #<N> with `merge_method: <method>`. It can't pin the head, so read the pull request's `head.sha` with its read tool just before, and don't merge unless it's <sha>",
       },
+      prClose: {
+        mcp: "The GitHub MCP's `update_pull_request` for {owner}/{repo} #<N> with `state: closed`",
+        cli: "`gh pr close <N> --repo {owner}/{repo}`. Never with `--delete-branch`, which deletes the local branch too",
+        api: `\`PATCH\` ${API_BARE}/pulls/<N>\` (header \`Authorization: Bearer {token}\`) with JSON \`state\` \`closed\``,
+      },
       prReady: {
         mcp: "The GitHub MCP's `update_pull_request` for {owner}/{repo} #<N> with `draft: false`",
         cli: "`gh pr ready <N> --repo {owner}/{repo}`",
@@ -180,8 +185,8 @@ export const github: IntegrationSpec = {
       // Also an adapter (`adapters/github.ts`), run first: two paged lists,
       // check runs and commit statuses, read as one.
       checks: {
-        cli: "`gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/check-runs?per_page=100'` and `gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/status?per_page=100'`. A check run is `pending` until its `status` is `completed`, then by `conclusion`: `success` or `neutral` pass, `skipped` is skipping, `cancelled` is cancelled, anything else fails; its `link` is `details_url`, and its `log` its `id` when `app.slug` is `github-actions`. A status (named by `context`) passes on `success`, is pending on `pending`, and fails otherwise, with `link` its `target_url` and no `log`",
-        api: `${API}/commits/<sha>/check-runs?per_page=100"\` and ${API}/commits/<sha>/status?per_page=100"\`, following the \`Link\` header's next pages, read as the CLI variant says`,
+        cli: "`gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/check-runs?per_page=100'` and `gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/status?per_page=100'`. A check run is `pending` until its `status` is `completed`, then by `conclusion`: `success` or `neutral` pass, `skipped` is skipping, `cancelled` is cancelled, anything else fails; its `link` is `details_url`, and its `log` its `id` when `app.slug` is `github-actions`. A status (named by `context`) passes on `success`, is pending on `pending`, and fails otherwise, with `link` its `target_url` and no `log`. With <base>, a check is `required` when its name is in `gh api repos/{owner}/{repo}/branches/<base> --jq '.protection.required_status_checks.contexts[]?'` or in the `required_status_checks` rules of `gh api --paginate repos/{owner}/{repo}/rules/branches/<base>` (each rule's `parameters.required_status_checks[].context`)",
+        api: `${API}/commits/<sha>/check-runs?per_page=100"\` and ${API}/commits/<sha>/status?per_page=100"\`, following the \`Link\` header's next pages, read as the CLI variant says (with <base>, \`required\` from ${API}/branches/<base>"\` and ${API}/rules/branches/<base>"\` as it says)`,
         mcp: "The GitHub MCP's check run and commit status tools for {owner}/{repo} at <sha>, read as the CLI variant says",
       },
       checkLog: {
@@ -223,14 +228,25 @@ export const github: IntegrationSpec = {
         api: `${GRAPHQL} with JSON \`query\` \`${ASSIGNED_QUERY}\` and \`variables\` ${ASSIGNED}`,
       },
       createIssue: {
-        mcp: `The GitHub MCP's \`issue_write\` with \`method: create\` (or \`create_issue\`) for {owner}/{repo} with \`title\`, \`body\` <description>, \`assignees\` the current user's login (\`get_me\`) unless \`<fields>\` names an assignee, and ${ISSUE_FIELDS}. With \`<parent>\`, then \`sub_issue_write\` with \`method: add\` (or \`add_sub_issue\`) on the parent's number, with \`sub_issue_id\` the new issue's \`id\` (not its number). Its id is \`#<number>\``,
+        mcp: `The GitHub MCP's \`issue_write\` with \`method: create\` (or \`create_issue\`) for {owner}/{repo} with \`title\`, \`body\` <description>, \`assignees\` the current user's login (\`get_me\`) unless \`<fields>\` names an assignee, and ${ISSUE_FIELDS}. With \`<parent>\`, then \`sub_issue_write\` with \`method: add\` (or \`add_sub_issue\`) on the parent's number, with \`sub_issue_id\` the new issue's \`id\` (not its number). Its id is \`#<number>\`. A new issue is open, which is every <state> but \`done\` and \`canceled\``,
         cli: `\`gh issue create --repo {owner}/{repo} --title <title> --body-file <a file holding the description> --assignee @me\` (the login instead, when \`<fields>\` names an assignee), with \`--label\` per label and ${ISSUE_FIELDS}. It prints the issue's URL, which ends in its number \`<N>\`. With \`<parent>\`, then \`gh api -X POST repos/{owner}/{repo}/issues/<the parent's number>/sub_issues -F sub_issue_id="$(gh api repos/{owner}/{repo}/issues/<N> -q .id)"\`. Its id is \`#<N>\``,
         api: `\`POST\` ${API_BARE}/issues\` (header \`Authorization: Bearer {token}\`) with JSON \`title\`, \`body\` <description>, \`assignees\` (the token's user from \`GET https://api.github.com/user\`, unless \`<fields>\` names an assignee), and ${ISSUE_FIELDS}; it returns \`number\`, \`html_url\`, and \`id\`. With \`<parent>\`, then \`POST\` ${API_BARE}/issues/<the parent's number>/sub_issues\` with JSON \`sub_issue_id\` the new issue's \`id\` (not its number). Its id is \`#<number>\``,
       },
       updateIssue: {
-        mcp: `The GitHub MCP's \`issue_write\` with \`method: update\` (or \`update_issue\`) for {owner}/{repo} #<N> (${ISSUE_NUMBER}) with \`title\`, \`body\` <description>, \`state\` and \`state_reason\` for <state>: ${STATE}, and ${ISSUE_FIELDS}. Its \`labels\` and \`assignees\` replace the whole list, so pass the issue's current ones (\`getIssue\`) with only the change made`,
-        cli: `\`gh issue edit <N> --repo {owner}/{repo} --title <title> --body-file <a file holding the description>\` (${ISSUE_NUMBER}), with \`--add-label\` and \`--remove-label\` for a label change, \`--add-assignee\` for an assignee, and ${ISSUE_FIELDS}. Then for <state>: ${STATE}, with \`gh issue close <N> --repo {owner}/{repo} --reason completed\` (\`--reason "not planned"\` for canceled) or \`gh issue reopen <N> --repo {owner}/{repo}\``,
-        api: `\`PATCH\` ${API_BARE}/issues/<N>\` (header \`Authorization: Bearer {token}\`; ${ISSUE_NUMBER}) with JSON \`title\`, \`body\` <description>, \`state\` (\`open\` or \`closed\`) and \`state_reason\` (\`completed\`, \`not_planned\`, or \`reopened\`) for <state>: ${STATE}, \`assignees\`, and ${ISSUE_FIELDS}. For a label change, \`POST .../issues/<N>/labels\` with JSON \`labels\` to add and \`DELETE .../issues/<N>/labels/<name>\` to remove, never \`labels\` in the \`PATCH\`, which replaces every label the issue has`,
+        mcp: `The GitHub MCP's \`issue_write\` with \`method: update\` (or \`update_issue\`) for {owner}/{repo} #<N> (${ISSUE_NUMBER}) with \`title\`, \`body\` <description>, \`state\` and \`state_reason\` for <state>: ${STATE}, and ${ISSUE_FIELDS}. Its \`labels\` and \`assignees\` replace the whole list, so pass the issue's current ones (\`getIssue\`) with only the change made. With <parent>, \`sub_issue_write\` with \`method: add\` on <parent>'s number, \`sub_issue_id\` this issue's \`id\`, and \`replace_parent: true\``,
+        cli: `\`gh issue edit <N> --repo {owner}/{repo} --title <title> --body-file <a file holding the description>\` (${ISSUE_NUMBER}), with \`--add-label\` and \`--remove-label\` for a label change, \`--add-assignee\` for an assignee, and ${ISSUE_FIELDS}. Then for <state>: ${STATE}, with \`gh issue close <N> --repo {owner}/{repo} --reason completed\` (\`--reason "not planned"\` for canceled) or \`gh issue reopen <N> --repo {owner}/{repo}\`. With <parent>, \`gh api -X POST repos/{owner}/{repo}/issues/<parent's number>/sub_issues -F sub_issue_id="$(gh api repos/{owner}/{repo}/issues/<N> -q .id)" -F replace_parent=true\``,
+        api: `\`PATCH\` ${API_BARE}/issues/<N>\` (header \`Authorization: Bearer {token}\`; ${ISSUE_NUMBER}) with JSON \`title\`, \`body\` <description>, \`state\` (\`open\` or \`closed\`) and \`state_reason\` (\`completed\`, \`not_planned\`, or \`reopened\`) for <state>: ${STATE}, \`assignees\`, and ${ISSUE_FIELDS}. For a label change, \`POST .../issues/<N>/labels\` with JSON \`labels\` to add and \`DELETE .../issues/<N>/labels/<name>\` to remove, never \`labels\` in the \`PATCH\`, which replaces every label the issue has. With <parent>, \`POST\` ${API_BARE}/issues/<parent's number>/sub_issues\` with JSON \`sub_issue_id\` this issue's \`id\` and \`replace_parent: true\``,
+      },
+      projectIssues: {
+        cli: "`gh project list --owner {owner} --format json` for the number of the project whose `title` is <project>, then `gh project item-list <number> --owner {owner} --format json --limit 1000`, keeping the items whose `content.type` is `Issue`, whose `content.repository` is `{owner}/{repo}`, and that are open (load each with `getIssue` for its state, priority, due date, and parent when the item doesn't carry them). Reading projects needs the `read:project` token scope; when it fails, say so",
+        api: `${GRAPHQL} \`repositoryOwner(login: "{owner}") { ... on ProjectV2Owner { projectsV2(first: 20, query: "<project>") { nodes { title items(first: 100, after: <cursor>) { pageInfo { hasNextPage endCursor } nodes { content { ... on Issue { number title url state repository { nameWithOwner } labels(first: 20) { nodes { name } } milestone { dueOn } parent { number } } } } } } } } }\`, the project whose \`title\` is <project>, following \`endCursor\`, keeping open issues of {owner}/{repo}: priority from a priority label, due date from the milestone's \`dueOn\`. Needs the \`read:project\` scope`,
+      },
+      fieldOptions: {
+        cli: "`gh api --paginate repos/{owner}/{repo}/assignees --jq '.[].login'` for the people (each login as `name`), `gh label list --repo {owner}/{repo} --limit 1000 --json name` for the labels, and `gh project list --owner {owner} --format json` for the projects (their `title`s; leave them out when it fails for want of the `read:project` scope). GitHub has no cycles: leave them out",
+        api: `${API}/assignees?per_page=100"\` for the people (each \`login\` as \`name\`), ${API}/labels?per_page=100"\` for the labels, following the \`Link\` header's next pages; projects as the CLI variant says, through ${GRAPHQL} \`repositoryOwner(login: "{owner}") { ... on ProjectV2Owner { projectsV2(first: 100) { nodes { title } } } }\`. No cycles`,
+      },
+      recordNotes: {
+        unsupported: "GitHub has no cycles, so no planning document for one",
       },
       // GitHub's issue dependencies; the MCP has no tool for them.
       linkBlocked: {

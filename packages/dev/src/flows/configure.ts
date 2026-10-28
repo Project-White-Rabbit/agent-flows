@@ -291,7 +291,7 @@ The rest of this step applies to both modes, within those limits.
 - **A command**: one that prints it, like a password manager's (\`op read op://<vault>/<item>/credential\`).
 - **None**: use its MCP server or CLI instead; adapters that need the token are skipped.
 
-Record each answer: \`{{command:configure}} token <integration> --env <NAME>\` (or \`--file <path>\`, \`--command '<command>'\`; \`--clear\` forgets it). It saves where the token is, never the token, in the repo's git dir: per machine, shared by the repo's worktrees, never committed, and not part of the confirm table below. Never print a token, and never pass one to the command.
+Record each answer: \`{{command:configure}} token <integration> --env <NAME>\` (or \`--file <path>\`, \`--command '<command>'\`; \`--clear\` forgets it). It saves where the token is, never the token, in the repo's git dir: per machine, shared by the repo's worktrees, never committed, and not part of the confirm table below. Never print a token, and never pass one to the command. An integration configured more than once on separate accounts (a second Linear workspace, searched read-only) needs a token per account: ask for each instance, and record it as \`token <integration>:<instance>\`; an instance without its own uses the integration's.
 
 Then work through \`plan.changes\` and \`plan.needs\` (other than \`use\`), plus the sections picked or named. Evidence that a service is used (a dependency) is not the same as its ids, so look up each missing required field read-only, in this order:
 
