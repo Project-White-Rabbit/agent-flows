@@ -3,6 +3,9 @@ import {
   CONFIGURE_GET_AND_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
+  HOOK_RESULTS,
+  HOOKS_COMMAND,
+  hooksInvariant,
   REQUIRE_CONFIG,
   STACK_PARENT,
   USE_INTEGRATIONS,
@@ -21,6 +24,7 @@ export const mergeFlow: Flow = devKit.defineFlow({
     argumentHint: "[stack | branch] [squash | merge | rebase]",
   },
   commands: DEV_COMMANDS.defineCommands({
+    hooks: HOOKS_COMMAND,
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
     ready: {
       description:
@@ -46,6 +50,7 @@ export const mergeFlow: Flow = devKit.defineFlow({
     "**Never bypass the host:** no admin merge, no auto-merge, no skipping a required check or review, no rerunning someone's CI to get past it.",
     "**Nothing is pushed between the CI pass and the merge.** The merge is pinned to the commit CI passed on; a head that moved since stops it.",
     "**Clean up only after the host says merged.** No branch deletion, issue update, or error resolution for a pull request that isn't merged.",
+    hooksInvariant("merge", { afterPoint: true, extra: "--branch <branch>" }),
   ],
   phases: [
     {
@@ -58,8 +63,8 @@ export const mergeFlow: Flow = devKit.defineFlow({
           kind: "action",
           title: "Pre-flight",
           refName: "pre-flight",
-          commandCalls: ["configure"],
-          body: `Reads only, apart from the sync that opens a missing pull request. Any gate that fails stops the command with nothing written.
+          commandCalls: ["configure", "hooks"],
+          body: `Reads only, apart from the sync that opens a missing pull request and the repo's own hooks. Any gate that fails stops the command with nothing written.
 
 ### 1a. Survey
 
@@ -97,7 +102,11 @@ Only for \`stack\`, in order:
 2. **Every one still open?** One merged or closed means the stack's record is out of date: stop, \`The stack is stale: <branch>'s pull request is <state>. Restack it ({{cmd}}sync), then re-run {{cmd}}merge.\`
 3. **Any already failing?** \`git fetch origin <every branch in the chain>\`, then for each branch the \`checks\` op on \`git rev-parse origin/<branch>\`. Any \`fail\` or \`cancelled\`: stop, naming the branch and its pull request URL, \`Can't land the chain: #<number> has failing checks. Fix it with {{cmd}}ready, then re-run {{cmd}}merge stack.\` A chain that stops halfway leaves part of it merged, so this is checked before anything is written.
 
-Drafts are fine: the merge step marks them ready.`,
+Drafts are fine: the merge step marks them ready.
+
+### 1e. The repo's \`before\` hooks
+
+\`{{command:hooks}} run merge.before --flow merge --mode default --branch <branch>\`. ${HOOK_RESULTS} Merge lands what's pushed, so hooks here check rather than change: when \`git status --porcelain\` prints anything after them, stop as gate 2 of 1b does.`,
           next: "run/sync",
         },
       ],

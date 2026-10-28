@@ -24,6 +24,10 @@ import {
 } from "../config/config.ts"
 import { createDetectContext, detectSections } from "../config/detect.ts"
 import {
+  type HookSuggestion,
+  suggestHooks,
+} from "../config/hook-suggestions.ts"
+import {
   coverage,
   findCapability,
   providersOf,
@@ -52,6 +56,12 @@ export type Loaded = {
   exists: boolean
   /** Present when the file is usable (migrated to the current version). */
   config?: RawConfig
+  /**
+   * The file migrated to the current version, valid or not: what a write
+   * patches, so it can repair a field that broke the file. Missing when the
+   * file can't be read as a config at all.
+   */
+  draft?: RawConfig
   issues: string[]
   warnings: string[]
 }
@@ -89,6 +99,7 @@ export function loadConfig(root: string): Loaded {
   return {
     configPath,
     exists: true,
+    draft: migrated.config,
     ...(issues.length === 0 ? { config: migrated.config } : {}),
     issues,
     warnings,
@@ -411,9 +422,12 @@ function parsePatch(input: string): ConfigPatch {
 async function write(root: string): Promise<void> {
   const patch = parsePatch(await readStdin())
   const current = loadConfig(root)
-  if (current.exists && !current.config) {
+  // An invalid file is patched as it stands, so a write can repair it; the
+  // result must be valid, like any write. Only a file that isn't a config at
+  // all (bad JSON, a newer version) has to be fixed by hand.
+  if (current.exists && !current.draft) {
     throw new Error(
-      `${CONFIG_PATH} is invalid; fix it first:\n- ${current.issues.join("\n- ")}`,
+      `${CONFIG_PATH} can't be read; fix it by hand:\n- ${current.issues.join("\n- ")}`,
     )
   }
   const patchIssues = checkPatch(patch)
@@ -426,7 +440,7 @@ async function write(root: string): Promise<void> {
     process.exitCode = 1
     return
   }
-  const next = applyPatch(current.config, patch)
+  const next = applyPatch(current.draft, patch)
   const { issues, warnings } = checkConfig(next)
   if (issues.length > 0) {
     printJson({ configPath: current.configPath, written: false, issues })
@@ -492,8 +506,27 @@ const HELP = `Usage: configure.ts <command>
                   once), null removes it, skip marks sections as deliberately
                   not configured.
                   Validates, and writes only if the content changed; on issues,
-                  prints them and exits 1.
+                  prints them and exits 1. An invalid file is patched as it
+                  stands, so a write that fixes it goes through; one that
+                  isn't a config at all (bad JSON, a newer version) has to be
+                  fixed by hand.
 `
+
+/** Suggestions whose command isn't already a hook at that point. */
+export function newHookSuggestions(
+  suggestions: HookSuggestion[],
+  config: RawConfig | undefined,
+): HookSuggestion[] {
+  return suggestions.filter(({ point, hook }) => {
+    const list = config ? getAt(config, point) : undefined
+    return !(
+      Array.isArray(list) &&
+      list.some(
+        (h) => isRecord(h) && (h.run === hook.run || h.name === hook.name),
+      )
+    )
+  })
+}
 
 async function main(): Promise<void> {
   const [command = "show", ...args] = process.argv.slice(2)
@@ -527,8 +560,9 @@ async function main(): Promise<void> {
           ? SECTIONS.map((s) => s.path)
           : undefined
     const loaded = loadConfig(root)
+    const context = createDetectContext(root)
     const detected = detectSections(
-      createDetectContext(root),
+      context,
       only
         ? SECTIONS.filter((s) => only.includes(s.path) || s.required)
         : SECTIONS,
@@ -546,6 +580,9 @@ async function main(): Promise<void> {
         systemProbe(),
         readLocal(root).tokens,
       ),
+      // Offered in the hooks walk, never planned: a guessed command is
+      // written only after the user takes it and it's been tried.
+      hookSuggestions: newHookSuggestions(suggestHooks(context), loaded.draft),
       // A broken file has to be fixed first, so there is no plan.
       ...(loaded.exists && !loaded.config
         ? {}

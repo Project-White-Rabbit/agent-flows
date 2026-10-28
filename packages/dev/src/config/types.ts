@@ -11,9 +11,52 @@
 // Runtime code: commands import this straight from the installed plugin, so it
 // uses Node built-ins only.
 
-export type FieldType = "string" | "boolean" | "string[]"
+export type FieldType = "string" | "boolean" | "string[]" | "hook[]"
 
-export type FieldValue = string | boolean | string[]
+/**
+ * A repo's own step at a named point in a flow (`ready.before`), for work no
+ * integration covers. It's a command (`run`) whose result the flow acts on,
+ * or a `prompt` the agent acts on at that point. `paths`, `modes`, and `on`
+ * narrow when it applies. The points and their rules are in `hooks.ts`.
+ *
+ * A command runs from the repo root, with the point's values in its
+ * environment (`AGENT_FLOWS_BASE` and friends) and as `{base}`-style
+ * placeholders. Exit 0 passes. Exit 2 hands its stderr to the agent as a task,
+ * for a check that found something only judgment can fix. Any other exit, or
+ * running past `timeout`, fails: with a `fix`, the flow runs it once and the
+ * command again. A prompt is a task too. Either way, the agent works under the
+ * command's own rules for what it may change.
+ */
+export type Hook = {
+  /** Shown in progress and the report; unique at its point. */
+  name: string
+  /** Globs, repo-relative: `*` within a directory, `**` across them. Only when the branch changed a match. */
+  paths?: string[]
+  /** Only in these modes of the point's flow. */
+  modes?: string[]
+  /** Only at an `after` point: only when the command succeeded, or failed. */
+  on?: "success" | "failure"
+  run?: string
+  /** Only with `run`: a command that repairs what it found. */
+  fix?: string
+  /** Only with `run`: seconds before it counts as failed (default 60). */
+  timeout?: number
+  prompt?: string
+}
+
+/** The fields a hook may have. */
+export const HOOK_KEYS = [
+  "name",
+  "paths",
+  "modes",
+  "on",
+  "run",
+  "fix",
+  "timeout",
+  "prompt",
+] as const
+
+export type FieldValue = string | boolean | string[] | Hook[]
 
 /** A shape a string field must match, and how to describe it in an error. */
 export type FieldPattern = { regex: RegExp; hint: string }

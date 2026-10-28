@@ -3,6 +3,8 @@ import {
   CONFIGURE_GET_AND_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
+  HOOKS_COMMAND,
+  hooksInvariant,
   REQUIRE_CONFIG,
   STACK_PARENT,
   USE_INTEGRATIONS,
@@ -89,6 +91,7 @@ export const evaluateFlow: Flow = devKit.defineFlow({
     argumentHint: "[PR number or URL | help]",
   },
   commands: DEV_COMMANDS.defineCommands({
+    hooks: HOOKS_COMMAND,
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
   }),
   tools: {},
@@ -114,6 +117,7 @@ export const evaluateFlow: Flow = devKit.defineFlow({
 2. **Risks**, prioritized. Things that could break in production, on deploy, for existing users, or for the team's ability to roll back. Not style, not layer rules, not convention violations (those live in the user's head and in CI). This is a shippability lens.
 
 The skill is read-only. It never writes to source control, the issue tracker, error tracking, or the working tree. It is safe to invoke at any point in a branch's life. With no argument it evaluates **everything in the working tree**: commits ahead of the base branch, uncommitted (staged and unstaged) changes, and untracked files. A PR, if one exists for the branch, supplies title/body context but never narrows the diff. With an explicit PR number or URL (including post-merge), it evaluates that PR's diff.`,
+  invariants: [hooksInvariant("evaluate")],
   phases: [
     {
       id: "main",

@@ -4,6 +4,8 @@ import {
   CONFIGURE_GET_AND_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
+  HOOKS_COMMAND,
+  hooksInvariant,
   REQUIRE_CONFIG,
   STACK_PARENT,
   USE_INTEGRATIONS,
@@ -60,6 +62,7 @@ export const syncFlow: Flow = devKit.defineFlow({
     argumentHint: { deriveFromModes: true, suffix: "[ISSUE-ID]" },
   },
   commands: DEV_COMMANDS.defineCommands({
+    hooks: HOOKS_COMMAND,
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
     sync: {
       description:
@@ -100,6 +103,7 @@ export const syncFlow: Flow = devKit.defineFlow({
     "**Stage everything** with `git add -A` for a commit; for conflict resolution, stage each file with `git add <file>`, never `-A`.",
     "**Don't prompt** for anything inferable from the branch, commits, diff, session, or config.",
     "**Write only what sync owns.** In the PR body that's its block; in the issue description, the branch, error, and session lines, `## Status`, and the last-synced line; on the issue, the fields under Issue fields, within their rules. A section a person wrote stays as they wrote it.",
+    hooksInvariant("sync"),
   ],
   phases: [
     {

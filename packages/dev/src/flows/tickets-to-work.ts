@@ -4,6 +4,8 @@ import {
   DEV_COMMANDS,
   devKit,
   flowDir,
+  HOOKS_COMMAND,
+  hooksInvariant,
   REQUIRE_CONFIG,
   UNKNOWN_FLAGS,
   USE_INTEGRATIONS,
@@ -30,6 +32,7 @@ export const ticketsToWorkFlow: Flow = devKit.defineFlow({
       "[--priority <ranks>] [--limit <n>] [--section <name> | --section-by-rank] [--in <integration>] [help]",
   },
   commands: DEV_COMMANDS.defineCommands({
+    hooks: HOOKS_COMMAND,
     configure: CONFIGURE_INTEGRATIONS,
     work: {
       description:
@@ -45,6 +48,7 @@ export const ticketsToWorkFlow: Flow = devKit.defineFlow({
   invariants: [
     "**Act through the integrations' ops.** Issues are read and closed, and workspaces listed, only through the ops `configure.ts integrations` returns, run as given; workspaces open only through `{{cmd}}start-work`.",
     "**The person decides every issue.** One question per issue, never several in one, never skipped because the answer looks obvious.",
+    hooksInvariant("tickets-to-work"),
   ],
   phases: [
     {

@@ -9,6 +9,7 @@
 // - Known fields are strict: wrong types and missing required fields are
 //   errors, and a write can never introduce an unknown section.
 
+import { checkHooks } from "./hooks.ts"
 import { freeInstanceName, INSTANCE_KEY, INSTANCE_NAME } from "./instances.ts"
 import { SECTIONS } from "./sections/index.ts"
 import type {
@@ -179,6 +180,10 @@ function checkEntry(
     const field = fields.get(key)
     if (!field) {
       warnings.push(`unknown field "${where}.${key}" (${UNKNOWN_NOTE})`)
+      continue
+    }
+    if (field.type === "hook[]") {
+      issues.push(...checkHooks(fieldValue, `${where}.${key}`, warnings))
       continue
     }
     const problem = checkField(field, fieldValue, `${where}.${key}`)

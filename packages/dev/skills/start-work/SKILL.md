@@ -17,6 +17,7 @@ Invoking it is the go-ahead, so it asks nothing before filing or starting, excep
 
 | Command | Description |
 |---------|-------------|
+| `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), or a failure that stops the command (`stop`) |
 | `configure.ts <subcommand>` | `get <path>...` prints configured values; `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
 | `work.ts <subcommand>` | `plan` decides which tickets to start, on which branch, and writes each agent's prompt; `branch-line` adds a `> Branch:` line to a description |
 | `tickets.ts <subcommand>` | `ids` lists the issues a create-tickets plan filed or matched |
@@ -26,6 +27,7 @@ Invoking it is the go-ahead, so it asks nothing before filing or starting, excep
 - **Act through the integrations' ops.** Issues are read and updated, and workspaces listed and opened, only through the ops `configure.ts integrations` returns, run as given.
 - **Never start an issue twice.** An issue with a workspace on its branch, in any workspaces integration or any git worktree of this repo, gets no new one.
 - **Change only an issue's branch line and state.** Its title, the rest of its description, and its fields stay as they are.
+- **Run the repo's hooks around this command.** Skip this when the mode is `help`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run before --flow start-work --mode <mode>`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run after --flow start-work --mode <mode> --outcome <success, when it did its job, else failure>`, leaving out a flag whose value isn't known yet. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest; a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). An exit of 2 means bad arguments or an invalid config: relay its message and stop. At the end, a `stop` can't happen: report the `failures`. Say in the report which hooks ran at each point, what any task for you changed, and what failed.
 
 ## 0. Help shortcut
 

@@ -16,6 +16,7 @@ Take the current branch from "in flight" to "merged" in one command: the last st
 
 | Command | Description |
 |---------|-------------|
+| `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), or a failure that stops the command (`stop`) |
 | `configure.ts <subcommand>` | `get <path>...` prints configured values; `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
 | `ready.ts <subcommand>` | `ci start` and `ci wait` track the CI pass on the commit about to land: settled, timed out, and what failed |
 
@@ -26,10 +27,11 @@ Take the current branch from "in flight" to "merged" in one command: the last st
 - **Never bypass the host:** no admin merge, no auto-merge, no skipping a required check or review, no rerunning someone's CI to get past it.
 - **Nothing is pushed between the CI pass and the merge.** The merge is pinned to the commit CI passed on; a head that moved since stops it.
 - **Clean up only after the host says merged.** No branch deletion, issue update, or error resolution for a pull request that isn't merged.
+- **Run the repo's hooks around this command.** Skip this when the mode is `help`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run before --flow merge --mode <mode>`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run merge.after after --flow merge --mode <mode> --branch <branch> --outcome <success, when it did its job, else failure>`, leaving out a flag whose value isn't known yet. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest; a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). An exit of 2 means bad arguments or an invalid config: relay its message and stop. At the end, a `stop` can't happen: report the `failures`. Say in the report which hooks ran at each point, what any task for you changed, and what failed.
 
 ## 1. Pre-flight
 
-Reads only, apart from the sync that opens a missing pull request. Any gate that fails stops the command with nothing written.
+Reads only, apart from the sync that opens a missing pull request and the repo's own hooks. Any gate that fails stops the command with nothing written.
 
 ### 1a. Survey
 
@@ -68,6 +70,10 @@ Only for `stack`, in order:
 3. **Any already failing?** `git fetch origin <every branch in the chain>`, then for each branch the `checks` op on `git rev-parse origin/<branch>`. Any `fail` or `cancelled`: stop, naming the branch and its pull request URL, `Can't land the chain: #<number> has failing checks. Fix it with /dev-flows:ready, then re-run /dev-flows:merge stack.` A chain that stops halfway leaves part of it merged, so this is checked before anything is written.
 
 Drafts are fine: the merge step marks them ready.
+
+### 1e. The repo's `before` hooks
+
+`node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run merge.before --flow merge --mode default --branch <branch>`. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest; a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). An exit of 2 means bad arguments or an invalid config: relay its message and stop. Merge lands what's pushed, so hooks here check rather than change: when `git status --porcelain` prints anything after them, stop as gate 2 of 1b does.
 
 **Next:**
 

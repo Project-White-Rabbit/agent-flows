@@ -5,6 +5,8 @@ import {
   DEV_COMMANDS,
   devKit,
   flowDir,
+  HOOKS_COMMAND,
+  hooksInvariant,
   REQUIRE_CONFIG,
   UNKNOWN_FLAGS,
   USE_INTEGRATIONS,
@@ -33,6 +35,7 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
     },
   },
   commands: DEV_COMMANDS.defineCommands({
+    hooks: HOOKS_COMMAND,
     configure: CONFIGURE_INTEGRATIONS,
     tickets: {
       description:
@@ -67,6 +70,7 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
     "**File only what the notes describe.** Don't invent work, and don't split an item into sub-issues the notes don't ask for.",
     "**Existing issues keep their title, description, and parent.** An update sets only the fields the plan changes.",
     "**Nothing is written before the confirmation** (or `--yes`), and nothing at all in `match` mode.",
+    hooksInvariant("create-tickets"),
   ],
   phases: [
     {

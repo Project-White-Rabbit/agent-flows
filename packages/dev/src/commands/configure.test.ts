@@ -245,6 +245,52 @@ describe("configure.ts (as a script)", () => {
     ])
   })
 
+  it("repairs an invalid file with a write that fixes it, and only then", () => {
+    init()
+    fs.mkdirSync(path.dirname(configFile()), { recursive: true })
+    fs.writeFileSync(
+      configFile(),
+      JSON.stringify({
+        version: 2,
+        repo: { baseBranch: "main" },
+        ready: { before: [{ name: "bump", run: "x", on: "success" }] },
+        merge: { after: "./teardown.sh" },
+      }),
+    )
+    const partial = run(
+      ["write"],
+      JSON.stringify({
+        sections: { ready: { before: [{ name: "bump", run: "x" }] } },
+      }),
+    )
+    expect(partial.status).toBe(1)
+    expect(json(partial)).toMatchObject({
+      written: false,
+      issues: ["merge.after must be a list of hooks"],
+    })
+
+    const fixed = run(
+      ["write"],
+      JSON.stringify({
+        sections: {
+          ready: { before: [{ name: "bump", run: "x" }] },
+          merge: { after: [{ name: "down", run: "./teardown.sh" }] },
+        },
+      }),
+    )
+    expect(fixed.status).toBe(0)
+    expect(json(fixed).written).toBe(true)
+    expect(run(["get", "merge.after"]).status).toBe(0)
+
+    fs.writeFileSync(configFile(), "{ not json")
+    const unreadable = run(
+      ["write"],
+      JSON.stringify({ sections: { repo: { baseBranch: "main" } } }),
+    )
+    expect(unreadable.status).not.toBe(0)
+    expect(unreadable.stderr).toContain("fix it by hand")
+  })
+
   it("returns every integration configured for a capability, with filled-in ops", () => {
     init()
     run(
