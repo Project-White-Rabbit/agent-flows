@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   actionOf,
   checkPlan,
+  matchPlan,
   type Plan,
   parentsFirst,
   planIds,
@@ -307,6 +308,148 @@ describe("the team's rules", () => {
     ])
   })
 
+  it("files a new sub-issue in its parent's project unless the notes name one", () => {
+    const tree: Plan = {
+      options: { linear: { projects: ["Web", "Dev tools", "Mobile"] } },
+      items: [
+        { key: "epic", title: "Epic", project: "Web" },
+        { key: "a", title: "A", parent: "epic" },
+        { key: "b", title: "B", parent: "a" },
+        {
+          key: "c",
+          title: "C",
+          parent: "epic",
+          project: "Dev tools",
+          defaults: ["project"],
+        },
+        { key: "d", title: "D", parent: "epic", project: "Mobile" },
+        {
+          key: "old",
+          match: "ENG-5",
+          existing: { title: "Old", project: "Dev tools" },
+        },
+        { key: "e", title: "E", parent: "old" },
+        { key: "f", title: "F", parent: "ENG-9" },
+      ],
+      refs: { "ENG-9": { found: true, title: "Outside", project: "Mobile" } },
+    }
+    const checked = checkPlan(tree, TODAY)
+    expect(checked.problems).toEqual([])
+    const project = (key: string) =>
+      renderTable(checked.rows.filter((r) => r.item.key === key))
+        .split("\n")[2]
+        ?.split(" | ")[9]
+    expect(["a", "b", "c", "d", "e", "f"].map(project)).toEqual([
+      "Web (parent)",
+      "Web (parent)",
+      "Web (parent)",
+      "Mobile",
+      "Dev tools (parent)",
+      "Mobile (parent)",
+    ])
+  })
+
+  it("raises a parent outside the plan when the plan raises a sub-issue already under it", () => {
+    const raised: Plan = {
+      items: [
+        {
+          key: "m",
+          match: "ENG-5",
+          priority: "urgent",
+          existing: { title: "Piece", priority: "low", parent: "ENG-9" },
+        },
+      ],
+      refs: {
+        "ENG-9": {
+          found: true,
+          title: "Epic",
+          priority: "medium",
+          subIssues: [{ id: "ENG-5", priority: "low" }],
+        },
+      },
+    }
+    const rules = { parentFollowsSubIssues: true }
+    const checked = checkPlan(raised, TODAY, rules)
+    expect(checked.problems).toEqual([])
+    expect(renderTable(checked.rows).split("\n").slice(2)).toEqual([
+      "| 1 | update | ENG-5 | Piece | ENG-9 | low → urgent |  |  |  |  |  |",
+      "| 2 | update | ENG-9 | Epic |  | medium → urgent (sub-issues) |  |  |  |  |  |",
+    ])
+    const unloaded = { ...raised, refs: undefined }
+    expect(checkPlan(unloaded, TODAY, rules).problems).toEqual([
+      'm: the plan raises ENG-5, which may move its parent ENG-9 up (tickets.parentFollowsSubIssues), and the plan hasn\'t loaded it: load it with getIssue and record it in "refs"',
+    ])
+    // Lowering it needs nothing loaded: a parent only moves up.
+    const lowered = structuredClone(unloaded)
+    ;(lowered.items[0] as { priority: string }).priority = "none"
+    expect(checkPlan(lowered, TODAY, rules).problems).toEqual([])
+  })
+
+  it("gives a parent only the cycle of a sub-issue whose cycle hasn't ended", () => {
+    const tree: Plan = {
+      options: { linear: { cycles } },
+      items: [
+        {
+          key: "epic",
+          match: "ENG-1",
+          existing: {
+            title: "Epic",
+            subIssues: [
+              {
+                id: "ENG-2",
+                cycle: "39",
+                cycleStart: "2026-10-12",
+                cycleEnd: "2026-10-19",
+              },
+              { id: "ENG-3", cycle: "38", cycleStart: "2026-10-05" },
+              { id: "ENG-4", cycle: "41", cycleStart: "2026-10-26" },
+            ],
+          },
+        },
+      ],
+    }
+    const checked = checkPlan(tree, TODAY, { parentFollowsSubIssues: true })
+    expect(checked.rows[0]?.item.cycle).toBe("41")
+    const ended: Plan = structuredClone(tree)
+    const subs = ended.items[0]?.existing?.subIssues ?? []
+    ended.items[0] = {
+      ...(ended.items[0] as Plan["items"][number]),
+      existing: { title: "Epic", subIssues: subs.slice(0, 2) },
+    }
+    expect(
+      checkPlan(ended, TODAY, { parentFollowsSubIssues: true }).rows[0]?.item
+        .cycle,
+    ).toBeUndefined()
+  })
+
+  it("takes a project or label named by a unique part of its name", () => {
+    const named: Plan = {
+      options: {
+        linear: {
+          projects: ["Web app", "Dev tools", "Dev ops"],
+          labels: ["Bug", "Feature request"],
+        },
+      },
+      items: [
+        { key: "a", title: "A", project: "web", label: "feature" },
+        { key: "b", title: "B", project: "dev tools", label: "bug" },
+        { key: "c", title: "C", project: "dev" },
+      ],
+    }
+    expect(checkPlan(named, TODAY).problems).toEqual([
+      'c: project "dev" matches 2 projects (projects: Web app | Dev tools | Dev ops)',
+    ])
+    named.items.pop()
+    const checked = checkPlan(named, TODAY)
+    expect(checked.names).toEqual([
+      'a: project "web" is "Web app"',
+      'a: label "feature" is "Feature request"',
+      'b: project "dev tools" is "Dev tools"',
+      'b: label "bug" is "Bug"',
+    ])
+    expect(renderTable(checked.rows)).toContain("|  | Web app |  |")
+  })
+
   it("moves a matched issue under another parent", () => {
     const moved: Plan = {
       items: [
@@ -322,6 +465,137 @@ describe("the team's rules", () => {
     const checked = checkPlan(moved, TODAY)
     expect(checked.rows[0]?.action).toBe("update")
     expect(renderTable(checked.rows)).toContain("| ENG-1 → ENG-9 |")
+  })
+})
+
+describe("matchPlan", () => {
+  const issue = (identifier: string, title: string, extra: object = {}) => ({
+    identifier,
+    title,
+    url: `https://t/${identifier}`,
+    state: "Todo",
+    open: true,
+    description: "",
+    ...extra,
+  })
+
+  it("matches the only open issue with the same title, and ranks the rest by shared words and search", () => {
+    const planned: Plan = {
+      items: [
+        {
+          key: "login",
+          title: "🛑 Fix the login redirect",
+          description: "- [ ] Send users back to the page they asked for",
+        },
+        { key: "cache", title: "Cache the dashboard queries" },
+        { key: "none", title: "Write the quarterly letter" },
+      ],
+    }
+    const lines = matchPlan(
+      planned,
+      {
+        linear: {
+          issues: [
+            issue("ENG-1", "Fix the login redirect!"),
+            issue("ENG-2", "Dashboard is slow", {
+              description: "Cache the queries the dashboard runs",
+            }),
+            issue("ENG-3", "Speed up the dashboard"),
+            issue("ENG-4", "Login page redirect loops", {
+              open: false,
+              state: "Done",
+            }),
+          ],
+          hits: { cache: ["ENG-3"] },
+        },
+        heynoah: {
+          link: true,
+          issues: [issue("HEY-1", "Cache the dashboard queries")],
+        },
+      },
+      { mark: "🛑" },
+    )
+    expect(planned.items.map((i) => i.match)).toEqual([
+      "ENG-1",
+      undefined,
+      undefined,
+    ])
+    expect(lines).toEqual([
+      'ITEM login "🛑 Fix the login redirect"',
+      '  MATCH exact title ENG-1 "Fix the login redirect!" [Todo] https://t/ENG-1 (linear)',
+      '  CANDIDATE 0.57, closed ENG-4 "Login page redirect loops" [Done] https://t/ENG-4 (linear)',
+      'ITEM cache "Cache the dashboard queries"',
+      '  CANDIDATE 0.64 ENG-2 "Dashboard is slow" [Todo] https://t/ENG-2 (linear)',
+      '  CANDIDATE 0.33, search #1 ENG-3 "Speed up the dashboard" [Todo] https://t/ENG-3 (linear)',
+      '  CANDIDATE 1.00, exact title HEY-1 "Cache the dashboard queries" [Todo] https://t/HEY-1 (heynoah)',
+      'ITEM none "Write the quarterly letter"',
+      "  NEW",
+    ])
+  })
+
+  it("matches an issue filed from the same notes when it clearly leads", () => {
+    const key = "1a2b3c4d5e6f708192a3b4c5d6e7f809"
+    const filed = `> Planning: [Planning, week of 2026-10-19](https://t/doc), from [Notes](https://n/Notes-${key})`
+    const planned: Plan = {
+      items: [{ key: "sync", title: "Sync planning with the dev workflow" }],
+    }
+    matchPlan(
+      planned,
+      {
+        linear: {
+          issues: [
+            issue("ENG-7", "Planning sync for dev workflow", {
+              description: filed,
+            }),
+            issue("ENG-8", "Dev workflow docs"),
+          ],
+        },
+      },
+      { key },
+    )
+    expect(planned.items[0]?.match).toBe("ENG-7")
+  })
+
+  it("leaves two items that would claim one issue, a closed one, and a branch's taken issue to the agent", () => {
+    const planned: Plan = {
+      items: [
+        { key: "a", title: "Ship it" },
+        { key: "b", title: "Ship it" },
+        { key: "c", title: "Old work" },
+        { key: "d", title: "Branch work" },
+        { key: "e", title: "Kept", match: "new" },
+      ],
+    }
+    const lines = matchPlan(
+      planned,
+      {
+        linear: {
+          issues: [
+            issue("ENG-1", "Ship it"),
+            issue("ENG-2", "Old work", { open: false }),
+            issue("ENG-3", "Branch work", {
+              description: "> Branch: `sam/other`",
+            }),
+            issue("ENG-4", "Kept"),
+          ],
+        },
+      },
+      { branch: "sam/mine" },
+    )
+    expect(planned.items.map((i) => i.match)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "new",
+    ])
+    expect(lines).toContain("  NEW (forced)")
+    // Both items still see the issue they couldn't both have.
+    expect(
+      lines.filter((l) =>
+        l.includes('CANDIDATE 1.00, exact title ENG-1 "Ship it"'),
+      ),
+    ).toHaveLength(2)
   })
 })
 
@@ -473,6 +747,52 @@ describe("tickets.ts", () => {
       "> Planning: [Planning, week of 2026-10-19](https://d), from [Sync](https://n/p)\n\nWork\n",
     )
     expect(cli(args).stdout.trim()).toBe("UNCHANGED")
+  })
+
+  it("sets certain matches in the plan and prints what's left to judge", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tickets-"))
+    dirs.push(dir)
+    const file = path.join(dir, "plan.json")
+    const issues = path.join(dir, "issues.json")
+    const notes = path.join(dir, "notes.md")
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        items: [{ key: "a", title: "Ship the login page" }],
+      }),
+    )
+    fs.writeFileSync(notes, "- Ship the login page\n")
+    fs.writeFileSync(
+      issues,
+      JSON.stringify({
+        linear: {
+          issues: [
+            {
+              identifier: "ENG-3",
+              title: "Ship the login page",
+              open: true,
+              description: "",
+            },
+          ],
+        },
+      }),
+    )
+    const out = cli([
+      "match",
+      "--plan",
+      file,
+      "--issues",
+      issues,
+      "--notes",
+      notes,
+    ])
+    expect(out.status).toBe(0)
+    expect(out.stdout).toContain(
+      'MATCH exact title ENG-3 "Ship the login page"',
+    )
+    expect(JSON.parse(fs.readFileSync(file, "utf8")).items[0].match).toBe(
+      "ENG-3",
+    )
   })
 
   it("exits 1 with PROBLEM lines for a plan it can't file", () => {

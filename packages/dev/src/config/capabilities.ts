@@ -83,6 +83,8 @@ export const CAPABILITIES: CapabilitySpec[] = [
         "Push the checked-out branch and open its pull request as a draft when it has none, leaving an existing pull request's title, body, and draft or ready state alone. Prints each pull request's URL, and its URL in the stacking tool's own app when it has one",
       downstack:
         '`{"chain": [<branch>...], "above": <n>, "size": <n>}`: `chain` the checked-out branch\'s ancestors in its stack as the tool records them, trunk left out, bottom first and ending with the checked-out branch; `above` how many branches stack on top of it; `size` how many its whole stack holds. A branch the tool doesn\'t track is a chain of one, with `above` 0 and `size` 1',
+      prUrl:
+        'The pull request at <url> (its URL on the source-control host) as a URL in the stacking tool\'s own app, built from that URL without calling the tool: `{"url": <its URL>}`, or `{"url": null}` when the tool has no app or no URL for that host',
       mergeStack:
         "Merge the pull requests of every branch in the checked-out branch's `downstack` chain, bottom first, up to and including it, retargeting and restacking each next branch as the one below it lands. Stops at the first one that can't merge, printing why. The host's or the tool's own merge method applies",
     },
@@ -111,10 +113,12 @@ export const CAPABILITIES: CapabilitySpec[] = [
         "Open issues anchored to branch <branch>, any assignee: their description has a `> Branch:` line naming it, in backticks or bare (as older tools wrote it), reading an issue id in it that the tracker turned into a link as plain text",
       searchIssues:
         "Issues that may already describe the work in <text>, any assignee: open ones, and ones closed in the last 90 days, ranked by the tracker's own search, each with its id, title, URL, workflow state, description, parent issue, and whether a pull request is attached",
+      recentIssues:
+        "Every issue that may already describe planned work, any assignee, all pages: the open ones, and the ones closed in the last 90 days, each with its id, title, URL, workflow state, whether it's open, whole description, parent issue, and attached pull requests. Searched as `searchIssues` is",
       projectIssues:
         "Every open issue in project <project>, any assignee, all pages: each with its id, title, URL, workflow state, priority, due date, and parent issue",
       fieldOptions:
-        '`{"people": [{"name", "displayName", "email"}], "projects": [<name>], "labels": [<name>], "cycles": [{"id", "startsAt", "endsAt", "current"}]}`: the people issues can be assigned to, the open projects, the labels, and the current and upcoming cycles (`id` its number or name, `current` true for the one in progress), as JSON. A field the tracker doesn\'t have is left out',
+        '`{"people": [{"name", "displayName", "email"}], "projects": [<name>], "labels": [<name>], "cycles": [{"id", "startsAt", "endsAt", "current"}]}`: the people issues can be assigned to (not apps or bots), the open projects, the labels, and the current and upcoming cycles (`id` its number or name, `current` true for the one in progress), as JSON. A field the tracker doesn\'t have is left out',
       recordNotes:
         "Put the section in the file <section-file> into the planning document titled <title>, in the current cycle (the team's, when cycles aren't documents' homes), creating it with that title when there's none: replace the `## ` section whose `Source:` line contains <key>, or add it at the end, keeping the rest. Prints the document's title and URL",
       assignedIssues:

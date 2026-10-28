@@ -1,5 +1,5 @@
 import path from "node:path"
-import { downstack } from "../adapters/graphite.ts"
+import { downstack, prUrl } from "../adapters/graphite.ts"
 import type { IntegrationSpec } from "../types.ts"
 
 /** Graphite's repo config: `{ "trunk": "main" }` or `{ "trunks": [{ "name": "main" }] }`. */
@@ -62,11 +62,15 @@ export const graphite: IntegrationSpec = {
       downstack: {
         cli: "`gt log short --stack`: one branch per line, the top of the stack first and trunk last, the checked-out one marked. `chain` is the branches from just above trunk up to the checked-out one, bottom first; `above` counts the lines above it; `size` counts every branch but trunk",
       },
+      // Also an adapter, which needs neither `gt` nor a network.
+      prUrl: {
+        cli: "`https://app.graphite.com/github/pr/<owner>/<repo>/<N>` from a `https://github.com/<owner>/<repo>/pull/<N>` URL; none for any other host",
+      },
       // Lands bottom-up, retargeting and restacking each next branch itself.
       mergeStack: { cli: "`gt merge --no-interactive`" },
     },
   },
-  adapters: { downstack },
+  adapters: { downstack, prUrl },
   detect(ctx) {
     const text = ctx.gitCommonDir
       ? ctx.read(path.join(ctx.gitCommonDir, ".graphite_repo_config"))

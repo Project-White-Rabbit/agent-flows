@@ -23,15 +23,19 @@ const SHALLOW_HEADING = /^#{1,3}(?=\s)/gm
 const SECTION_START = /^## /gm
 const PLANNING_LINE = /^> Planning:/
 const LINK_LINE = /^> [A-Za-z][A-Za-z ]*:/
+/** A page id ending a URL, as Notion's do: the page under any title or link. */
+const PAGE_ID = /([0-9a-f]{32})(?:[?#]|$)/
 
 /**
- * What identifies the notes across runs: the page's URL, or a hash of pasted
- * text, so the same notes pasted again find their section.
+ * What identifies the notes across runs: the page's id when its URL ends in
+ * one (a renamed page, or a link with a view or share parameter, is still the
+ * same page), else its URL, or a hash of pasted text, so the same notes pasted
+ * again find their section.
  */
 export function sourceKey(source: NotesSource, notes: string): string {
   const url = source.url?.trim()
   if (url) {
-    return url
+    return url.replaceAll("-", "").match(PAGE_ID)?.[1] ?? url
   }
   const hash = createHash("sha1")
     .update(notes.split(/\s+/).filter(Boolean).join(" "))

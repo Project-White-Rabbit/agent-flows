@@ -80,8 +80,13 @@ export type Workspace = {
 }
 
 export type StartOptions = {
-  /** Every new workspace's section; null for none. Undefined: the current one's. */
+  /**
+   * Every new workspace's section; null for none. Undefined: the current
+   * one's, or none in another project, whose sections aren't this one's.
+   */
   section?: string | null
+  /** The workspaces open in another project (`--project`). */
+  otherProject?: boolean
   byRank?: boolean
   ranks?: string[]
 }
@@ -202,9 +207,11 @@ export function planStart(
   const current = workspaces.find((w) => w.current)
   const section = options.byRank
     ? rankName(ticket.priority, options.ranks)
-    : options.section === undefined
-      ? current?.section?.trim() || null
-      : options.section
+    : options.section !== undefined
+      ? options.section
+      : options.otherProject
+        ? null
+        : current?.section?.trim() || null
   return {
     action: "start",
     id: ticket.id,
@@ -411,9 +418,10 @@ export function isBlocker(issue: Assigned, mark?: string): boolean {
 /**
  * Tickets with no work started on them yet, in the order to pick them up:
  * most urgent first, then the ones whose title carries the blocker mark
- * (`mark`: they stop a customer), then the ones blocking other work, then the
- * earliest due. One with open sub-issues is left out (they're what gets worked
- * on), and so is one with a pull request or a workspace on its branch.
+ * (`mark`: they stop a customer), then the earliest due (a deadline is the
+ * order within a priority), then the ones blocking other work. One with open
+ * sub-issues is left out (they're what gets worked on), and so is one with a
+ * pull request or a workspace on its branch.
  */
 export function queue(
   issues: Assigned[],
@@ -424,8 +432,8 @@ export function queue(
     [
       PRIORITIES.indexOf(issue.priority ?? "none"),
       isBlocker(issue, mark) ? 0 : 1,
-      issue.blocks ? 0 : 1,
       issue.dueDate ?? "9999-12-31",
+      issue.blocks ? 0 : 1,
     ] as const
   return issues
     .filter(
@@ -441,7 +449,7 @@ export function queue(
     .sort((a, b) => {
       const [x, y] = [order(a), order(b)]
       return (
-        x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || x[3].localeCompare(y[3])
+        x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2]) || x[3] - y[3]
       )
     })
 }
@@ -479,7 +487,7 @@ export function describeTicket(
   return `TICKET ${issue.id} "${rankName(issue.priority, ranks)}" due=${issue.dueDate ?? "none"}${state}${blocker}${blocks} "${issue.title}" ${issue.url}`
 }
 
-const SWITCHES = new Set(["section-by-rank", "no-section", "yes"])
+const SWITCHES = new Set(["section-by-rank", "no-section", "project", "yes"])
 
 type Args = Flags
 
@@ -514,7 +522,7 @@ function placement(args: Args): StartOptions {
 function plan(args: Args): void {
   const file = requiredFlag(args, "input")
   const input = readJson<{ tickets?: Ticket[]; workspaces?: Workspace[] }>(file)
-  const options = placement(args)
+  const options = { ...placement(args), otherProject: args.has("project") }
   const workspaces = [...(input.workspaces ?? []), ...listWorktrees()]
   const prompts =
     args.get("prompts") ?? path.join(path.dirname(file), "prompts")
@@ -619,7 +627,7 @@ function list(args: Args): void {
 const USAGE = `Usage: work.ts <command>
 
   plan --input <file> [--section <name> | --section-by-rank | --no-section]
-       [--ranks <names>] [--prompts <dir>]
+       [--project] [--ranks <names>] [--prompts <dir>]
                   Decide each ticket in <file> ({"tickets": [...], "workspaces":
                   [...]}) against the open workspaces and this repo's git
                   worktrees. Writes nothing to any tracker. Prints one line each:
@@ -630,7 +638,8 @@ const USAGE = `Usage: work.ts <command>
                     SKIP <ID> <not found|done|canceled>
                   and writes each START's agent prompt to <file>. Without a
                   placement flag, a workspace goes in the section of the one
-                  this session runs in, or none.
+                  this session runs in, or none; with --project (the
+                  workspaces open in another project), in none.
   reuse (--input <file> | --title "<title>")
         [--section <name> | --section-by-rank | --no-section] [--ranks <names>]
         [--yes [--rename <command>]]
@@ -654,7 +663,7 @@ const USAGE = `Usage: work.ts <command>
                   The tickets in <file> ({"issues": [...], "workspaces": [...]})
                   with no work started yet, in the order to pick them up
                   (by priority, then the config's tickets.blockerMark in the
-                  title, then blocking other work, then due date):
+                  title, then due date, then blocking other work):
                     TICKET <ID> "<rank>" due=<date|none> [<state>] [blocker]
                            [blocks-other-work] "<title>" <url>
                   then COUNT <n> (printed) and TOTAL <n> (before --priority

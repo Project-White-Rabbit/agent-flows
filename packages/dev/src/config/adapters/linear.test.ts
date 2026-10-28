@@ -10,8 +10,10 @@ import {
   findIssue,
   mentionFilter,
   projectIssues,
+  recentIssues,
   recordNotes,
   searchIssues,
+  searchScope,
 } from "./linear.ts"
 
 const BRANCH = "ruven/eng-12-feature"
@@ -176,13 +178,77 @@ describe("linear searchIssues adapter", () => {
     expect(filter.or).toHaveLength(3)
   })
 
+  it("searches every team for a shared workspace's issues that mention the product", async () => {
+    const { fetch, seen } = fakeLinear([{ searchIssues: { nodes: [] } }])
+    await searchIssues.run({
+      ...input(fetch, { text: "Same work" }),
+      values: { teamKey: "HEY", mention: "Acme" },
+    })
+    const filter = seen[0].filter as Record<string, unknown>
+    expect(filter.team).toBeUndefined()
+    expect(filter.and).toEqual(mentionFilter("Acme").and)
+    expect(searchScope({ teamKey: "ENG" })).toEqual({
+      team: { key: { eq: "ENG" } },
+    })
+  })
+
   it("needs text to search for", async () => {
     const { fetch } = fakeLinear([])
     await expect(searchIssues.run(input(fetch, {}))).rejects.toThrow("--text")
   })
 })
 
+describe("linear recentIssues adapter", () => {
+  it("reads every page of open and recently closed issues, whole descriptions", async () => {
+    const node = (identifier: string, type: string) => ({
+      identifier,
+      title: identifier,
+      url: `https://l/${identifier}`,
+      description: "y".repeat(3000),
+      state: { name: type, type },
+      parent: null,
+      attachments: { nodes: [] },
+    })
+    const { fetch, seen } = fakeLinear(
+      issuePages([[node("ENG-1", "started")], [node("ENG-2", "canceled")]]),
+    )
+    const result = (await recentIssues.run(input(fetch, {}))) as {
+      issues: Record<string, unknown>[]
+    }
+    expect(result.issues.map((i) => [i.identifier, i.open])).toEqual([
+      ["ENG-1", true],
+      ["ENG-2", false],
+    ])
+    expect(String(result.issues[0].description)).toHaveLength(3000)
+    expect(seen.map((v) => v.after)).toEqual([undefined, "c1"])
+    const filter = seen[0].filter as { team: unknown; or: unknown[] }
+    expect(filter.team).toEqual({ key: { eq: "ENG" } })
+    expect(filter.or).toHaveLength(3)
+  })
+})
+
 describe("linear assignedIssues adapter", () => {
+  it("keeps a shared workspace's issues that don't mention the product out", async () => {
+    const { fetch, seen } = fakeLinear([
+      {
+        viewer: {
+          assignedIssues: {
+            nodes: [],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    ])
+    await assignedIssues.run({
+      ...input(fetch, {}),
+      values: { teamKey: "HEY", mention: "Acme" },
+    })
+    expect(seen[0].filter).toMatchObject({
+      team: { key: { eq: "HEY" } },
+      ...mentionFilter("Acme"),
+    })
+  })
+
   it("reads every page and reports what tickets-to-work sorts by", async () => {
     const node = (identifier: string, extra: object) => ({
       identifier,
@@ -237,9 +303,13 @@ describe("linear assignedIssues adapter", () => {
     const result = (await assignedIssues.run(input(fetch, {}))) as {
       issues: Record<string, unknown>[]
     }
+    const filter = {
+      team: { key: { eq: "ENG" } },
+      state: { type: { in: ["triage", "backlog", "unstarted", "started"] } },
+    }
     expect(seen).toEqual([
-      { team: "ENG", after: undefined },
-      { team: "ENG", after: "c1" },
+      { filter, after: undefined },
+      { filter, after: "c1" },
     ])
     expect(result.issues).toEqual([
       {
@@ -308,6 +378,7 @@ describe("linear planning adapters", () => {
                     active: true,
                   },
                   { name: "Gone", active: false },
+                  { name: "Linear Bot", active: true, app: true },
                 ],
               },
               projects: { nodes: [{ name: "Web" }] },

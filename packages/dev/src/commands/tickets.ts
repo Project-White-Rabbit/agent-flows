@@ -12,6 +12,13 @@
 import fs from "node:fs"
 import { getAt } from "../config/config.ts"
 import {
+  canMatchFor,
+  certainMatch,
+  type EntryIssues,
+  type Ranked,
+  rankCandidates,
+} from "../config/matching.ts"
+import {
   type FiledIssue,
   planningLine,
   planningTitle,
@@ -49,6 +56,8 @@ export type SubIssue = {
   cycle?: string | null
   /** When its cycle starts, `YYYY-MM-DD`. */
   cycleStart?: string | null
+  /** When its cycle ends, `YYYY-MM-DD`. */
+  cycleEnd?: string | null
   dueDate?: string | null
 }
 
@@ -64,6 +73,8 @@ export type Existing = {
   parent?: string | null
   /** When its cycle starts, `YYYY-MM-DD`. */
   cycleStart?: string | null
+  /** When its cycle ends, `YYYY-MM-DD`. */
+  cycleEnd?: string | null
   /** Its open sub-issues. */
   subIssues?: SubIssue[]
 } & Partial<Record<Field, string | null>>
@@ -75,6 +86,8 @@ export type Ref = {
   title?: string
   closed?: boolean
   priority?: string | null
+  /** Its project's name, or null for none. */
+  project?: string | null
   subIssues?: SubIssue[]
 }
 
@@ -151,6 +164,8 @@ export type Action = "file" | "update" | "unchanged"
 export type Planned = PlanItem & {
   /** Fields the rules set, not the notes: `priority` and `cycle` from sub-issues. */
   derived?: Field[]
+  /** Fields a new sub-issue takes from its parent: `project`. */
+  fromParent?: Field[]
   /** The title to set on a matched issue: its own with the blocker mark. */
   retitle?: string
 }
@@ -161,6 +176,8 @@ export type Checked = {
   problems: string[]
   checks: string[]
   rows: Row[]
+  /** Projects and labels the plan named in part, with the tracker's full name. */
+  names?: string[]
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -359,6 +376,19 @@ function personMatches(person: Person, wanted: string): boolean {
   return names.some((name) => name && normalize(name) === wanted)
 }
 
+/**
+ * The tracker's names a plan's project or label can mean: the ones it equals
+ * once case and punctuation are dropped, else the ones that contain it.
+ */
+export function resolveName(value: string, names: string[]): string[] {
+  const wanted = normalize(value)
+  const exact = names.filter((n) => normalize(n) === wanted)
+  if (exact.length > 0 || !wanted) {
+    return exact
+  }
+  return names.filter((n) => normalize(n).includes(wanted))
+}
+
 /** The cycle a plan's `cycle` names, from the tracker's current and upcoming ones. */
 export function resolveCycle(
   value: string,
@@ -416,10 +446,10 @@ function nameProblems(plan: Plan): string[] {
     ] as const) {
       const value = item[field]
       if (value && names) {
-        const exact = names.filter((n) => normalize(n) === normalize(value))
-        if (exact.length !== 1) {
+        const found = resolveName(value, names)
+        if (found.length !== 1) {
           problems.push(
-            `${key}: ${kind} "${value}" matches ${exact.length} ${kind}s (${kind}s: ${list(names)})`,
+            `${key}: ${kind} "${value}" matches ${found.length} ${kind}s (${kind}s: ${list(names)})`,
           )
         }
       }
@@ -437,17 +467,19 @@ function nameProblems(plan: Plan): string[] {
 
 /**
  * The plan as it will be filed: the rules applied to each item, problems that
- * block filing, checks that need an answer, and updates to parents outside
- * the plan that its new sub-issues outrank.
+ * block filing, checks that need an answer, updates to parents outside the
+ * plan that its sub-issues outrank, and the full names of projects and labels
+ * it named in part.
  */
 function applyRules(
   plan: Plan,
   ordered: PlanItem[],
   rules: Rules,
   today: string,
-): { items: Planned[]; problems: string[]; checks: string[] } {
+): { items: Planned[]; problems: string[]; checks: string[]; names: string[] } {
   const problems: string[] = []
   const checks: string[] = []
+  const names: string[] = []
   const items: Planned[] = ordered.map((item) => structuredClone(item))
   const byKey = new Map(items.map((item) => [item.key, item]))
   const inPlan = new Set(items.filter((i) => !isNew(i)).map((i) => i.match))
@@ -469,6 +501,26 @@ function applyRules(
       ? (item.existing?.cycleStart ?? undefined)
       : undefined
   }
+  const endOf = (item: Planned): string | undefined => {
+    const cycle = cycleOf(item)
+    const cycles = optionsFor(plan, item)?.cycles
+    const found = cycle && cycles ? resolveCycle(cycle, cycles) : undefined
+    if (found) {
+      return found.endsAt.slice(0, 10)
+    }
+    return item.cycle === undefined
+      ? (item.existing?.cycleEnd ?? undefined)
+      : undefined
+  }
+  // A cycle that hasn't ended: by its end date, else by being among the
+  // current and upcoming cycles the tracker listed.
+  const unended = (owner: Planned, cycle: string, end?: string | null) => {
+    if (end) {
+      return end.slice(0, 10) > today
+    }
+    const cycles = optionsFor(plan, owner)?.cycles
+    return !cycles || resolveCycle(cycle, cycles) !== undefined
+  }
   // A plan item's sub-issues: items filed under it, and its open sub-issues
   // the plan doesn't touch.
   const children = (item: Planned) => {
@@ -484,6 +536,41 @@ function applyRules(
       open: (item.existing?.subIssues ?? []).filter(
         (sub) => !inPlan.has(sub.id),
       ),
+    }
+  }
+
+  for (const item of items) {
+    const options = optionsFor(plan, item)
+    for (const [field, known] of [
+      ["project", options?.projects],
+      ["label", options?.labels],
+    ] as const) {
+      const value = item[field]
+      const [full, ...more] = value && known ? resolveName(value, known) : []
+      if (full && more.length === 0 && full !== value) {
+        item[field] = full
+        names.push(`${item.key}: ${field} "${value}" is "${full}"`)
+      }
+    }
+  }
+
+  // Parents first, so a sub-issue of a new sub-issue takes the project its
+  // parent just took.
+  for (const item of items) {
+    if (!isNew(item) || !item.parent) {
+      continue
+    }
+    if (item.project !== undefined && !item.defaults?.includes("project")) {
+      continue
+    }
+    const parent = byKey.get(item.parent)
+    const project = parent
+      ? (parent.project ?? parent.existing?.project)
+      : plan.refs?.[item.parent]?.project
+    if (project) {
+      item.project = project
+      item.defaults = item.defaults?.filter((f) => f !== "project")
+      item.fromParent = [...(item.fromParent ?? []), "project"]
     }
   }
 
@@ -519,12 +606,14 @@ function applyRules(
           priority: priorityOf(c),
           cycle: cycleOf(c),
           start: startOf(c),
+          end: endOf(c),
         })),
         ...open.map((s) => ({
           id: s.id,
           priority: s.priority ?? undefined,
           cycle: s.cycle ?? undefined,
           start: s.cycleStart ?? undefined,
+          end: s.cycleEnd ?? undefined,
         })),
       ]
       if (kids.length === 0) {
@@ -549,7 +638,9 @@ function applyRules(
         item.cycle !== undefined && !item.defaults?.includes("cycle")
           ? item.cycle
           : (item.existing?.cycle ?? undefined)
-      const dated = kids.filter((k) => k.cycle && k.start)
+      const dated = kids.filter(
+        (k) => k.cycle && k.start && unended(item, k.cycle, k.end),
+      )
       if (!ownCycle && dated.length > 0) {
         const earliest = dated.reduce((a, b) =>
           (a.start as string) <= (b.start as string) ? a : b,
@@ -559,16 +650,29 @@ function applyRules(
       }
     }
     checks.push(...forced)
-    // A parent outside the plan that a new sub-issue outranks moves up too.
+    // A parent outside the plan that a sub-issue outranks moves up too: one
+    // filed or moved under it, or one already there that the plan raises.
     for (const item of items) {
-      const ref =
-        item.parent && !byKey.has(item.parent)
-          ? plan.refs?.[item.parent]
-          : undefined
-      if (!ref?.found || !item.parent || !reparentsOrNew(item)) {
+      const id =
+        item.parent ?? (isNew(item) ? undefined : item.existing?.parent)
+      if (!id || byKey.has(id) || inPlan.has(id)) {
         continue
       }
-      const id = item.parent
+      const ref = plan.refs?.[id]
+      if (!ref) {
+        const raised =
+          item.priority !== undefined &&
+          urgency(item.priority) < urgency(item.existing?.priority)
+        if (raised) {
+          problems.push(
+            `${item.key}: the plan raises ${item.match}, which may move its parent ${id} up (tickets.parentFollowsSubIssues), and the plan hasn't loaded it: load it with getIssue and record it in "refs"`,
+          )
+        }
+        continue
+      }
+      if (!ref.found) {
+        continue
+      }
       const wanted = Math.min(
         urgency(priorityOf(item)),
         urgency(updates.get(id)?.priority),
@@ -630,7 +734,7 @@ function applyRules(
       )
     }
   }
-  return { items: [...items, ...updates.values()], problems, checks }
+  return { items: [...items, ...updates.values()], problems, checks, names }
 }
 
 function dueChecks(item: PlanItem, today: string): string[] {
@@ -677,13 +781,19 @@ export function checkPlan(
   if (named.length > 0) {
     return { problems: named, checks: [], rows: [] }
   }
-  const { items, problems, checks } = applyRules(plan, ordered, rules, today)
+  const { items, problems, checks, names } = applyRules(
+    plan,
+    ordered,
+    rules,
+    today,
+  )
   if (problems.length > 0) {
     return { problems, checks: [], rows: [] }
   }
   return {
     problems: [],
     checks,
+    names,
     rows: items.map((item, i) => ({
       row: i + 1,
       item,
@@ -710,6 +820,9 @@ function fieldCell(item: Planned, field: Field): string {
   }
   if (text && item.derived?.includes(field)) {
     return `${text} (sub-issues)`
+  }
+  if (text && item.fromParent?.includes(field)) {
+    return `${text} (parent)`
   }
   return item.defaults?.includes(field) && text ? `${text} (default)` : text
 }
@@ -800,6 +913,115 @@ export function filedIssues(plan: Plan): FiledIssue[] {
     }))
 }
 
+const MAX_CANDIDATES = 5
+const MAX_LINKED_CANDIDATES = 3
+
+function candidateLine(c: Ranked): string {
+  const flags = [
+    c.exact ? "exact title" : "",
+    c.searchRank ? `search #${c.searchRank}` : "",
+    c.sameSource ? "same notes" : "",
+    c.issue.open === false ? "closed" : "",
+  ].filter(Boolean)
+  const head = [c.score.toFixed(2), ...flags].join(", ")
+  const parent = c.issue.parent ? ` parent=${c.issue.parent}` : ""
+  const prs = (c.issue.pullRequests ?? []).length
+  return `  CANDIDATE ${head} ${issueText(c)}${parent}${prs > 0 ? ` prs=${prs}` : ""}`
+}
+
+function issueText(c: Ranked): string {
+  const state = c.issue.state ? ` [${c.issue.state}]` : ""
+  const url = c.issue.url ? ` ${c.issue.url}` : ""
+  return `${c.issue.identifier} "${cell(c.issue.title)}"${state}${url} (${c.entry})`
+}
+
+/**
+ * Ranks every entry's issues against each item, and sets `match` on an item
+ * that has none when one is certain (the same title, or filed from the same
+ * notes) and no other item claims it. Returns the lines to judge the rest by.
+ */
+export function matchPlan(
+  plan: Plan,
+  entries: Record<string, EntryIssues>,
+  options: { key?: string; mark?: string; branch?: string } = {},
+): string[] {
+  const canMatch = canMatchFor(entries, options.branch)
+  const ranked = new Map<string, Ranked[]>()
+  for (const item of plan.items) {
+    ranked.set(
+      item.key,
+      Object.entries(entries)
+        .flatMap(([entry, found]) =>
+          rankCandidates(item, entry, found.issues, {
+            key: options.key,
+            mark: options.mark,
+            hits: found.hits?.[item.key],
+          }),
+        )
+        .sort(
+          (a, b) =>
+            Number(b.exact) - Number(a.exact) ||
+            b.fused - a.fused ||
+            b.score - a.score,
+        ),
+    )
+  }
+  const proposals = new Map<string, Ranked>()
+  for (const item of plan.items) {
+    if (item.match !== undefined) {
+      continue
+    }
+    const chosen = certainMatch(ranked.get(item.key) ?? [], canMatch)
+    if (chosen) {
+      proposals.set(item.key, chosen)
+    }
+  }
+  const claimed = [
+    ...[...proposals.values()].map((c) => c.issue.identifier),
+    ...plan.items.filter((i) => !isNew(i)).map((i) => i.match as string),
+  ]
+  const why = new Map<string, Ranked>()
+  for (const [key, chosen] of proposals) {
+    const id = chosen.issue.identifier
+    if (claimed.filter((c) => c === id).length === 1) {
+      const item = plan.items.find((i) => i.key === key) as PlanItem
+      item.match = id
+      why.set(key, chosen)
+    }
+  }
+  // Only issues an item now holds; one two items wanted stays a candidate.
+  const taken = new Set(
+    plan.items.filter((i) => !isNew(i)).map((i) => i.match as string),
+  )
+  const lines: string[] = []
+  for (const item of plan.items) {
+    lines.push(`ITEM ${item.key} "${cell(item.title)}"`)
+    const all = ranked.get(item.key) ?? []
+    const auto = why.get(item.key)
+    if (auto) {
+      lines.push(
+        `  MATCH ${auto.exact ? "exact title" : "same notes"} ${issueText(auto)}`,
+      )
+    } else if (item.match === "new") {
+      lines.push("  NEW (forced)")
+    } else if (item.match !== undefined) {
+      lines.push(`  MATCH set before ${item.match}`)
+    }
+    const others = all.filter((c) => !taken.has(c.issue.identifier))
+    const shown = [
+      ...others.filter((c) => !entries[c.entry]?.link).slice(0, MAX_CANDIDATES),
+      ...others
+        .filter((c) => entries[c.entry]?.link)
+        .slice(0, MAX_LINKED_CANDIDATES),
+    ]
+    lines.push(...shown.map(candidateLine))
+    if (item.match === undefined && shown.length === 0) {
+      lines.push("  NEW")
+    }
+  }
+  return lines
+}
+
 /** The current cycle's start, from the first tracker entry's options. */
 function currentCycleStart(plan: Plan): string | undefined {
   const first = Object.values(plan.options ?? {})[0]
@@ -861,6 +1083,9 @@ function check(args: Args): void {
     return
   }
   const lines = [renderTable(checked.rows), "", summaryLine(checked.rows)]
+  if (checked.names?.length) {
+    lines.push("", ...checked.names.map((n) => `NAME ${n}`))
+  }
   if (checked.checks.length > 0) {
     lines.push("", ...checked.checks.map((c) => `CHECK ${c}`))
   }
@@ -903,6 +1128,29 @@ function notes(args: Args): void {
   })
 }
 
+function match(args: Args): void {
+  const file = requiredFlag(args, "plan")
+  const plan = readPlan(file)
+  const entries = readJson<Record<string, EntryIssues>>(
+    requiredFlag(args, "issues"),
+  )
+  const notesFile = args.get("notes")
+  const notesText = notesFile ? readText(notesFile) : ""
+  const source = plan.source ?? {}
+  // Pasted notes are known by their text; with neither, nothing was filed from them.
+  const key =
+    source.url?.trim() || notesText.trim()
+      ? sourceKey(source, notesText)
+      : undefined
+  const lines = matchPlan(plan, entries, {
+    key,
+    mark: readRules(repoRoot()).blockerMark,
+    branch: args.get("branch"),
+  })
+  fs.writeFileSync(file, `${JSON.stringify(plan, null, 2)}\n`)
+  console.log(lines.join("\n"))
+}
+
 function planning(args: Args): void {
   const plan = readPlan(requiredFlag(args, "plan"))
   const file = requiredFlag(args, "description")
@@ -927,8 +1175,16 @@ const USAGE = `Usage: tickets.ts <command>
                   writing anything. Prints PROBLEM lines and exits 1 when it
                   can't be filed; otherwise the table (rows in the order apply
                   files them, parents first, then parents outside the plan its
-                  sub-issues move up), a SUMMARY line, and CHECK lines that
-                  need an answer first.
+                  sub-issues move up), a SUMMARY line, NAME lines for each
+                  project or label the plan named in part (with the tracker's
+                  full name), and CHECK lines that need an answer first.
+  match --plan <file> --issues <file> [--notes <file>] [--branch <branch>]
+                  Rank each entry's issues (--issues: {"<entry>": {"link",
+                  "issues", "hits": {"<key>": [<id>...]}}}) against each item
+                  by shared words and the search's own rank, and set "match"
+                  on an item that has none when it's certain: the only open
+                  issue with the same title, or one filed from the same notes.
+                  Prints ITEM, MATCH, CANDIDATE, and NEW lines.
   record --plan <file> --key <key> --id <id> [--url <url>]
                   Save an issue apply just filed as the item's match, so a
                   re-run updates it instead of filing it again.
@@ -950,6 +1206,7 @@ Exits 2 on bad arguments or a plan it can't read.`
 
 const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   check,
+  match,
   record,
   ids,
   notes,

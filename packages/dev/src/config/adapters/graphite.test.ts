@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { downstackOf } from "./graphite.ts"
+import { downstackOf, graphitePrUrl, prUrl } from "./graphite.ts"
 
 // main ← a ← b ← c, with d also on a and e on c; x stands alone on main.
 const PARENTS = new Map([
@@ -47,5 +47,23 @@ describe("downstackOf", () => {
       ["q", "p"],
     ])
     expect(downstackOf("p", "main", cycle).chain).toEqual(["q", "p"])
+  })
+})
+
+describe("prUrl", () => {
+  it("gives a GitHub pull request's Graphite link, and none for another host", async () => {
+    expect(graphitePrUrl("https://github.com/acme/web/pull/42")).toBe(
+      "https://app.graphite.com/github/pr/acme/web/42",
+    )
+    expect(
+      graphitePrUrl("https://gitlab.com/acme/web/-/merge_requests/4"),
+    ).toBe(null)
+    expect(
+      await prUrl.run({
+        values: {},
+        args: { url: "https://github.com/acme/web/pull/7/files" },
+        fetch,
+      }),
+    ).toEqual({ url: "https://app.graphite.com/github/pr/acme/web/7" })
   })
 })

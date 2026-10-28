@@ -58,7 +58,8 @@ already working on it, without asking first.
     a short title for the work, then this session does it
   - --confirm: shows what it will file and start, and asks once first
   - --section <name>: puts the workspaces in that sidebar section; without
-    it they go in this workspace's section, or none when it has none
+    it they go in this workspace's section, or none when it has none (or
+    with --project)
   - --section-by-rank: puts each in the section named after its issue's
     priority (Urgent, High, …, or the repo's own names), making it if needed
   - --no-section: puts the workspaces in no section
@@ -114,10 +115,10 @@ integration (a workspace app, or plain git worktrees); set it up with
 2. **Decide.** Run it with the section flag when one was given:
 
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT}/src/commands/work.ts" plan --input <dir>/start.json [--section "<name>" | --section-by-rank | --no-section] [--ranks <names>]
+   node "${CLAUDE_PLUGIN_ROOT}/src/commands/work.ts" plan --input <dir>/start.json [--section "<name>" | --section-by-rank | --no-section] [--project] [--ranks <names>]
    ```
 
-   When the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they point to for ranking work) name the priorities their own way (P0, P1, …), pass `--ranks` with their names for `urgent`, `high`, `medium`, `low`, and no priority, in that order (`--ranks Urgent,P0,P1,P2,Audit`). It writes nothing to any tracker. Exit code 2 is bad input: fix `start.json` and run it again. It prints one line per issue:
+   When the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they point to for ranking work) name the priorities their own way (P0, P1, …), pass `--ranks` with their names for `urgent`, `high`, `medium`, `low`, and no priority, in that order (`--ranks Urgent,P0,P1,P2,Audit`). Pass `--project` with `--project <name>`: without a section flag, a workspace in another project then goes in no section, since this one's sections aren't that project's. It writes nothing to any tracker. Exit code 2 is bad input: fix `start.json` and run it again. It prints one line per issue:
    - `START`: a new workspace on `branch` (`exact=yes` when the issue's own `> Branch:` line named it; `no` lets the integration put it under its prefix), in `section`, with the agent's prompt in `prompt`. `state=move` means the issue hasn't started yet, so it moves to in progress.
    - `EXISTS`: a workspace is already on the issue's branch. `branch-line=add` means the issue has no `> Branch:` line yet, and `state=move` that it moves to in progress.
    - `SKIP`: done, canceled, or not found.

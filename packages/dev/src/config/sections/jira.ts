@@ -8,6 +8,8 @@ const JQL =
   '`project = {projectKey} AND statusCategory != Done AND text ~ "<branch>"`'
 const SEARCH_JQL =
   '`project = {projectKey} AND text ~ "<text>" AND (statusCategory != Done OR resolved >= -90d) ORDER BY relevance`'
+const RECENT_JQL =
+  "`project = {projectKey} AND (statusCategory != Done OR resolved >= -90d)`"
 const ASSIGNED_JQL =
   "`project = {projectKey} AND assignee = currentUser() AND statusCategory != Done`"
 const ASSIGNED_FIELDS =
@@ -129,6 +131,10 @@ export const jira: IntegrationSpec = {
       searchIssues: {
         mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${SEARCH_JQL}, \`maxResults: 10\`, and fields \`summary\`, \`status\`, \`description\`, and \`parent\`. Then try two or three shorter queries from the text's key words, since \`text ~\` matches words, not meaning`,
         api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${SEARCH_JQL}, \`maxResults: 10\`, and \`fields: ["summary", "status", "description", "parent"]\`. Then try two or three shorter queries from the text's key words`,
+      },
+      recentIssues: {
+        mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${RECENT_JQL} and fields \`summary\`, \`status\`, \`description\`, and \`parent\`, following \`nextPageToken\` to the last page. Its URL is \`https://{site}/browse/<ID>\`, and a pull request shows in its development panel`,
+        api: `\`POST https://{site}/rest/api/3/search/jql\` (${AUTH}) with JSON \`jql\` ${RECENT_JQL} and \`fields: ["summary", "status", "description", "parent"]\`, following \`nextPageToken\` to the last page. Its URL is \`https://{site}/browse/<ID>\``,
       },
       assignedIssues: {
         mcp: `The Atlassian MCP's \`searchJiraIssuesUsingJql\` on \`{site}\` with ${ASSIGNED_JQL} and fields ${ASSIGNED_FIELDS}, following \`nextPageToken\` to the last page. Its URL is \`https://{site}/browse/<ID>\`, an open sub-issue is a subtask whose status isn't done, and a pull request shows in its development panel`,

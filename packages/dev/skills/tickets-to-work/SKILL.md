@@ -34,7 +34,7 @@ If the argument is `help`, print the block below verbatim and stop.
 
 Goes through your open issues that have no pull request, workspace, or git
 worktree yet, most urgent first (then the ones whose title has the team's
-blocker mark, then the ones blocking other work, then the earliest due),
+blocker mark, then the earliest due, then the ones blocking other work),
 and asks about each one:
   - Start: opens a workspace with a coding agent on it and moves the issue
     to in progress (/dev-flows:start-work)

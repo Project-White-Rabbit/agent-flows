@@ -21,7 +21,7 @@ Winds down a branch whose work is being abandoned: the destructive sibling of `/
 - **Act through the integrations' ops.** Pull requests and issues are reached only through the ops `configure.ts integrations` returns, run as given. Plain `git` is fine for the remote branch and everything local.
 - **A failed read is not an absence.** A lookup that errors (sign-in, rate limit, network) stops the command before any write: mistaking it for "no pull request" could delete a branch out from under an open one.
 - **Never touch the local branch or working tree:** no `git branch -D`, no switching branches, no reset or stash. Only what's remote, and what the repo's own hooks tear down.
-- **Change only the issue the branch names,** or one the person picks. An issue another open pull request is attached to stays open.
+- **Change only the issue the branch names,** or one the person picks. An issue another pull request is attached to (open or merged) stays open, and one found only by its `> Branch:` line or a search is asked about, never changed in `force` mode.
 - **Run the repo's hooks around this command.** Skip this when the mode is `help`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run before --flow close --mode <mode>`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run close.after after --flow close --mode <mode> --branch <branch> --pr <N> --outcome <success, when it did its job, else failure>`, leaving out a flag whose value isn't known yet. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest; a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). An exit of 2 means bad arguments or an invalid config: relay its message and stop. At the end, a `stop` can't happen: report the `failures`. Say in the report which hooks ran at each point, what any task for you changed, and what failed.
 
 ## Modes
@@ -54,8 +54,8 @@ If mode is `help`, print the block below verbatim and exit. No reads, no writes.
 > What it does, each only when it applies:
 >   - closes the pull request
 >   - deletes the remote branch
->   - cancels the issue the branch names (left open when another open pull request is attached to it)
->   - when the branch names no issue, searches for it and asks which one, if any, to cancel or mark done
+>   - cancels the issue the branch names (left open when another pull request, open or merged, is attached to it)
+>   - when the branch names no issue, looks for one (a `> Branch:` line naming the branch, then a search) and asks which, if any, to cancel or mark done; `force` changes none of them
 >   - runs the repo's teardown (`close.after` hooks)
 >
 > It never deletes the local branch, switches branches, or touches the working tree. It refuses on the base branch, on a branch other branches are stacked on, and on a pull request that merged.
