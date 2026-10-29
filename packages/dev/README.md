@@ -36,6 +36,8 @@ Claude Code doesn't auto-update plugins from this marketplace unless you turn it
 
 The repo's shared dev configuration, committed so the whole team uses the same values. It holds configuration only (ids, slugs, branch names): no secrets, and nothing that points at one. Credentials stay with each integration's own CLI, MCP server, or environment.
 
+Configure writes it only when its content changes; a different layout or key order doesn't count. After a write it formats just that file with the repo's installed Biome (`biome.json`) or Prettier (`.prettierrc*`, `prettier.config.*`, or a `prettier` key in `package.json`), so a lint fix that formats JSON doesn't undo it. Without one, or when the formatter isn't installed or fails, the file keeps the plain two-space layout.
+
 ```json
 {
   "version": 2,

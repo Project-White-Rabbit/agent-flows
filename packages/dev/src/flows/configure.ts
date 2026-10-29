@@ -357,7 +357,7 @@ JSON
 
 A list entry replaces the whole list, so include every instance you're keeping: \`"integrations.vercel": [{"name": "web", ...}, {"name": "docs", ...}]\`.
 
-It validates the whole result and writes only if the content changed, in a fixed order, so the same answers always produce the same file. On issues it prints them with \`"written": false\` and exits 1: fix each one and run it again. \`warnings\` (unknown sections or fields it kept) are worth mentioning but don't block.`,
+It validates the whole result and writes only if the content changed (a different layout or key order doesn't count), with sections in a fixed order, so the same answers always produce the same config. It then lays the file out with the repo's own Biome or Prettier, when one is installed, so the next lint fix leaves it alone: \`"formatted"\` names the formatter, or is \`false\` with a \`formatReason\`. On issues it prints them with \`"written": false\` and exits 1: fix each one and run it again. \`warnings\` (unknown sections or fields it kept) are worth mentioning but don't block.`,
           next: "configure/report",
         },
         {
@@ -373,7 +373,7 @@ It validates the whole result and writes only if the content changed, in a fixed
 
 Show it as one table: section (with the instance name, for a list), its fields and values, and what the team uses it for (\`use\`). Then list the \`skipped\` sections, and any \`warnings\`.
 
-Say what changed in \`{{configPath}}\`, or that nothing did (\`"written": false\` with no issues). Then, from \`coverage\`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from \`access\`, plus your MCP check; for the API, \`access.api.source\`, which says where the token comes from, never what it is), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (\`access.cli.auth\`), or record where its token is (\`token\`). That part is about this machine only and never goes in the config. If the file changed, remind the user to commit it so the team shares it.`,
+Say what changed in \`{{configPath}}\`, or that nothing did (\`"written": false\` with no issues). When it was written with \`"formatted": false\` and a \`formatReason\` other than \`no formatter configured\`, say the file isn't in the repo's format yet and why (a formatter that isn't installed usually means the repo's install hasn't run in this checkout). Then, from \`coverage\`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from \`access\`, plus your MCP check; for the API, \`access.api.source\`, which says where the token comes from, never what it is), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (\`access.cli.auth\`), or record where its token is (\`token\`). That part is about this machine only and never goes in the config. If the file changed, remind the user to commit it so the team shares it.`,
           next: null,
         },
       ],

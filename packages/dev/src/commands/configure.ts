@@ -20,9 +20,11 @@ import {
   planConfig,
   type RawConfig,
   resolveSections,
+  sameConfig,
   serializeConfig,
 } from "../config/config.ts"
 import { createDetectContext, detectSections } from "../config/detect.ts"
+import { type FormatResult, formatFile } from "../config/format.ts"
 import {
   type HookSuggestion,
   suggestHooks,
@@ -433,6 +435,37 @@ function parsePatch(input: string): ConfigPatch {
   return patch as ConfigPatch
 }
 
+function readJson(file: string): unknown {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"))
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Write the config, then lay it out with the repo's formatter. A formatter
+ * that changed what the file holds is undone: the file must stay this config.
+ */
+function writeFormatted(
+  root: string,
+  configPath: string,
+  config: RawConfig,
+): FormatResult {
+  const content = serializeConfig(config)
+  fs.mkdirSync(path.dirname(configPath), { recursive: true })
+  fs.writeFileSync(configPath, content)
+  const result = formatFile(root, path.relative(root, configPath))
+  if (result.formatted && !sameConfig(readJson(configPath), config)) {
+    fs.writeFileSync(configPath, content)
+    return {
+      formatted: false,
+      reason: `${result.formatted} changed the config's content`,
+    }
+  }
+  return result
+}
+
 async function write(root: string): Promise<void> {
   const patch = parsePatch(await readStdin())
   const current = loadConfig(root)
@@ -461,22 +494,24 @@ async function write(root: string): Promise<void> {
     process.exitCode = 1
     return
   }
-  // Leave the file alone when nothing changed, so re-running is a no-op.
-  const content = serializeConfig(next)
-  let existing: string | undefined
-  try {
-    existing = fs.readFileSync(current.configPath, "utf8")
-  } catch {
-    existing = undefined
-  }
-  const changed = existing !== content
+  // Leave the file alone when its content is the same, however it's laid out,
+  // so re-running is a no-op.
+  const changed = !sameConfig(readJson(current.configPath), next)
+  let format: FormatResult | undefined
   if (changed) {
-    fs.mkdirSync(path.dirname(current.configPath), { recursive: true })
-    fs.writeFileSync(current.configPath, content)
+    format = writeFormatted(root, current.configPath, next)
   }
   printJson({
     configPath: current.configPath,
     written: changed,
+    ...(format
+      ? {
+          formatted: format.formatted,
+          ...(format.formatted === false
+            ? { formatReason: format.reason }
+            : {}),
+        }
+      : {}),
     config: next,
     coverage: coverage(next),
     ...(warnings.length > 0 ? { warnings } : {}),
@@ -523,7 +558,10 @@ const HELP = `Usage: configure.ts <command>
                   named instances, for an integration configured more than
                   once), null removes it, skip marks sections as deliberately
                   not configured.
-                  Validates, and writes only if the content changed; on issues,
+                  Validates, and writes only if the content changed (layout
+                  and key order don't count), then formats the file with the
+                  repo's installed Biome or Prettier, if any ("formatted",
+                  and "formatReason" when it couldn't). On issues,
                   prints them and exits 1. An invalid file is patched as it
                   stands, so a write that fixes it goes through; one that
                   isn't a config at all (bad JSON, a newer version) has to be

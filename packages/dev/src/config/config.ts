@@ -477,6 +477,33 @@ export function serializeConfig(config: RawConfig): string {
   return `${JSON.stringify(config, null, 2)}\n`
 }
 
+/**
+ * True when two JSON values hold the same config: arrays in the same order,
+ * objects with the same keys in any order. A file the repo's formatter laid
+ * out, or someone reordered by hand, is the same config as long as this holds.
+ */
+export function sameConfig(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, i) => sameConfig(item, b[i]))
+    )
+  }
+  if (isRecord(a) || isRecord(b)) {
+    if (!isRecord(a) || !isRecord(b)) {
+      return false
+    }
+    const keys = Object.keys(a)
+    return (
+      keys.length === Object.keys(b).length &&
+      keys.every((k) => Object.hasOwn(b, k) && sameConfig(a[k], b[k]))
+    )
+  }
+  return a === b
+}
+
 export type PlannedChange =
   | { section: string; kind: "add"; values: SectionEntry; evidence: string[] }
   | {
