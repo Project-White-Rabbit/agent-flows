@@ -10,6 +10,7 @@ import { parseGraphiteConfig } from "./graphite.ts"
 import { INTEGRATIONS, SECTIONS } from "./index.ts"
 import { inferJiraProject, jiraLinkedKeys } from "./jira.ts"
 import { inferLinearTeamKey } from "./linear.ts"
+import { detectReady, ready } from "./ready.ts"
 import { parseSentryConfig } from "./sentry.ts"
 import { BITFAB_DEV_FORMAT, sync } from "./sync.ts"
 
@@ -394,5 +395,248 @@ describe("instance names", () => {
         { preferred: "apps-web-2", fallback: "x" },
       ]),
     ).toEqual(["apps-web", "apps-web-2", "apps-web-2-2"])
+  })
+})
+
+/** A checkout made of `files`, every one tracked; JSON files given as objects. */
+function checkout(files: Record<string, unknown>): DetectContext {
+  const text = (file: string) => {
+    const value = files[file]
+    return typeof value === "string" || value === undefined
+      ? value
+      : JSON.stringify(value)
+  }
+  const tracked = Object.keys(files)
+  const manifests = tracked.filter((f) => f.endsWith("package.json"))
+  return {
+    tracked,
+    packageDirs: [
+      "",
+      ...manifests
+        .filter((f) => f !== "package.json")
+        .map((f) => f.slice(0, -"/package.json".length)),
+    ],
+    read: text,
+    readJson: (file: string) =>
+      files[file] === undefined ? undefined : JSON.parse(text(file) as string),
+    dependsOn: (pattern: RegExp) =>
+      manifests.flatMap((file) => {
+        const manifest = files[file] as Record<string, object | undefined>
+        return Object.keys({
+          ...manifest.dependencies,
+          ...manifest.devDependencies,
+        })
+          .filter((name) => pattern.test(name))
+          .map((name) => `${file} depends on ${name}`)
+      }),
+  } as DetectContext
+}
+
+/** mxpt's scripts: one root package, bun, vitest. */
+const MXPT_SCRIPTS = {
+  "lint:fix": "biome check --write .",
+  format: "biome format --write .",
+  lint: "biome check .",
+  tsc: "react-router typegen && tsc",
+  typecheck: "react-router typegen && tsc",
+  knip: "knip",
+  test: "vitest run",
+  validate:
+    "bun run lint:fix && bun run tsc && bun run knip && bun run db:migrate:check",
+  "db:migrate:check": "bun scripts/check-migrations.ts",
+  "check-all": "bun run validate && bun run test",
+}
+
+describe("ready detection", () => {
+  it("proposes the validate script, its fix first, and the tests a branch changed", () => {
+    // check-all runs the whole suite on top of validate, so it's no candidate.
+    expect(
+      ready.detect?.(
+        checkout({
+          "bun.lock": "",
+          "package.json": {
+            scripts: MXPT_SCRIPTS,
+            devDependencies: { vitest: "4" },
+          },
+        }),
+      ),
+    ).toEqual({
+      values: {
+        fix: ["bun run lint:fix"],
+        checks: ["bun run validate", "bunx vitest run --changed {base}"],
+      },
+      evidence: [
+        "package.json has a validate script (lint:fix, tsc, knip, db:migrate:check); none of its steps, or the scripts they call, deploy, publish, migrate, or write to a shared service",
+        "package.json depends on vitest, and validate runs no tests: ready runs the ones changed since the merge base",
+      ],
+    })
+  })
+
+  it("takes a check that runs the tests as it is, with every fix script", () => {
+    expect(
+      ready.detect?.(
+        checkout({
+          "package.json": {
+            scripts: {
+              "lint:fix": "eslint --fix .",
+              format: "prettier --write .",
+              ci: "npm run lint && jest",
+            },
+            devDependencies: { jest: "30" },
+          },
+        }),
+      )?.values,
+    ).toEqual({
+      fix: ["npm run lint:fix", "npm run format"],
+      checks: ["npm run ci"],
+    })
+  })
+
+  it("runs jest's changed tests through the runner, and reads run-s and npm-run-all", () => {
+    expect(
+      ready.detect?.(
+        checkout({
+          "pnpm-lock.yaml": "",
+          "package.json": {
+            scripts: {
+              lint: "eslint .",
+              "lint:types": "tsc",
+              verify: "run-s 'lint:*'",
+            },
+            devDependencies: { jest: "30" },
+          },
+        }),
+      ),
+    ).toEqual({
+      values: {
+        checks: ["pnpm run verify", "pnpm exec jest --changedSince={base}"],
+      },
+      evidence: [
+        "package.json has a verify script (lint:types); none of its steps, or the scripts they call, deploy, publish, migrate, or write to a shared service",
+        "package.json depends on jest, and verify runs no tests: ready runs the ones changed since the merge base",
+      ],
+    })
+  })
+
+  it.each([
+    ["deploys", "bun run lint && vercel deploy --prebuilt"],
+    ["migrates", "bun run lint && prisma migrate deploy"],
+    ["calls a script that migrates", "bun run lint && bun run db:migrate"],
+  ])("proposes nothing when the check %s", (_why, validate) => {
+    expect(
+      detectReady(
+        checkout({
+          "package.json": {
+            scripts: {
+              lint: "biome check .",
+              "db:migrate": "prisma migrate dev",
+              validate,
+            },
+          },
+        }),
+      ),
+    ).toBeUndefined()
+  })
+
+  it("lets a migration check that only reads through", () => {
+    expect(
+      ready.detect?.(
+        checkout({
+          "package.json": {
+            scripts: { validate: "tsc && prisma migrate diff --exit-code" },
+          },
+        }),
+      )?.values,
+    ).toEqual({ checks: ["npm run validate"] })
+  })
+
+  it("passes over an unsafe check for a safe one, and says why", () => {
+    const detection = ready.detect?.(
+      checkout({
+        "package.json": {
+          scripts: {
+            validate: "tsc && vercel deploy",
+            ci: "tsc && eslint .",
+          },
+        },
+      }),
+    )
+    expect(detection?.values).toEqual({ checks: ["npm run ci"] })
+    expect(detection?.evidence).toContain(
+      "package.json's validate script runs `vercel deploy`, so ready can't run it",
+    )
+  })
+
+  it("names the other candidates, so configure asks", () => {
+    const detection = ready.detect?.(
+      checkout({
+        "package.json": {
+          scripts: { validate: "tsc && eslint .", ci: "tsc && next build" },
+        },
+      }),
+    )
+    expect(detection?.values).toEqual({ checks: ["npm run validate"] })
+    expect(detection?.evidence.at(-1)).toBe(
+      "package.json also has a ci script (tsc, next build); ask which one ready runs",
+    )
+  })
+
+  it("proposes nothing without a root script that runs the whole check", () => {
+    // One tool isn't the whole check, and a package's own scripts are what
+    // ready runs per touched package anyway.
+    expect(
+      detectReady(
+        checkout({
+          "package.json": {
+            scripts: { check: "biome check .", lint: "biome check" },
+          },
+        }),
+      ),
+    ).toBeUndefined()
+    expect(
+      detectReady(
+        checkout({
+          "package.json": { scripts: { dev: "turbo dev" } },
+          "apps/web/package.json": {
+            scripts: {
+              validate: "tsc && eslint .",
+              "lint:fix": "eslint --fix",
+            },
+          },
+          "apps/api/package.json": {
+            scripts: { validate: "tsc && vitest run" },
+          },
+        }),
+      ),
+    ).toBeUndefined()
+  })
+
+  it("reads a monorepo's root check through the packages it filters", () => {
+    expect(
+      detectReady(
+        checkout({
+          "bun.lock": "",
+          "package.json": {
+            scripts: {
+              "lint:fix": "biome check --write",
+              validate: "bun run lint && bun run --filter @acme/web validate",
+            },
+          },
+          "apps/web/package.json": {
+            name: "@acme/web",
+            scripts: { validate: "tsc && vitest run" },
+          },
+          "apps/api/package.json": {
+            name: "@acme/api",
+            scripts: { validate: "tsc && prisma migrate deploy" },
+          },
+        }),
+      )?.detection,
+    ).toEqual({
+      values: { fix: ["bun run lint:fix"], checks: ["bun run validate"] },
+      evidence: [
+        "package.json has a validate script (bun run lint, validate in apps/web); none of its steps, or the scripts they call, deploy, publish, migrate, or write to a shared service",
+      ],
+    })
   })
 })

@@ -407,6 +407,81 @@ describe("planConfig", () => {
   })
 })
 
+describe("planConfig for ready", () => {
+  const detected = {
+    ready: {
+      values: {
+        fix: ["bun run lint:fix"],
+        checks: ["bun run validate", "bunx vitest run --changed {base}"],
+      },
+      evidence: ["package.json has a validate script"],
+    },
+  }
+
+  it("adds a detected ready section like any other", () => {
+    const plan = planConfig(base, detected, SECTIONS)
+    expect(plan.changes).toEqual([
+      {
+        section: "ready",
+        kind: "add",
+        values: detected.ready.values,
+        evidence: detected.ready.evidence,
+      },
+    ])
+  })
+
+  it("fills only the empty fields of a configured ready, and keeps its hooks", () => {
+    const hook = { name: "bump", run: "bun run check-version" }
+    const config = applyPatch(base, {
+      sections: {
+        ready: { skip: ["tests"], ignoreChecks: ["Vercel*"], before: [hook] },
+      },
+    })
+    const plan = planConfig(config, detected, SECTIONS)
+    const fills = plan.changes.flatMap((c) =>
+      c.kind === "fill" ? [[c.field, c.value] as const] : [],
+    )
+    expect(fills).toEqual([
+      ["fix", ["bun run lint:fix"]],
+      ["checks", ["bun run validate", "bunx vitest run --changed {base}"]],
+    ])
+    // The write replaces the section, so it carries the fields already there.
+    const filled = applyPatch(config, {
+      sections: {
+        ready: {
+          ...(config.ready as object),
+          ...Object.fromEntries(fills),
+        },
+      },
+    })
+    expect(filled.ready).toEqual({
+      fix: ["bun run lint:fix"],
+      checks: ["bun run validate", "bunx vitest run --changed {base}"],
+      skip: ["tests"],
+      ignoreChecks: ["Vercel*"],
+      before: [hook],
+    })
+  })
+
+  it("never replaces checks the team set", () => {
+    const config = applyPatch(base, {
+      sections: { ready: { checks: ["make check"] } },
+    })
+    const plan = planConfig(config, detected, SECTIONS)
+    expect(plan.changes).toEqual([
+      expect.objectContaining({ section: "ready", kind: "fill", field: "fix" }),
+    ])
+    expect(plan.conflicts).toEqual([
+      {
+        section: "ready",
+        field: "checks",
+        configured: ["make check"],
+        detected: detected.ready.values.checks,
+      },
+    ])
+  })
+})
+
 describe("planConfig with instances", () => {
   it("proposes every detected instance as a list, with needs per instance", () => {
     const plan = planConfig(

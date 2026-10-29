@@ -132,6 +132,40 @@ describe("detect", () => {
   })
 })
 
+describe("detect ready", () => {
+  let dir: string | undefined
+  afterEach(() => {
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("proposes the root's validate script and the tests a branch changed", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-detect-"))
+    const root = dir
+    fs.writeFileSync(path.join(root, "bun.lock"), "")
+    fs.writeFileSync(
+      path.join(root, "package.json"),
+      JSON.stringify({
+        scripts: {
+          "lint:fix": "biome check --write .",
+          tsc: "tsc",
+          test: "vitest run",
+          validate: "bun run lint:fix && bun run tsc",
+          "check-all": "bun run validate && bun run test",
+        },
+        devDependencies: { vitest: "4" },
+      }),
+    )
+    execFileSync("git", ["-C", root, "init", "-q"])
+    execFileSync("git", ["-C", root, "add", "."])
+    expect(detectSections(createDetectContext(root)).ready?.values).toEqual({
+      fix: ["bun run lint:fix"],
+      checks: ["bun run validate", "bunx vitest run --changed {base}"],
+    })
+  })
+})
+
 describe("pythonDependencyNames", () => {
   it("reads requirements files", () => {
     expect(

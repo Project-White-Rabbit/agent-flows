@@ -274,6 +274,7 @@ Route on the result:
 - Lookups: a lookup with exactly one result is the answer. Ask when it returns several (two Vercel projects, several Linear teams) or none.
 - Several integrations detected for one capability, \`plan.conflicts\`, and \`plan.moreInstances\`: ask.
 - A section that can't be filled without the user and isn't worth asking about: leave it out of this run rather than skipping it.
+- \`ready\`: a detected \`fix\` and \`checks\` is one clear answer: take it without asking. When its \`evidence\` names other candidate scripts ("also has a … script"), ask which one ready runs.
 - Hooks: never add any. When \`hookSuggestions\` has some, list them in confirm as available, with \`{{cmd}}configure hooks\` (or \`ready\`, \`merge\`) to set them up.
 
 **Manual: one section at a time.** Go through the \`requested\` sections in the sections table's order. For each, show what's configured (and any of its \`plan.moreInstances\`), what was detected, and how this machine reaches it, then {{askVerb}} whether to configure it, keep it as it is, or skip it, then ask the questions below for that section only before moving on. Recommend keeping what's configured, and configuring what was detected or is in reach.
@@ -346,7 +347,7 @@ Then {{askVerb}}:
           kind: "action",
           title: "Write",
           commandCalls: ["configure"],
-          body: `Pass only what changes on stdin, keyed by section path. Each section you include **replaces** that section's whole entry (so include its existing fields too); \`null\` removes one; \`skip\` marks sections as deliberately not configured; everything you omit stays as it is.
+          body: `Pass only what changes on stdin, keyed by section path. Each section you include **replaces** that section's whole entry (so include its existing fields too: filling \`ready\`'s \`fix\` and \`checks\` keeps its \`skip\`, \`ignoreChecks\`, and hooks); \`null\` removes one; \`skip\` marks sections as deliberately not configured; everything you omit stays as it is.
 
 \`\`\`bash
 {{command:configure}} write <<'JSON'
