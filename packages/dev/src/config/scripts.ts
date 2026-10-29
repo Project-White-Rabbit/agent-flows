@@ -75,9 +75,12 @@ export function binCommand(runner: Runner, bin: string): string {
 export const UNSAFE_COMMAND =
   /\b(?:publish|deploy|release|push|upload|apply|seed)\b|\bmigrate\b(?![\s:_-]*(?:diff|check|status|verify|lint)\b)/i
 
+/** A test runner's binary, however it's run: `vitest`, `bunx vitest`, `node_modules/.bin/jest`. */
+const RUNNER_BIN = /(?:^|[\s/])(vitest|jest|mocha|ava|pytest)(?=\s|$)/
 /** A command that runs a test suite, rather than only the tests a change touches. */
-const TEST_RUN =
-  /(?:^|[\s/])(?:vitest|jest|mocha|ava|pytest)(?=\s|$)|\bplaywright\s+test\b|\bbun\s+test\b/
+const TEST_RUN = new RegExp(
+  `${RUNNER_BIN.source}|\\bplaywright\\s+test\\b|\\bbun\\s+test\\b`,
+)
 const CHANGED_TESTS = /--changed|--onlyChanged|--findRelatedTests|\brelated\b/
 
 /** The `scripts` of the package at `dir` ("" for the root). */
@@ -300,4 +303,14 @@ export function runsTests(steps: ScriptStep[]): boolean {
       call.names.some((name) => /^test(?::|$)/.test(name))
     return (TEST_RUN.test(command) || callsTest) && !CHANGED_TESTS.test(command)
   })
+}
+
+/** The test runners a resolved script runs, by binary name, first run first. */
+export function testRunners(steps: ScriptStep[]): string[] {
+  const bins = commandsOf(steps).flatMap((command) =>
+    [...command.matchAll(new RegExp(RUNNER_BIN.source, "g"))].map(
+      (match) => match[1] as string,
+    ),
+  )
+  return [...new Set(bins)]
 }

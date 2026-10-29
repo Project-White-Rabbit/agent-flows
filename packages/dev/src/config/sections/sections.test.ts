@@ -472,6 +472,106 @@ describe("ready detection", () => {
     })
   })
 
+  // A shared stack package can bring the runner in: the root's own
+  // dependencies don't name it, its test scripts and config files do.
+  const { test: _test, ...UNTESTED_SCRIPTS } = MXPT_SCRIPTS
+  const changedTests = (files: Record<string, unknown>) => {
+    const detection = ready.detect?.(checkout({ "bun.lock": "", ...files }))
+    return {
+      checks: detection?.values.checks,
+      evidence: detection?.evidence.at(-1),
+    }
+  }
+
+  it("finds the runner from the root's test script", () => {
+    expect(changedTests({ "package.json": { scripts: MXPT_SCRIPTS } })).toEqual(
+      {
+        checks: ["bun run validate", "bunx vitest run --changed {base}"],
+        evidence:
+          "package.json's test script runs vitest, and validate runs no tests: ready runs the ones changed since the merge base",
+      },
+    )
+  })
+
+  it("finds the runner through the scripts a test script calls", () => {
+    expect(
+      changedTests({
+        "package.json": {
+          scripts: {
+            ...UNTESTED_SCRIPTS,
+            test: "bun run test:unit",
+            "test:unit": "jest",
+          },
+        },
+      }),
+    ).toEqual({
+      checks: ["bun run validate", "bunx jest --changedSince={base}"],
+      evidence:
+        "package.json's test script runs jest, and validate runs no tests: ready runs the ones changed since the merge base",
+    })
+  })
+
+  it("finds the runner from a tracked config file", () => {
+    expect(
+      changedTests({
+        "package.json": { scripts: UNTESTED_SCRIPTS },
+        "vitest.config.ts": "",
+      }),
+    ).toEqual({
+      checks: ["bun run validate", "bunx vitest run --changed {base}"],
+      evidence:
+        "vitest.config.ts is tracked, and validate runs no tests: ready runs the ones changed since the merge base",
+    })
+    expect(
+      changedTests({
+        "package.json": { scripts: UNTESTED_SCRIPTS, jest: {} },
+      }).checks,
+    ).toEqual(["bun run validate", "bunx jest --changedSince={base}"])
+  })
+
+  it("takes the root's dependency over a config file for another runner", () => {
+    expect(
+      changedTests({
+        "package.json": {
+          scripts: UNTESTED_SCRIPTS,
+          devDependencies: { jest: "30" },
+        },
+        "vitest.config.ts": "",
+      }),
+    ).toEqual({
+      checks: ["bun run validate", "bunx jest --changedSince={base}"],
+      evidence:
+        "package.json depends on jest, and validate runs no tests: ready runs the ones changed since the merge base",
+    })
+  })
+
+  it("guesses no runner when the test script runs both", () => {
+    expect(
+      changedTests({
+        "package.json": {
+          scripts: { ...UNTESTED_SCRIPTS, test: "vitest run && jest" },
+        },
+      }),
+    ).toEqual({
+      checks: ["bun run validate"],
+      evidence:
+        "package.json's test script runs vitest and jest, and validate runs no tests: ask which runner's changed tests ready runs, since detection can't tell",
+    })
+  })
+
+  it("adds no changed tests without a runner, or when the check runs the tests", () => {
+    expect(
+      changedTests({ "package.json": { scripts: UNTESTED_SCRIPTS } }).checks,
+    ).toEqual(["bun run validate"])
+    const { validate: _validate, ...scripts } = MXPT_SCRIPTS
+    expect(
+      changedTests({
+        "package.json": { scripts, devDependencies: { vitest: "4" } },
+        "vitest.config.ts": "",
+      }).checks,
+    ).toEqual(["bun run check-all"])
+  })
+
   it("takes a check that runs the tests as it is, with every fix script", () => {
     expect(
       ready.detect?.(
