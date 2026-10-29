@@ -3,6 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterAll, afterEach, describe, expect, it } from "vitest"
+import { CONFIG_VERSION, serializeConfig } from "../config/config.ts"
 
 describe("configure.ts (as a script)", () => {
   let dir: string | undefined
@@ -697,6 +698,177 @@ describe("configure.ts (as a script)", () => {
     )
     expect(onprem.ops.prCommits.cli).toContain(
       "projects/platform%2Fapi/merge_requests/<N>/commits --hostname git.acme.dev:8443",
+    )
+  })
+
+  describe("write keeps the repo's format", () => {
+    const repoRoot = path.resolve(import.meta.dirname, "../../../..")
+    const realBiome = path.join(repoRoot, "node_modules", ".bin", "biome")
+    const patch = JSON.stringify({
+      sections: {
+        repo: { baseBranch: "main" },
+        "integrations.github": { owner: "acme", repo: "web" },
+      },
+      skip: ["integrations.sentry", "integrations.linear"],
+    })
+    // The same config, the way Biome lays it out: short arrays on one line.
+    const collapsed = `{
+  "version": ${CONFIG_VERSION},
+  "repo": {
+    "baseBranch": "main"
+  },
+  "integrations": {
+    "github": {
+      "owner": "acme",
+      "repo": "web"
+    }
+  },
+  "skipped": ["integrations.linear", "integrations.sentry"]
+}
+`
+    const file = (name: string) => path.join(dir as string, name)
+    const read = () => fs.readFileSync(configFile(), "utf8")
+    const put = (content: string) => {
+      fs.mkdirSync(path.dirname(configFile()), { recursive: true })
+      fs.writeFileSync(configFile(), content)
+    }
+    // A formatter binary that records its arguments, writes $STUB_OUTPUT over
+    // the file it's given (when set), and exits $STUB_EXIT.
+    function stub(name: string): void {
+      const bin = file(`node_modules/.bin/${name}`)
+      fs.mkdirSync(path.dirname(bin), { recursive: true })
+      fs.writeFileSync(
+        bin,
+        `#!/bin/sh
+printf '%s\\n' "$@" > "${file("args")}"
+for last; do :; done
+[ -n "$STUB_OUTPUT" ] && printf '%s' "$STUB_OUTPUT" > "$last"
+exit "\${STUB_EXIT:-0}"
+`,
+        { mode: 0o755 },
+      )
+    }
+    const ran = () => fs.existsSync(file("args"))
+
+    it("leaves a formatted file with the same content alone, without formatting it", () => {
+      init()
+      fs.writeFileSync(file("biome.json"), "{}")
+      stub("biome")
+      put(collapsed)
+      const out = json(run(["write"], JSON.stringify({ skip: [] })))
+      expect(out.written).toBe(false)
+      expect(out.formatted).toBeUndefined()
+      expect(read()).toBe(collapsed)
+      expect(ran()).toBe(false)
+      expect(json(run(["write"], patch)).written).toBe(false)
+      expect(read()).toBe(collapsed)
+    })
+
+    it("leaves a hand-reordered file with the same content alone", () => {
+      init()
+      const reordered = `{"skipped": ["integrations.linear", "integrations.sentry"], "integrations": {"github": {"repo": "web", "owner": "acme"}}, "repo": {"baseBranch": "main"}, "version": ${CONFIG_VERSION}}`
+      put(reordered)
+      expect(json(run(["write"], patch)).written).toBe(false)
+      expect(read()).toBe(reordered)
+    })
+
+    it("writes the plain layout when the repo has no formatter, or it isn't installed", () => {
+      init()
+      const plain = json(run(["write"], patch))
+      expect(plain).toMatchObject({
+        written: true,
+        formatted: false,
+        formatReason: "no formatter configured",
+      })
+      expect(read()).toBe(serializeConfig(plain.config))
+
+      fs.rmSync(configFile())
+      fs.writeFileSync(file("biome.json"), "{}")
+      expect(json(run(["write"], patch))).toMatchObject({
+        written: true,
+        formatted: false,
+        formatReason: "biome not installed",
+      })
+      expect(read()).toBe(serializeConfig(plain.config))
+    })
+
+    it("formats only the config file with the repo's formatter after a real change", () => {
+      init()
+      fs.writeFileSync(file("biome.json"), "{}")
+      stub("biome")
+      const out = json(run(["write"], patch, { STUB_OUTPUT: collapsed }))
+      expect(out).toMatchObject({ written: true, formatted: "biome" })
+      expect(out.formatReason).toBeUndefined()
+      expect(fs.readFileSync(file("args"), "utf8")).toBe(
+        "format\n--write\n--no-errors-on-unmatched\n.agent-flows/config.json\n",
+      )
+      expect(read()).toBe(collapsed)
+    })
+
+    it("keeps the plain layout when the formatter fails or changes the content", () => {
+      init()
+      fs.writeFileSync(file("biome.json"), "{}")
+      stub("biome")
+      const failed = run(["write"], patch, { STUB_EXIT: "1" })
+      expect(failed.status).toBe(0)
+      const out = json(failed)
+      expect(out).toMatchObject({
+        written: true,
+        formatted: false,
+        formatReason: "biome exited 1",
+      })
+      expect(read()).toBe(serializeConfig(out.config))
+
+      fs.rmSync(configFile())
+      expect(
+        json(run(["write"], patch, { STUB_OUTPUT: '{"version": 1}\n' })),
+      ).toMatchObject({
+        written: true,
+        formatted: false,
+        formatReason: "biome changed the config's content",
+      })
+      expect(read()).toBe(serializeConfig(out.config))
+    })
+
+    it("uses Prettier when that's what the repo configures, and Biome when it has both", () => {
+      init()
+      fs.writeFileSync(file(".prettierrc"), "{}")
+      stub("prettier")
+      expect(json(run(["write"], patch))).toMatchObject({
+        formatted: "prettier",
+      })
+      expect(fs.readFileSync(file("args"), "utf8")).toBe(
+        "--write\n.agent-flows/config.json\n",
+      )
+
+      fs.rmSync(configFile())
+      fs.writeFileSync(file("biome.json"), "{}")
+      stub("biome")
+      expect(json(run(["write"], patch))).toMatchObject({ formatted: "biome" })
+    })
+
+    it.skipIf(!fs.existsSync(realBiome))(
+      "round-trips through the real Biome",
+      () => {
+        init()
+        fs.writeFileSync(
+          file("biome.json"),
+          '{"formatter": {"indentStyle": "space"}}',
+        )
+        fs.mkdirSync(file("node_modules/.bin"), { recursive: true })
+        fs.symlinkSync(realBiome, file("node_modules/.bin/biome"))
+        // Biome's launcher is a node script.
+        const env = {
+          PATH: `${onlyGit}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
+        }
+        expect(json(run(["write"], patch, env))).toMatchObject({
+          written: true,
+          formatted: "biome",
+        })
+        expect(read()).toBe(collapsed)
+        expect(json(run(["write"], patch, env)).written).toBe(false)
+        expect(read()).toBe(collapsed)
+      },
     )
   })
 })

@@ -8,6 +8,7 @@ import {
   normalize,
   planConfig,
   resolveSections,
+  sameConfig,
   serializeConfig,
 } from "./config.ts"
 import { SECTIONS } from "./sections/index.ts"
@@ -722,5 +723,30 @@ describe("the sync section", () => {
   it("stays skipped once the team declines it", () => {
     const skipped = applyPatch(config, { skip: ["sync"] }, SECTIONS)
     expect(planConfig(skipped, detected, SECTIONS).upToDate).toBe(true)
+  })
+})
+
+describe("sameConfig", () => {
+  it("ignores key order and layout, but not array order or values", () => {
+    const config = {
+      version: 2,
+      repo: { baseBranch: "main" },
+      ready: { fix: ["a"], checks: ["b", "c"] },
+    }
+    const reordered = JSON.parse(
+      '{"ready": {"checks": ["b", "c"], "fix": ["a"]}, "repo": {"baseBranch": "main"}, "version": 2}',
+    )
+    expect(sameConfig(reordered, config)).toBe(true)
+    expect(
+      sameConfig(
+        { ...config, ready: { fix: ["a"], checks: ["c", "b"] } },
+        config,
+      ),
+    ).toBe(false)
+    expect(sameConfig({ ...config, repo: {} }, config)).toBe(false)
+    expect(sameConfig({ ...config, extra: null }, config)).toBe(false)
+    expect(sameConfig({ ...config, version: "2" }, config)).toBe(false)
+    expect(sameConfig({ a: [] }, { a: {} })).toBe(false)
+    expect(sameConfig(undefined, config)).toBe(false)
   })
 })
