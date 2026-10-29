@@ -183,6 +183,22 @@ describe("the team's rules", () => {
     ])
   })
 
+  it("refuses an estimate off the team's scale", () => {
+    const sized: Plan = {
+      items: [
+        { key: "on", title: "On", estimate: 4 },
+        { key: "text", title: "Text", estimate: "8" },
+        { key: "off", title: "Off", estimate: 3 },
+      ],
+    }
+    expect(
+      checkPlan(sized, TODAY, { estimateScale: [1, 2, 4, 8] }).problems,
+    ).toEqual([
+      "off: estimate 3 isn't on the team's scale (tickets.estimateScale: 1, 2, 4, 8): pick one of those",
+    ])
+    expect(checkPlan(sized, TODAY).problems).toEqual([])
+  })
+
   it("raises a parent to its most urgent sub-issue and gives it the earliest cycle", () => {
     const tree: Plan = {
       options: { linear: { cycles } },

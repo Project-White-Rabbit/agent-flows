@@ -11,7 +11,12 @@
 // Runtime code: commands import this straight from the installed plugin, so it
 // uses Node built-ins only.
 
-export type FieldType = "string" | "boolean" | "string[]" | "hook[]"
+export type FieldType =
+  | "string"
+  | "boolean"
+  | "string[]"
+  | "number[]"
+  | "hook[]"
 
 /**
  * A repo's own step at a named point in a flow (`ready.before`), for work no
@@ -56,7 +61,7 @@ export const HOOK_KEYS = [
   "prompt",
 ] as const
 
-export type FieldValue = string | boolean | string[] | Hook[]
+export type FieldValue = string | boolean | string[] | number[] | Hook[]
 
 /** A shape a string field must match, and how to describe it in an error. */
 export type FieldPattern = { regex: RegExp; hint: string }
