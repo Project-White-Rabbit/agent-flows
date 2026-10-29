@@ -164,6 +164,35 @@ describe("detect ready", () => {
       checks: ["bun run validate", "bunx vitest run --changed {base}"],
     })
   })
+
+  it("finds the test runner a shared stack package brings in", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-detect-"))
+    const root = dir
+    fs.writeFileSync(path.join(root, "bun.lock"), "")
+    fs.writeFileSync(path.join(root, "vitest.config.ts"), "export default {}\n")
+    fs.writeFileSync(
+      path.join(root, "package.json"),
+      JSON.stringify({
+        scripts: {
+          "lint:fix": "biome check --write .",
+          tsc: "react-router typegen && tsc",
+          knip: "knip",
+          test: "vitest run",
+          validate:
+            "bun run lint:fix && bun run tsc && bun run knip && bun run db:migrate:check",
+          "db:migrate:check": "bun scripts/check-migrations.ts",
+          "check-all": "bun run validate && bun run test",
+        },
+        devDependencies: { "@chuvenger/react-router-stack": "1" },
+      }),
+    )
+    execFileSync("git", ["-C", root, "init", "-q"])
+    execFileSync("git", ["-C", root, "add", "."])
+    expect(detectSections(createDetectContext(root)).ready?.values).toEqual({
+      fix: ["bun run lint:fix"],
+      checks: ["bun run validate", "bunx vitest run --changed {base}"],
+    })
+  })
 })
 
 describe("pythonDependencyNames", () => {

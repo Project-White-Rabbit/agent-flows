@@ -8,6 +8,7 @@ import {
   runsTests,
   type ScriptStep,
   scriptCommand,
+  testRunners,
   unsafeCommand,
 } from "../scripts.ts"
 import type { DetectContext, Detection, SectionSpec } from "../types.ts"
@@ -28,10 +29,90 @@ const AGGREGATE_NAMES = [
 const FIX_NAMES = ["lint:fix", "fix", "format", "format:write", "format:fix"]
 
 /** Runners that pick the tests a change touches, and how. */
-const CHANGED_TESTS: [RegExp, string, string][] = [
-  [/^vitest$/, "vitest", "vitest run --changed {base}"],
-  [/^jest$/, "jest", "jest --changedSince={base}"],
+const CHANGED_TESTS: Record<string, string> = {
+  vitest: "vitest run --changed {base}",
+  jest: "jest --changedSince={base}",
+}
+
+/** Root files that configure a runner, so the repo uses it. */
+const RUNNER_CONFIGS: [RegExp, string][] = [
+  [/^vitest\.config\.(?:ts|mts|js|mjs|cjs)$/, "vitest"],
+  [/^vitest\.workspace\.\w+$/, "vitest"],
+  [/^jest\.config\.(?:ts|js|mjs|cjs|json)$/, "jest"],
 ]
+
+/** Each runner once, in the order found, leaving out those without changed tests. */
+function known<T extends { runner: string }>(found: T[]): T[] {
+  const runners = new Set<string>()
+  return found.filter(
+    ({ runner }) =>
+      runner in CHANGED_TESTS && !runners.has(runner) && runners.add(runner),
+  )
+}
+
+/**
+ * The runners whose changed-tests command fits the root, and the evidence
+ * that names them. A shared toolchain package (a stack preset) can bring the
+ * runner in without the root depending on it, so after the root's own
+ * dependencies come its test scripts, then a tracked runner config. The
+ * first source that names one decides; more than one is for the user.
+ */
+export function changedTestsRunners(
+  ctx: DetectContext,
+  scripts: Record<string, string>,
+): { runners: string[]; source: string } | undefined {
+  const deps = known(
+    ctx
+      .dependsOn(/^(?:vitest|jest)$/)
+      .filter((line) => line.startsWith("package.json "))
+      .map((line) => ({ runner: line.split(" ").at(-1) as string })),
+  ).map((d) => d.runner)
+  if (deps.length > 0) {
+    return {
+      runners: deps,
+      source: `package.json depends on ${deps.join(" and ")}`,
+    }
+  }
+
+  const testScripts = Object.keys(scripts)
+    .filter((name) => /^test(?::|$)/.test(name))
+    .sort((a, b) => Number(b === "test") - Number(a === "test"))
+  const run = known(
+    testScripts.flatMap((name) =>
+      testRunners(resolveScript(ctx, "", scripts[name] as string)).map(
+        (runner) => ({ runner, name }),
+      ),
+    ),
+  )
+  if (run.length > 0) {
+    const names = [...new Set(run.map((r) => r.name))]
+    const runners = run.map((r) => r.runner).join(" and ")
+    return {
+      runners: run.map((r) => r.runner),
+      source:
+        names.length === 1
+          ? `package.json's ${names[0]} script runs ${runners}`
+          : `package.json's ${names.join(" and ")} scripts run ${runners}`,
+    }
+  }
+
+  const configs = ctx.tracked.flatMap((file) =>
+    RUNNER_CONFIGS.filter(([pattern]) => pattern.test(file)).map(
+      ([, runner]) => ({ runner, source: `${file} is tracked` }),
+    ),
+  )
+  if (ctx.readJson("package.json")?.jest !== undefined) {
+    configs.push({ runner: "jest", source: "package.json has a jest key" })
+  }
+  const configured = known(configs)
+  if (configured.length > 0) {
+    return {
+      runners: configured.map((c) => c.runner),
+      source: configured.map((c) => c.source).join(" and "),
+    }
+  }
+  return undefined
+}
 
 /** A script chains others (or other commands): the whole check, not one tool. */
 function chains(body: string, steps: ScriptStep[]): boolean {
@@ -116,20 +197,16 @@ export function detectReady(
     .map((name) => scriptCommand(runner, "", name))
 
   const checks = [scriptCommand(runner, "", chosen.name)]
-  if (!chosen.tests) {
-    const root = ctx
-      .dependsOn(/^(?:vitest|jest)$/)
-      .filter((line) => line.startsWith("package.json "))
-    const runnerLine = CHANGED_TESTS.find(([pattern]) =>
-      root.some((line) => pattern.test(line.split(" ").at(-1) as string)),
+  const found = chosen.tests ? undefined : changedTestsRunners(ctx, scripts)
+  if (found?.runners.length === 1) {
+    checks.push(binCommand(runner, CHANGED_TESTS[found.runners[0] as string]))
+    evidence.push(
+      `${found.source}, and ${chosen.name} runs no tests: ready runs the ones changed since the merge base`,
     )
-    if (runnerLine) {
-      const [, bin, args] = runnerLine
-      checks.push(binCommand(runner, args))
-      evidence.push(
-        `package.json depends on ${bin}, and ${chosen.name} runs no tests: ready runs the ones changed since the merge base`,
-      )
-    }
+  } else if (found) {
+    evidence.push(
+      `${found.source}, and ${chosen.name} runs no tests: ask which runner's changed tests ready runs, since detection can't tell`,
+    )
   }
   return {
     detection: {
@@ -186,5 +263,5 @@ export const ready: SectionSpec = {
   ],
   detect: (ctx) => detectReady(ctx)?.detection,
   lookup:
-    "Leave it out to run each touched package's own scripts and every step, and to wait on every CI check. Set `fix` and `checks` when the repo has one command for the whole check (`bun run validate`), or its own script that picks the checks a branch needs; detection proposes them from a root `validate`, `check`, `verify`, or `ci` script that chains others and runs nothing unsafe, its fix scripts, and the runner's changed-tests command when that script runs no tests, since `checks` replaces ready's own related-tests step; `skip` and `ignoreChecks` when the team never wants a step, or a check is slow or optional (a preview deploy); `before` for a check CI runs that ready would otherwise find only after pushing (a version bump), or a rule that applies only when certain paths change; `beforePublish` and `after` for the repo's own steps at those points",
+    "Leave it out to run each touched package's own scripts and every step, and to wait on every CI check. Set `fix` and `checks` when the repo has one command for the whole check (`bun run validate`), or its own script that picks the checks a branch needs; detection proposes them from a root `validate`, `check`, `verify`, or `ci` script that chains others and runs nothing unsafe, its fix scripts, and, when that script runs no tests, the changed-tests command of the runner the root depends on, its test script runs, or a tracked runner config (`vitest.config.ts`) sets up, since `checks` replaces ready's own related-tests step; `skip` and `ignoreChecks` when the team never wants a step, or a check is slow or optional (a preview deploy); `before` for a check CI runs that ready would otherwise find only after pushing (a version bump), or a rule that applies only when certain paths change; `beforePublish` and `after` for the repo's own steps at those points",
 }
