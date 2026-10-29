@@ -411,6 +411,59 @@ describe("work.ts", () => {
     ).toBe("UNCHANGED")
   })
 
+  it("names sections and TICKET lines after the config's tickets.ranks", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-"))
+    execFileSync("git", ["-C", dir, "init", "-q", "-b", "main"])
+    fs.mkdirSync(path.join(dir, ".agent-flows"))
+    fs.writeFileSync(
+      path.join(dir, ".agent-flows", "config.json"),
+      JSON.stringify({
+        version: 2,
+        repo: { baseBranch: "main" },
+        tickets: { ranks: ["Urgent", "P0", "P1", "P2", "Audit"] },
+      }),
+    )
+    const issue = (id: string, priority: string) => ({
+      id,
+      title: id,
+      url: `https://tracker/${id}`,
+      priority,
+    })
+    fs.writeFileSync(
+      path.join(dir, "issues.json"),
+      JSON.stringify({
+        issues: [issue("ENG-1", "high"), issue("ENG-2", "medium")],
+      }),
+    )
+    fs.writeFileSync(
+      path.join(dir, "start.json"),
+      JSON.stringify({ tickets: [ticket({ priority: "high" })] }),
+    )
+    const cli = (args: string[]) =>
+      execFileSync(
+        "node",
+        [path.join(import.meta.dirname, "work.ts"), ...args],
+        { cwd: dir, encoding: "utf8" },
+      )
+    expect(cli(["list", "--input", "issues.json", "--priority", "p1"])).toBe(
+      'TICKET ENG-2 "P1" due=none "ENG-2" https://tracker/ENG-2\nCOUNT 1\nTOTAL 2\n',
+    )
+    expect(
+      cli(["plan", "--input", "start.json", "--section-by-rank"]),
+    ).toContain('section="P0"')
+    // --ranks still wins over the config.
+    expect(
+      cli([
+        "plan",
+        "--input",
+        "start.json",
+        "--section-by-rank",
+        "--ranks",
+        "Now,Next,Soon,Later,Someday",
+      ]),
+    ).toContain('section="Next"')
+  })
+
   it("exits 2 on bad arguments", () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-"))
     const input = path.join(dir, "issues.json")

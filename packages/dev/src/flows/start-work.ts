@@ -25,7 +25,7 @@ const INPUT_EXAMPLE = `{
 
 /** How the flow reads a priority scale the repo names its own way. */
 export const RANKS =
-  "When the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they point to for ranking work) name the priorities their own way (P0, P1, …), pass `--ranks` with their names for `urgent`, `high`, `medium`, `low`, and no priority, in that order (`--ranks Urgent,P0,P1,P2,Audit`)"
+  "It reads the config's `tickets.ranks` itself, the team's names for the priorities (P0, P1, …). Pass `--ranks` only when the config has none and the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they point to for ranking work) name the priorities their own way: their names for `urgent`, `high`, `medium`, `low`, and no priority, in that order (`--ranks Urgent,P0,P1,P2,Audit`), and say once that `{{cmd}}configure tickets` can record them"
 
 /** How a tracker's workflow state reads as the stages updateIssue takes. */
 export const STAGES =
@@ -111,7 +111,8 @@ already working on it, without asking first.
     it they go in this workspace's section, or none when it has none (or
     with --project)
   - --section-by-rank: puts each in the section named after its issue's
-    priority (Urgent, High, …, or the repo's own names), making it if needed
+    priority (Urgent, High, …, or the config's tickets.ranks), making it
+    if needed
   - --no-section: puts the workspaces in no section
   - --in <integration>: opens them with that workspaces integration, when the
     repo configured more than one

@@ -79,7 +79,7 @@ and asks about each one:
   - Stop: ends the run
 An issue with open sub-issues is left out: its sub-issues are the work.
 --priority <ranks>: only these priorities: urgent, high, medium, low, none,
-  or the names the repo's agent instructions give them (--priority urgent,p0)
+  or the names the config's tickets.ranks gives them (--priority urgent,p0)
 --limit <n>: only the first n issues, after --priority
 --section <name>: puts started workspaces in that sidebar section; without
   it they go in no section
