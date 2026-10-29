@@ -17,6 +17,8 @@ function checkout(files: Record<string, string>): DetectContext {
     read: (file: string) => files[file],
     readJson: (file: string) =>
       files[file] ? JSON.parse(files[file] as string) : undefined,
+    // No test runner, so ready's detected checks add no changed-tests command.
+    dependsOn: (_pattern: RegExp): string[] => [],
   } as DetectContext
 }
 
@@ -144,6 +146,71 @@ describe("suggestHooks", () => {
         evidence:
           ".github/workflows/ci.yml runs it in CI, so ready would otherwise meet it only after pushing",
       },
+    ])
+  })
+
+  it("runs a script file through the package script that runs it, else its shebang, else the lockfile's runner", () => {
+    const run = (files: Record<string, string>) =>
+      suggestHooks(checkout(files)).map((s) => [s.point, s.hook.run])
+    const bunScript = "#!/usr/bin/env bun\nawait check()\n"
+    expect(
+      run({
+        "bun.lock": "",
+        "package.json": JSON.stringify({
+          scripts: { "db:migrate:check": "bun scripts/check-migrations.ts" },
+        }),
+        "scripts/check-migrations.ts": bunScript,
+      }),
+    ).toEqual([["ready.before", "bun run db:migrate:check"]])
+    expect(run({ "scripts/check-migrations.ts": bunScript })).toEqual([
+      ["ready.before", "bun scripts/check-migrations.ts"],
+    ])
+    expect(
+      run({ "scripts/check-version.ts": "#!/usr/bin/env -S deno run -A\n" }),
+    ).toEqual([["ready.before", "deno run -A scripts/check-version.ts"]])
+    expect(
+      run({ "bun.lockb": "", "scripts/check-version.ts": "check()\n" }),
+    ).toEqual([["ready.before", "bun scripts/check-version.ts"]])
+  })
+
+  it("names migration checks under a prefix", () => {
+    expect(
+      suggestHooks(
+        checkout({
+          "package.json": JSON.stringify({
+            scripts: {
+              "db:migrate:check": "a",
+              "db:migrations:verify": "b",
+              "db:migrate": "c",
+            },
+          }),
+        }),
+      ).map((s) => s.hook.run),
+    ).toEqual(["npm run db:migrate:check", "npm run db:migrations:verify"])
+  })
+
+  it("leaves out checks the detected ready checks already run", () => {
+    const files = {
+      "bun.lock": "",
+      "package.json": JSON.stringify({
+        scripts: {
+          tsc: "tsc",
+          validate: "bun run tsc && bun run db:migrate:check",
+          "db:migrate:check": "bun scripts/check-migrations.ts",
+          "check-version": "node scripts/version.ts check",
+        },
+      }),
+      "scripts/check-migrations.ts": "#!/usr/bin/env bun\n",
+      ".github/workflows/ci.yml": [
+        "on: pull_request",
+        "jobs:",
+        "  a:",
+        "    steps:",
+        "      - run: bun scripts/check-migrations.ts",
+      ].join("\n"),
+    }
+    expect(suggestHooks(checkout(files)).map((s) => s.hook.run)).toEqual([
+      "bun run check-version",
     ])
   })
 

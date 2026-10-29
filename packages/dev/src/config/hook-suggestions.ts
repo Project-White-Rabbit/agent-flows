@@ -9,6 +9,14 @@
 
 import path from "node:path"
 import { toInstanceName } from "./instances.ts"
+import {
+  packageScripts,
+  runnerFor,
+  scriptCommand,
+  splitSteps,
+  UNSAFE_COMMAND,
+} from "./scripts.ts"
+import { detectReady } from "./sections/ready.ts"
 import type { DetectContext, Hook } from "./types.ts"
 
 export type HookSuggestion = {
@@ -19,9 +27,12 @@ export type HookSuggestion = {
   evidence: string
 }
 
-/** A check ready can run before cleanup: version, changelog, migrations. */
+/**
+ * A check ready can run before cleanup: version, changelog, migrations, under
+ * an optional prefix (`db:migrate:check`, `db:verify-migrations`).
+ */
 const CHECK_NAME =
-  /^(?:(?:check|verify|lint)[-:_]?(?:version|changelog|migrations?)|(?:version|changelog|migrations?)[-:_]?(?:check|verify|lint)|db:verify-migrations?)$/
+  /^(?:[\w-]+:)?(?:(?:check|verify|lint)[-:_]?(?:version|changelog|migrat(?:e|ions?))|(?:version|changelog|migrat(?:e|ions?))[-:_]?(?:check|verify|lint))$/
 
 /** A script that bumps the version: a check's likely fix. */
 const BUMP_NAME = /^(?:bump|version[-:_]?bump|bump[-:_]?version)$/
@@ -37,60 +48,57 @@ const TEARDOWN_FILE = /(?:server|services|stack)[-_]?(?:down|stop)|teardown/
 /** A branch's resources go once it lands, or once it's thrown away. */
 const TEARDOWN_POINTS = ["merge.after", "close.after"] as const
 
-/** CI lines worth running before cleanup, and ones that must never run locally. */
+/** CI lines worth running before cleanup. */
 const CI_CHECK = /version|changelog|migrat/i
-const CI_UNSAFE =
-  /\b(?:publish|deploy|release|push|upload|apply|migrate(?!.*(?:check|verify|status)))\b/i
 
-type Runner = "bun" | "pnpm" | "yarn" | "npm"
+const escapeRegExp = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
-const LOCKFILES: [string, Runner][] = [
-  ["bun.lock", "bun"],
-  ["bun.lockb", "bun"],
-  ["pnpm-lock.yaml", "pnpm"],
-  ["yarn.lock", "yarn"],
-  ["package-lock.json", "npm"],
-]
-
-function runnerFor(ctx: DetectContext, dir: string): Runner {
-  for (let current = dir; ; current = path.posix.dirname(current)) {
-    const at = current === "." ? "" : current
-    for (const [lockfile, runner] of LOCKFILES) {
-      if (ctx.tracked.includes(at ? `${at}/${lockfile}` : lockfile)) {
-        return runner
+/**
+ * A tracked script file, run the way the repo runs it: a package script that
+ * runs just that file, else its shebang's interpreter, else what its
+ * extension needs (a JS or TS file through the lockfile's runner, bun or node).
+ */
+function fileCommand(ctx: DetectContext, file: string): string {
+  for (const dir of ctx.packageDirs) {
+    const relative = dir ? path.posix.relative(dir, file) : file
+    if (relative.startsWith("..")) {
+      continue
+    }
+    const runs = new RegExp(
+      `(?:^|\\s)(?:\\./)?${escapeRegExp(relative)}(?:\\s|$)`,
+    )
+    for (const [name, body] of Object.entries(packageScripts(ctx, dir))) {
+      if (splitSteps(body).length === 1 && runs.test(body)) {
+        return scriptCommand(runnerFor(ctx, dir), dir, name)
       }
     }
-    if (!at) {
-      return "npm"
+  }
+  const shebang = /^#!\s*(\S+)(?:\s+(.*))?/.exec(
+    ctx.read(file)?.split("\n", 1)[0] ?? "",
+  )
+  if (shebang) {
+    const [, program, args = ""] = shebang as unknown as [
+      string,
+      string,
+      string,
+    ]
+    // `#!/usr/bin/env -S deno run -A` runs everything after `-S`.
+    const interpreter =
+      path.posix.basename(program) === "env"
+        ? args.replace(/^-S\s+/, "").trim()
+        : [path.posix.basename(program), args.trim()].filter(Boolean).join(" ")
+    if (interpreter) {
+      return `${interpreter} ${file}`
     }
   }
-}
-
-/** A package script, run from the repo root. */
-function scriptCommand(runner: Runner, dir: string, script: string): string {
-  if (!dir) {
-    return `${runner} run ${script}`
-  }
-  switch (runner) {
-    case "bun":
-      return `bun run --cwd ${dir} ${script}`
-    case "pnpm":
-      return `pnpm --dir ${dir} run ${script}`
-    case "yarn":
-      return `yarn --cwd ${dir} run ${script}`
-    default:
-      return `npm --prefix ${dir} run ${script}`
-  }
-}
-
-/** A tracked script file, run by what its extension needs. */
-function fileCommand(file: string): string {
   const ext = path.extname(file)
   if (ext === ".sh" || ext === ".bash") {
     return `bash ${file}`
   }
   if ([".ts", ".js", ".mjs", ".cjs", ".mts"].includes(ext)) {
-    return `node ${file}`
+    const runner = runnerFor(ctx, path.posix.dirname(file))
+    return `${runner === "bun" ? "bun" : "node"} ${file}`
   }
   if (ext === ".py") {
     return `python3 ${file}`
@@ -154,13 +162,11 @@ export function suggestHooks(ctx: DetectContext): HookSuggestion[] {
   const bumps = new Map<string, string>()
 
   for (const dir of ctx.packageDirs) {
-    const manifest = ctx.readJson(dir ? `${dir}/package.json` : "package.json")
-    const scripts = manifest?.scripts
-    if (!scripts || typeof scripts !== "object") {
+    const names = Object.keys(packageScripts(ctx, dir))
+    if (names.length === 0) {
       continue
     }
-    const runner = runnerFor(ctx, dir || ".")
-    const names = Object.keys(scripts)
+    const runner = runnerFor(ctx, dir)
     const bump = names.find((name) => BUMP_NAME.test(name))
     if (bump) {
       bumps.set(dir, `${scriptCommand(runner, dir, bump)} patch`)
@@ -197,14 +203,18 @@ export function suggestHooks(ctx: DetectContext): HookSuggestion[] {
     if (CHECK_FILE.test(base)) {
       out.push({
         point: "ready.before",
-        hook: { name: base, run: fileCommand(file) },
+        hook: { name: base, run: fileCommand(ctx, file) },
         evidence: `${file} looks like a check; see what arguments it takes (\`{base}\` is the merge base)`,
       })
     } else if (TEARDOWN_FILE.test(base)) {
       for (const point of TEARDOWN_POINTS) {
         out.push({
           point,
-          hook: { name: base, on: "success", run: fileCommand(file) },
+          hook: {
+            name: base,
+            on: "success",
+            run: fileCommand(ctx, file),
+          },
           evidence: `${file} looks like teardown; see what arguments it takes (\`{branch}\` is the ${point === "merge.after" ? "merged" : "closed"} branch)`,
         })
       }
@@ -221,7 +231,7 @@ export function suggestHooks(ctx: DetectContext): HookSuggestion[] {
     }
     for (const command of workflowCommands(text)) {
       const local = localCommand(command)
-      if (!local || !CI_CHECK.test(local) || CI_UNSAFE.test(local)) {
+      if (!local || !CI_CHECK.test(local) || UNSAFE_COMMAND.test(local)) {
         continue
       }
       const script = /([\w./-]+\.(?:ts|js|mjs|sh|py))/.exec(local)?.[1]
@@ -253,12 +263,30 @@ export function suggestHooks(ctx: DetectContext): HookSuggestion[] {
     }
   }
 
+  // A check the detected ready checks already run would run twice.
+  const readyRuns = (detectReady(ctx)?.runs ?? []).map(normalizeCommand)
+  const covered = (run: string) => {
+    // A script file counts as run when any of their commands names it.
+    const file = /[\w./-]+\.(?:ts|js|mjs|cjs|mts|sh|bash|py)\b/
+      .exec(run)?.[0]
+      ?.replace(/^\.\//, "")
+    return (
+      readyRuns.includes(normalizeCommand(run)) ||
+      (file !== undefined && readyRuns.some((r) => r.includes(file)))
+    )
+  }
+
   // One suggestion per command, named uniquely at its point.
   const seen = new Set<string>()
   const names = new Set<string>()
   return out.filter((suggestion) => {
     const key = `${suggestion.point} ${suggestion.hook.run}`
-    if (seen.has(key)) {
+    if (
+      seen.has(key) ||
+      (suggestion.point === "ready.before" &&
+        suggestion.hook.run &&
+        covered(suggestion.hook.run))
+    ) {
       return false
     }
     seen.add(key)
@@ -270,4 +298,8 @@ export function suggestHooks(ctx: DetectContext): HookSuggestion[] {
     suggestion.hook.name = name
     return true
   })
+}
+
+function normalizeCommand(command: string): string {
+  return command.trim().replace(/\s+/g, " ")
 }
