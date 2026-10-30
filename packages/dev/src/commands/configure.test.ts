@@ -735,6 +735,174 @@ describe("configure.ts (as a script)", () => {
     )
   })
 
+  it("layers this machine's override over the committed config, without touching it", () => {
+    init()
+    const localFile = path.join(dir as string, ".git/agent-flows/config.json")
+    run(
+      ["write"],
+      JSON.stringify({
+        sections: {
+          repo: { baseBranch: "main" },
+          "integrations.github": { owner: "acme", repo: "web" },
+        },
+        skip: ["integrations.linear"],
+      }),
+    )
+    const committed = fs.readFileSync(configFile(), "utf8")
+
+    const written = run(
+      ["write", "--local"],
+      JSON.stringify({
+        sections: {
+          repo: { baseBranch: "develop" },
+          "integrations.linear": {
+            teamKey: "ME",
+            use: { issueTracker: "track" },
+          },
+        },
+        skip: ["integrations.github"],
+      }),
+    )
+    expect(written.status).toBe(0)
+    expect(json(written)).toMatchObject({
+      configPath: fs.realpathSync(localFile),
+      local: true,
+      written: true,
+    })
+    expect(fs.readFileSync(configFile(), "utf8")).toBe(committed)
+
+    const got = json(
+      run(["get", "repo.baseBranch", "integrations.linear.teamKey"]),
+    )
+    expect(got.values).toEqual({
+      "repo.baseBranch": "develop",
+      "integrations.linear.teamKey": "ME",
+    })
+    expect(run(["get", "integrations.github"]).status).toBe(2)
+    expect(json(run(["show"])).overridden).toEqual([
+      "repo",
+      "integrations.linear",
+      "integrations.github",
+    ])
+
+    // null drops a section from the override, so the committed one is back.
+    run(["write", "--local"], JSON.stringify({ sections: { repo: null } }))
+    expect(json(run(["get", "repo.baseBranch"])).values).toEqual({
+      "repo.baseBranch": "main",
+    })
+
+    // The override must make a valid config on top of the committed one.
+    const invalid = run(
+      ["write", "--local"],
+      JSON.stringify({ skip: ["repo"] }),
+    )
+    expect(invalid.status).toBe(1)
+    expect(json(invalid).written).toBe(false)
+  })
+
+  it("configures a repo that has no committed config, from the override alone", () => {
+    init()
+    const written = run(
+      ["write", "--local"],
+      JSON.stringify({ sections: { repo: { baseBranch: "trunk" } } }),
+    )
+    expect(written.status).toBe(0)
+    expect(fs.existsSync(configFile())).toBe(false)
+    expect(json(run(["get", "repo.baseBranch"])).values).toEqual({
+      "repo.baseBranch": "trunk",
+    })
+    expect(json(run(["detect", "local", "linear"]))).toMatchObject({
+      mode: "manual",
+      local: true,
+      requested: ["integrations.linear"],
+    })
+  })
+
+  it("replaces the committed config instead, starting from what it read as", () => {
+    init()
+    const localFile = path.join(dir as string, ".git/agent-flows/config.json")
+    run(
+      ["write"],
+      JSON.stringify({
+        sections: {
+          repo: { baseBranch: "main" },
+          "integrations.github": { owner: "acme", repo: "web" },
+        },
+      }),
+    )
+    run(
+      ["write", "--local"],
+      JSON.stringify({ sections: { repo: { baseBranch: "develop" } } }),
+    )
+
+    // Switching to replace copies the config as it reads now.
+    const switched = run(["write", "--local", "--replace"], "{}")
+    expect(switched.status).toBe(0)
+    const file = JSON.parse(fs.readFileSync(localFile, "utf8"))
+    expect(file).toMatchObject({
+      version: 3,
+      override: "replace",
+      repo: { baseBranch: "develop" },
+      integrations: { github: { owner: "acme", repo: "web" } },
+    })
+    expect(Object.keys(file).slice(0, 2)).toEqual(["version", "override"])
+
+    // The committed file no longer reaches this machine.
+    run(
+      ["write"],
+      JSON.stringify({
+        sections: { "integrations.github": { owner: "acme", repo: "api" } },
+      }),
+    )
+    const shown = json(run(["show"]))
+    expect(shown.override).toBe("replace")
+    expect(shown.overridden).toBeUndefined()
+    expect(shown.config.integrations.github.repo).toBe("web")
+
+    // Later local writes stay in replace without saying so again.
+    run(
+      ["write", "--local"],
+      JSON.stringify({ sections: { "integrations.github": null } }),
+    )
+    expect(run(["get", "integrations.github"]).status).toBe(2)
+    expect(JSON.parse(fs.readFileSync(localFile, "utf8")).override).toBe(
+      "replace",
+    )
+
+    // Merge again: the override's sections layer over the committed file.
+    run(["write", "--local", "--merge"], "")
+    expect(JSON.parse(fs.readFileSync(localFile, "utf8")).override).toBe(
+      undefined,
+    )
+    expect(json(run(["get", "integrations.github.repo"])).values).toEqual({
+      "integrations.github.repo": "api",
+    })
+
+    expect(json(run(["detect", "replace"]))).toMatchObject({
+      local: true,
+      replace: true,
+    })
+    expect(run(["write", "--replace"], "{}").status).toBe(1)
+  })
+
+  it("refuses an override that doesn't say merge or replace", () => {
+    init()
+    fs.mkdirSync(path.join(dir as string, ".git/agent-flows"))
+    fs.writeFileSync(
+      path.join(dir as string, ".git/agent-flows/config.json"),
+      JSON.stringify({
+        version: 2,
+        override: "both",
+        repo: { baseBranch: "main" },
+      }),
+    )
+    const got = run(["get", "repo.baseBranch"])
+    expect(got.status).toBe(2)
+    expect(json(got).issues[0]).toContain(
+      'override must be "merge" or "replace"',
+    )
+  })
+
   describe("write keeps the repo's format", () => {
     const repoRoot = path.resolve(import.meta.dirname, "../../../..")
     const realBiome = path.join(repoRoot, "node_modules", ".bin", "biome")

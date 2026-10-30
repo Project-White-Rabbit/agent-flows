@@ -1,6 +1,6 @@
 ---
 description: Set up or update .agent-flows/config.json, the repo's shared dev configuration: base branch and the integrations it uses for each capability (source control, issue tracker, deployments, error tracking, …).
-argument-hint: "[auto | manual] [section | capability ...]"
+argument-hint: "[auto | manual] [local | replace] [section | capability ...]"
 ---
 
 # /dev-flows:configure
@@ -86,13 +86,18 @@ Each integration also records what the team **uses** it for, under `use`: per ca
 
 An integration can be reached in up to three ways: its **MCP server**, its **CLI**, or its **HTTP API** directly, with a token from an environment variable. Which ones work depends on the machine, not the repo, so it's never written to the config: every flow checks at run time and uses the first that works, in that order. Configure uses the same check to offer integrations this machine can already reach, even when the repo shows no sign of them.
 
+**A local override** is for a repo whose config isn't yours to change (someone else's), or settings only you want: `/dev-flows:configure local` (with a mode or sections as usual) writes to this machine's override instead of `.agent-flows/config.json`. It lives in the repo's git dir, so the repo's worktrees share it and it can never be committed. It's the same format, and applies one of two ways, recorded in the file as `"override"`:
+
+- **Merge** (the default): each section it sets replaces the committed one, and each it skips is dropped; the rest follows the committed file as the team changes it. A repo with no config at all can be configured entirely this way.
+- **Replace** (`/dev-flows:configure replace`): the override is the whole config and the committed file is ignored. Switching to it starts from the config as it reads now, so nothing is lost, but later changes to the committed file no longer reach this machine.
+
 Re-running is safe: values already in the file are kept, skipped sections stay skipped (until a manual run or naming them brings them back), and when nothing new turns up the command says so and changes nothing.
 
 **CLI commands** available via Bash (paths relative to `${CLAUDE_PLUGIN_ROOT}/src/commands/`):
 
 | Command | Description |
 |---------|-------------|
-| `configure.ts <subcommand>` | `show` the config, `detect [auto|manual]` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, `write` a patch read from stdin (JSON), or `token <integration> --env|--file|--command <where>` to record where an API token is on this machine |
+| `configure.ts <subcommand>` | `show` the config, `detect [auto|manual]` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, `write [--local [--merge|--replace]]` a patch read from stdin (JSON), to the committed config or this machine's override, or `token <integration> --env|--file|--command <where>` to record where an API token is on this machine |
 | `hooks.ts <subcommand>` | `try <point> --hook '<json>'` runs one hook that isn't configured yet, once, without its fix, to check it before it's written |
 
 ## Invariants
@@ -103,7 +108,7 @@ Re-running is safe: values already in the file are kept, skipped sections stay s
 
 ## 1. Pick the mode
 
-If the user typed `auto`, `manual`, or any section names, that settles it: go straight to detect. Otherwise use `AskUserQuestion` how to run it:
+If the user typed `local` or `replace`, or asked for a configuration only they use (it's someone else's repo, or they don't want to change the team's file), this run writes to the local override: carry the word through to detect (`replace` when they want to ignore the committed config entirely rather than layer over it). If the user typed `auto`, `manual`, or any section names, that settles it: go straight to detect. Otherwise use `AskUserQuestion` how to run it:
 
 > A) **Auto**: examine the repo and this machine, and ask only about what's ambiguous *(recommended)* → step 2
 > B) **Manual**: go through every section, one at a time → step 2
@@ -111,12 +116,12 @@ If the user typed `auto`, `manual`, or any section names, that settles it: go st
 ## 2. Detect
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" detect [auto | manual] [section | capability ...]
+node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" detect [auto | manual] [local | replace] [section | capability ...]
 ```
 
-Pass the mode (typed or picked) and the sections or capabilities the user named, if any, as they typed them. An unknown name fails with the list of known sections, capabilities, and modes: show it and ask which they meant.
+Pass the mode (typed or picked), `local` or `replace` for a local run, and the sections or capabilities the user named, if any, as they typed them. An unknown name fails with the list of known sections, capabilities, and modes: show it and ask which they meant.
 
-The JSON has `mode` (`auto` or `manual`; names alone mean `manual`), `configPath`, `exists`, the current `config` (when valid), its `issues`, `requested` (when you passed names: the section paths they resolved to, with each capability expanded to its integrations), `coverage` (per capability, the integrations configured for it), `detected` (per section path: guessed `values` and the `evidence` behind them, from local files and git metadata only), `hookSuggestions` (hooks the checkout suggests, not already configured: each with its `point`, the `hook`, and the `evidence`, which says what to check before taking it; offered in the hooks walk, never planned), and a `plan`:
+The JSON has `mode` (`auto` or `manual`; names alone mean `manual`), `local` (true for a local run) and `replace` (true when it should replace the committed config), `configPath`, `exists`, `localPath`, `override` (`merge` or `replace`), and `overridden` (when this machine has an override: its file, how it applies, and, merged, the sections it sets or skips), the current `config` (when valid, with the override applied), its `issues`, `requested` (when you passed names: the section paths they resolved to, with each capability expanded to its integrations), `coverage` (per capability, the integrations configured for it), `detected` (per section path: guessed `values` and the `evidence` behind them, from local files and git metadata only), `hookSuggestions` (hooks the checkout suggests, not already configured: each with its `point`, the `hook`, and the `evidence`, which says what to check before taking it; offered in the hooks walk, never planned), and a `plan`:
 
 - `changes`: sections to `add`, and empty fields of configured sections to `fill`.
 - `needs`: required fields still missing after those changes (per instance, with its `instance` name, for a list).
@@ -199,6 +204,8 @@ Then use `AskUserQuestion`:
 
 ## 5. Write
 
+For a local run, add `--local` (`node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" write --local`): the patch then applies to this machine's override, `null` removes a section from the override so the committed one applies again, and `skip` drops a committed section for this machine only. When detect said `replace`, add `--replace` too: the override then becomes the whole config, starting from the config as it reads now, with the patch on top. To go back to layering over the committed file, add `--merge`. Either one is remembered in the file, so later local writes need only `--local`, and with no changes to make, `echo '{}' | node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" write --local --replace` just switches. Otherwise it writes `.agent-flows/config.json`.
+
 Pass only what changes on stdin, keyed by section path. Each section you include **replaces** that section's whole entry (so include its existing fields too: filling `ready`'s `fix` and `checks` keeps its `skip`, `ignoreChecks`, and hooks); `null` removes one; `skip` marks sections as deliberately not configured; everything you omit stays as it is.
 
 ```bash
@@ -219,6 +226,6 @@ Print the resulting configuration:
 node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" show
 ```
 
-Show it as one table: section (with the instance name, for a list), its fields and values, and what the team uses it for (`use`). Then list the `skipped` sections, and any `warnings`.
+Show it as one table: section (with the instance name, for a list), its fields and values, what the team uses it for (`use`), and, when `overridden` lists it, that it comes from the local override (when `override` is `replace`, say the whole config is this machine's and the committed file is ignored). Then list the `skipped` sections, and any `warnings`.
 
-Say what changed in `.agent-flows/config.json`, or that nothing did (`"written": false` with no issues). When it was written with `"formatted": false` and a `formatReason` other than `no formatter configured`, say the file isn't in the repo's format yet and why (a formatter that isn't installed usually means the repo's install hasn't run in this checkout). Then, from `coverage`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from `access`, plus your MCP check; for the API, `access.api.source`, which says where the token comes from, never what it is), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (`access.cli.auth`), or record where its token is (`token`). That part is about this machine only and never goes in the config. If the file changed, remind the user to commit it so the team shares it.
+Say what changed in `.agent-flows/config.json` (or, for a local run, in the override at the write's `configPath`), or that nothing did (`"written": false` with no issues). When it was written with `"formatted": false` and a `formatReason` other than `no formatter configured`, say the file isn't in the repo's format yet and why (a formatter that isn't installed usually means the repo's install hasn't run in this checkout). Then, from `coverage`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from `access`, plus your MCP check; for the API, `access.api.source`, which says where the token comes from, never what it is), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (`access.cli.auth`), or record where its token is (`token`). That part is about this machine only and never goes in the config. If the committed file changed, remind the user to commit it so the team shares it; a local override is never committed, so say it applies on this machine only. When `show` has `overridden`, name those sections as coming from this machine's override.
