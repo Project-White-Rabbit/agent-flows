@@ -43,7 +43,7 @@ and asks about each one:
   - Stop: ends the run
 An issue with open sub-issues is left out: its sub-issues are the work.
 --priority <ranks>: only these priorities: urgent, high, medium, low, none,
-  or the names the repo's agent instructions give them (--priority urgent,p0)
+  or the names the config's tickets.ranks gives them (--priority urgent,p0)
 --limit <n>: only the first n issues, after --priority
 --section <name>: puts started workspaces in that sidebar section; without
   it they go in no section
@@ -76,7 +76,7 @@ An issue with open sub-issues is left out: its sub-issues are the work.
    node "${CLAUDE_PLUGIN_ROOT}/src/commands/work.ts" list --input <dir>/issues.json [--priority <ranks>] [--limit <n>] [--ranks <names>]
    ```
 
-   When the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they point to for ranking work) name the priorities their own way (P0, P1, …), pass `--ranks` with their names for `urgent`, `high`, `medium`, `low`, and no priority, in that order (`--ranks Urgent,P0,P1,P2,Audit`). It reads the config's `tickets.blockerMark` itself, and marks an issue whose title has it `blocker`. It prints one `TICKET` line per issue with no work started yet (no open sub-issues, no pull request, and no workspace or git worktree on its branch), already in the order to go through them, then `COUNT <n>` (the issues printed) and `TOTAL <n>` (before `--priority` and `--limit`). Exit code 2 is an unknown `--priority` rank (say which ones exist, and stop) or bad input (fix `issues.json` and run it again).
+   It reads the config's `tickets.ranks` itself, the team's names for the priorities (P0, P1, …). Pass `--ranks` only when the config has none and the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they point to for ranking work) name the priorities their own way: their names for `urgent`, `high`, `medium`, `low`, and no priority, in that order (`--ranks Urgent,P0,P1,P2,Audit`), and say once that `/dev-flows:configure tickets` can record them. It reads the config's `tickets.blockerMark` itself, and marks an issue whose title has it `blocker`. It prints one `TICKET` line per issue with no work started yet (no open sub-issues, no pull request, and no workspace or git worktree on its branch), already in the order to go through them, then `COUNT <n>` (the issues printed) and `TOTAL <n>` (before `--priority` and `--limit`). Exit code 2 is an unknown `--priority` rank (say which ones exist, and stop) or bad input (fix `issues.json` and run it again).
 
 When `COUNT` is 0, say there is nothing waiting and stop; when `TOTAL` is above 0, say instead that the filters left out all `TOTAL` issues, and stop. Otherwise say how many issues there are, and when `COUNT` is less than `TOTAL`, how many the filters left out.
 

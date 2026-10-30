@@ -499,6 +499,40 @@ describe("configure.ts (as a script)", () => {
     ])
   })
 
+  it("sets an estimate scale, and refuses one that isn't numbers smallest first", () => {
+    init()
+    const written = run(
+      ["write"],
+      JSON.stringify({
+        sections: {
+          repo: { baseBranch: "main" },
+          tickets: { estimateScale: [1, 2, 4, 8] },
+        },
+      }),
+    )
+    expect(written.status).toBe(0)
+    expect(json(run(["get", "tickets.estimateScale"]))).toEqual({
+      values: { "tickets.estimateScale": [1, 2, 4, 8] },
+    })
+
+    const words = run(
+      ["write"],
+      JSON.stringify({ sections: { tickets: { estimateScale: ["S", "M"] } } }),
+    )
+    expect(words.status).toBe(1)
+    expect(json(words).issues).toEqual([
+      "tickets.estimateScale must be a non-empty list of numbers, 0 or more",
+    ])
+    const unsorted = run(
+      ["write"],
+      JSON.stringify({ sections: { tickets: { estimateScale: [4, 2, 2] } } }),
+    )
+    expect(unsorted.status).toBe(1)
+    expect(json(unsorted).issues).toEqual([
+      "tickets.estimateScale must list its numbers smallest first, without repeats",
+    ])
+  })
+
   it("configures an integration more than once, one entry per instance", () => {
     init()
     const written = json(

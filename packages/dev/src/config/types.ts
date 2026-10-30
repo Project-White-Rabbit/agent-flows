@@ -11,7 +11,12 @@
 // Runtime code: commands import this straight from the installed plugin, so it
 // uses Node built-ins only.
 
-export type FieldType = "string" | "boolean" | "string[]" | "hook[]"
+export type FieldType =
+  | "string"
+  | "boolean"
+  | "string[]"
+  | "number[]"
+  | "hook[]"
 
 /**
  * A repo's own step at a named point in a flow (`ready.before`), for work no
@@ -56,7 +61,7 @@ export const HOOK_KEYS = [
   "prompt",
 ] as const
 
-export type FieldValue = string | boolean | string[] | Hook[]
+export type FieldValue = string | boolean | string[] | number[] | Hook[]
 
 /** A shape a string field must match, and how to describe it in an error. */
 export type FieldPattern = { regex: RegExp; hint: string }
@@ -70,6 +75,8 @@ export type FieldSpec = {
   required?: boolean
   /** Required for any field an op uses, since ops become shell commands. */
   pattern?: FieldPattern
+  /** A rule the value as a whole must meet, past its type and pattern: what's wrong, or undefined. */
+  check?(value: FieldValue): string | undefined
 }
 
 export type SectionValues = Record<string, FieldValue>

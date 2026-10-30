@@ -183,6 +183,22 @@ describe("the team's rules", () => {
     ])
   })
 
+  it("refuses an estimate off the team's scale", () => {
+    const sized: Plan = {
+      items: [
+        { key: "on", title: "On", estimate: 4 },
+        { key: "text", title: "Text", estimate: "8" },
+        { key: "off", title: "Off", estimate: 3 },
+      ],
+    }
+    expect(
+      checkPlan(sized, TODAY, { estimateScale: [1, 2, 4, 8] }).problems,
+    ).toEqual([
+      "off: estimate 3 isn't on the team's scale (tickets.estimateScale: 1, 2, 4, 8): pick one of those",
+    ])
+    expect(checkPlan(sized, TODAY).problems).toEqual([])
+  })
+
   it("raises a parent to its most urgent sub-issue and gives it the earliest cycle", () => {
     const tree: Plan = {
       options: { linear: { cycles } },
@@ -465,6 +481,60 @@ describe("the team's rules", () => {
     const checked = checkPlan(moved, TODAY)
     expect(checked.rows[0]?.action).toBe("update")
     expect(renderTable(checked.rows)).toContain("| ENG-1 → ENG-9 |")
+  })
+})
+
+describe("rank names", () => {
+  const ranks = ["Urgent", "P0", "P1", "P2", "Audit"]
+
+  it("reads an item's rank name as its priority and shows both", () => {
+    const ranked: Plan = {
+      items: [
+        { key: "a", title: "Ship it", priority: "P0", dueDate: "2026-10-30" },
+        { key: "b", title: "Audit logs", priority: "audit" },
+        {
+          key: "c",
+          match: "ENG-3",
+          priority: "medium",
+          existing: { title: "Old", priority: "low" },
+        },
+      ],
+    }
+    const checked = checkPlan(ranked, TODAY, { ranks })
+    expect(checked.problems).toEqual([])
+    expect(checked.rows.map((r) => r.item.priority)).toEqual([
+      "high",
+      "none",
+      "medium",
+    ])
+    expect(renderTable(checked.rows, ranks).split("\n").slice(2)).toEqual([
+      "| 1 | file | new | Ship it |  | high (P0) |  | 2026-10-30 |  |  |  |",
+      "| 2 | file | new | Audit logs |  | none (Audit) |  |  |  |  |  |",
+      "| 3 | update | ENG-3 | Old |  | low (P2) → medium (P1) |  |  |  |  |  |",
+    ])
+    // Without the config's ranks, the defaults stand: `P0` is no priority.
+    expect(checkPlan(ranked, TODAY).problems).toEqual([
+      "a: priority must be one of urgent, high, medium, low, none",
+      "b: priority must be one of urgent, high, medium, low, none",
+    ])
+  })
+
+  it("names the ranks in problems", () => {
+    expect(
+      checkPlan({ items: [{ key: "a", title: "A", priority: "P9" }] }, TODAY, {
+        ranks,
+      }).problems,
+    ).toEqual([
+      "a: priority must be one of urgent, high, medium, low, none, Urgent, P0, P1, P2, Audit",
+    ])
+    expect(
+      checkPlan({ items: [{ key: "a", title: "A", priority: "P0" }] }, TODAY, {
+        ranks,
+        dueDateRequired: ["high"],
+      }).problems,
+    ).toEqual([
+      'a: every high (P0) issue needs a due date (tickets.dueDateRequired): set "dueDate", or ask for one',
+    ])
   })
 })
 

@@ -13,6 +13,7 @@ import { inferLinearTeamKey } from "./linear.ts"
 import { detectReady, ready } from "./ready.ts"
 import { parseSentryConfig } from "./sentry.ts"
 import { BITFAB_DEV_FORMAT, sync } from "./sync.ts"
+import { ranksFromDoc, ranksProblem, tickets } from "./tickets.ts"
 
 // The contract every section must meet. A new section that breaks the shared
 // rules fails here, not in some flow later.
@@ -191,8 +192,11 @@ const SHELL_HOSTILE = [
 
 function typeOf(value: FieldSpec["example"]): string {
   if (Array.isArray(value)) {
-    return value.every((item) => typeof item === "string")
-      ? "string[]"
+    if (value.every((item) => typeof item === "string")) {
+      return "string[]"
+    }
+    return value.every((item) => typeof item === "number")
+      ? "number[]"
       : "hook[]"
   }
   return typeof value
@@ -755,5 +759,101 @@ describe("ready detection", () => {
         "package.json has a validate script (bun run lint, validate in apps/web); none of its steps, or the scripts they call, deploy, publish, migrate, or write to a shared service",
       ],
     })
+  })
+})
+
+/** ai-assistant's TASK_PRIORITIZATION.md, cut down to its rank table. */
+const PRIORITIZATION = `# Task Prioritization
+
+## Priorities
+
+| Ours | Meaning | Deadline | Linear priority |
+|---|---|---|---|
+| Urgent | Drop everything and work on it now. | None. It is being worked on right now. | Urgent (1) |
+| P0 | Highest planned priority. | Required. Every P0 has a date. | High (2) |
+| P1 | Normal priority work. | Optional | Medium (3) |
+| P2 | Background work. | Optional | Low (4) |
+| Audit | Ongoing work with no finish line. | None | No priority (0) |
+
+## Order of work
+
+| Work | Shape in Linear |
+|---|---|
+| A piece of work | One task |
+`
+
+describe("ticket ranks", () => {
+  it("reads the team's rank names off a prioritization doc's table", () => {
+    expect(ranksFromDoc(PRIORITIZATION)).toEqual([
+      "Urgent",
+      "P0",
+      "P1",
+      "P2",
+      "Audit",
+    ])
+    // Rows in any order, Jira's names, and markdown in the cells.
+    expect(
+      ranksFromDoc(`| Rank | Jira |
+|:--|:--|
+| **Sev 2** | High |
+| **Sev 1** | Highest |
+| Sev 3 | Medium |
+| Sev 5 | Lowest |
+| Sev 4 | \`Low\` |`),
+    ).toEqual(["Sev 1", "Sev 2", "Sev 3", "Sev 4", "Sev 5"])
+  })
+
+  it("reads nothing from a table that doesn't map every priority once", () => {
+    expect(ranksFromDoc("| Ours | Linear |\n|---|---|\n| P0 | High |")).toBe(
+      undefined,
+    )
+    expect(
+      ranksFromDoc(
+        "| A | Linear |\n|---|---|\n| a | High |\n| b | High |\n| c | Medium |\n| d | Low |\n| e | None |",
+      ),
+    ).toBe(undefined)
+    expect(ranksFromDoc("No tables here.")).toBe(undefined)
+  })
+
+  it("detects the ranks from a tracked prioritization doc", () => {
+    expect(
+      tickets.detect?.(checkout({ "TASK_PRIORITIZATION.md": PRIORITIZATION })),
+    ).toEqual({
+      values: { ranks: ["Urgent", "P0", "P1", "P2", "Audit"] },
+      evidence: [
+        "TASK_PRIORITIZATION.md ranks work as Urgent, P0, P1, P2, Audit, mapped to the tracker's urgent, high, medium, low, none",
+      ],
+    })
+    expect(tickets.detect?.(checkout({ "notes.md": PRIORITIZATION }))).toBe(
+      undefined,
+    )
+    // The tracker's own names are the defaults: nothing to configure.
+    const plain =
+      "| Ours | Linear |\n|---|---|\n| Urgent | Urgent |\n| High | High |\n| Medium | Medium |\n| Low | Low |\n| No priority | No priority |"
+    expect(tickets.detect?.(checkout({ "docs/priorities.md": plain }))).toBe(
+      undefined,
+    )
+  })
+
+  it("takes one distinct name per priority, a priority's own name only in its place", () => {
+    expect(ranksProblem(["Urgent", "P0", "P1", "P2", "Audit"])).toBe(undefined)
+    expect(ranksProblem(["P0", "P1", "P2", "P3"])).toBe(
+      "must name 5 ranks, one each for urgent, high, medium, low, none (got 4)",
+    )
+    expect(ranksProblem(["P0", "p0", "P1", "P2", "P3"])).toBe(
+      "names `p0` twice",
+    )
+    expect(ranksProblem(["High", "P0", "P1", "P2", "P3"])).toBe(
+      "names the `urgent` rank `High`, another priority's name",
+    )
+    expect(
+      checkConfig({
+        version: 2,
+        repo: { baseBranch: "main" },
+        tickets: { ranks: ["P0", "P1"] },
+      }).issues,
+    ).toEqual([
+      "tickets.ranks must name 5 ranks, one each for urgent, high, medium, low, none (got 2)",
+    ])
   })
 })
