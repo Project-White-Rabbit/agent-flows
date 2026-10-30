@@ -473,6 +473,83 @@ export function applyPatch(
   return normalize(out, registry)
 }
 
+/** The key in an override file that says how it applies. */
+export const OVERRIDE_KEY = "override"
+
+/**
+ * How an override applies: `merge` (the default) lays its sections over the
+ * committed config; `replace` ignores the committed config, so the override
+ * is the whole config.
+ */
+export const OVERRIDE_MODES = ["merge", "replace"] as const
+export type OverrideMode = (typeof OVERRIDE_MODES)[number]
+
+/** An override file's mode, and the config it holds without that key. */
+export function splitOverride(local: RawConfig): {
+  mode: OverrideMode
+  own: RawConfig
+  issues: string[]
+} {
+  const { [OVERRIDE_KEY]: mode = "merge", ...own } = local
+  return OVERRIDE_MODES.includes(mode as OverrideMode)
+    ? { mode: mode as OverrideMode, own, issues: [] }
+    : {
+        mode: "merge",
+        own,
+        issues: [
+          `${OVERRIDE_KEY} must be ${OVERRIDE_MODES.map((m) => `"${m}"`).join(" or ")}`,
+        ],
+      }
+}
+
+/** An override file's content: its mode (when not the default) after `version`. */
+export function joinOverride(mode: OverrideMode, own: RawConfig): RawConfig {
+  if (mode === "merge") {
+    return own
+  }
+  const { version, ...rest } = own
+  return { version, [OVERRIDE_KEY]: mode, ...rest }
+}
+
+/**
+ * The config with this machine's override applied. Merged, each section the
+ * override sets replaces the committed entry, and each it skips is dropped;
+ * `overridden` lists those paths. Replaced, the override is the whole config.
+ */
+export function overlay(
+  shared: RawConfig | undefined,
+  local: RawConfig,
+  registry: SectionSpec[] = SECTIONS,
+): {
+  config: RawConfig
+  mode: OverrideMode
+  own: RawConfig
+  overridden: string[]
+  issues: string[]
+} {
+  const { mode, own, issues } = splitOverride(local)
+  if (mode === "replace") {
+    return { config: own, mode, own, overridden: [], issues }
+  }
+  const sections: Record<string, SectionEntry> = {}
+  for (const spec of registry) {
+    const value = getAt(own, spec.path)
+    if (value !== undefined) {
+      sections[spec.path] = value as SectionEntry
+    }
+  }
+  const skip = (Array.isArray(own.skipped) ? own.skipped : []).filter(
+    (p): p is string => registry.some((s) => s.path === p),
+  )
+  return {
+    config: applyPatch(shared, { sections, skip }, registry),
+    mode,
+    own,
+    overridden: [...Object.keys(sections), ...skip],
+    issues,
+  }
+}
+
 export function serializeConfig(config: RawConfig): string {
   return `${JSON.stringify(config, null, 2)}\n`
 }

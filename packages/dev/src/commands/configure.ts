@@ -16,7 +16,11 @@ import {
   getAt,
   INSTANCE_KEY,
   isRecord,
+  joinOverride,
   migrate,
+  OVERRIDE_MODES,
+  type OverrideMode,
+  overlay,
   planConfig,
   type RawConfig,
   resolveSections,
@@ -37,6 +41,8 @@ import {
 import {
   checkSource,
   describeSource,
+  gitCommonDir,
+  localConfigPath,
   readLocal,
   type TokenSource,
   tokenKey,
@@ -55,54 +61,128 @@ export function repoRoot(cwd = process.cwd()): string {
 
 export type Loaded = {
   configPath: string
+  /** True when the committed file or this machine's override exists. */
   exists: boolean
-  /** Present when the file is usable (migrated to the current version). */
+  /** This machine's override, when there is one. */
+  localPath?: string
+  /**
+   * How the override applies: `merge` lays it over the committed file,
+   * `replace` uses it alone.
+   */
+  override?: OverrideMode
+  /** Merged: section paths the override sets or skips, over the committed file. */
+  overridden?: string[]
+  /** Present when the config is usable (migrated to the current version). */
   config?: RawConfig
   /**
-   * The file migrated to the current version, valid or not: what a write
-   * patches, so it can repair a field that broke the file. Missing when the
-   * file can't be read as a config at all.
+   * The config migrated to the current version, valid or not: the committed
+   * file, with the override applied when there is one. Missing when a file
+   * can't be read as a config at all.
    */
   draft?: RawConfig
   issues: string[]
   warnings: string[]
 }
 
-export function loadConfig(root: string): Loaded {
-  const configPath = path.join(root, CONFIG_PATH)
+type ConfigFile = {
+  exists: boolean
+  /** The file migrated to the current version, valid or not. */
+  draft?: RawConfig
+  /** Why it can't be read as a config at all (bad JSON, a newer version). */
+  issues: string[]
+}
+
+function readConfigFile(file: string): ConfigFile {
   let text: string
   try {
-    text = fs.readFileSync(configPath, "utf8")
+    text = fs.readFileSync(file, "utf8")
   } catch {
-    return { configPath, exists: false, issues: [], warnings: [] }
+    return { exists: false, issues: [] }
   }
-  const fail = (issues: string[]): Loaded => ({
-    configPath,
-    exists: true,
-    issues,
-    warnings: [],
-  })
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
   } catch (error) {
-    return fail([
-      `not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    ])
+    return {
+      exists: true,
+      issues: [
+        `not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      ],
+    }
   }
   if (!isRecord(parsed)) {
-    return fail(["config must be a JSON object"])
+    return { exists: true, issues: ["config must be a JSON object"] }
   }
   const migrated = migrate(parsed)
-  if (!migrated.config) {
-    return fail(migrated.issues)
-  }
-  const { issues, warnings } = checkConfig(migrated.config)
-  return {
+  return migrated.config
+    ? { exists: true, draft: migrated.config, issues: [] }
+    : { exists: true, issues: migrated.issues }
+}
+
+/** Where this machine's override is, or undefined outside a git repo. */
+function localConfigFile(root: string): string | undefined {
+  const dir = gitCommonDir(root)
+  return dir ? localConfigPath(dir) : undefined
+}
+
+/**
+ * The config flows use: the committed file, with this machine's override
+ * merged over it or replacing it when there is one, so a repo that isn't
+ * yours can be configured for you alone.
+ */
+export function loadConfig(root: string): Loaded {
+  const configPath = path.join(root, CONFIG_PATH)
+  const shared = readConfigFile(configPath)
+  const localPath = localConfigFile(root)
+  const local: ConfigFile = localPath
+    ? readConfigFile(localPath)
+    : { exists: false, issues: [] }
+  const base = {
     configPath,
-    exists: true,
-    draft: migrated.config,
-    ...(issues.length === 0 ? { config: migrated.config } : {}),
+    exists: shared.exists || local.exists,
+    ...(local.exists ? { localPath } : {}),
+  }
+  const unreadable = [
+    ...shared.issues,
+    ...local.issues.map((issue) => `${localPath}: ${issue}`),
+  ]
+  if (unreadable.length > 0) {
+    return { ...base, issues: unreadable, warnings: [] }
+  }
+  if (!local.draft) {
+    if (!shared.draft) {
+      return { ...base, issues: [], warnings: [] }
+    }
+    const { issues, warnings } = checkConfig(shared.draft)
+    return {
+      ...base,
+      draft: shared.draft,
+      ...(issues.length === 0 ? { config: shared.draft } : {}),
+      issues,
+      warnings,
+    }
+  }
+  const applied = overlay(shared.draft, local.draft)
+  const draft = applied.config
+  const checked = checkConfig(draft)
+  const issues = [
+    ...applied.issues.map((issue) => `${localPath}: ${issue}`),
+    ...checked.issues,
+  ]
+  // Replaced, the override's own warnings are the config's.
+  const warnings =
+    applied.mode === "replace"
+      ? checked.warnings
+      : [
+          ...checked.warnings,
+          ...checkConfig(applied.own).warnings.map((w) => `${localPath}: ${w}`),
+        ]
+  return {
+    ...base,
+    override: applied.mode,
+    ...(applied.mode === "merge" ? { overridden: applied.overridden } : {}),
+    draft,
+    ...(issues.length === 0 ? { config: draft } : {}),
     issues,
     warnings,
   }
@@ -383,27 +463,48 @@ export function resolveNames(names: string[]): {
 export const MODES = ["auto", "manual"] as const
 export type Mode = (typeof MODES)[number]
 
+/** The word that sends a run's writes to this machine's override. */
+export const LOCAL = "local"
+/** The word for an override that replaces the committed config (implies local). */
+export const REPLACE = "replace"
+
 /**
- * The mode a user typed, if any, and the section names after it. Names alone
- * mean a manual walk of just those sections.
+ * The mode a user typed, if any, whether they asked for `local` (writes go to
+ * this machine's override) or `replace` (the override replaces the committed
+ * config), and the section names after it. Names alone mean a manual walk of
+ * just those sections.
  */
 export function parseMode(args: string[]): {
   mode?: Mode
+  local?: true
+  replace?: true
   names: string[]
 } {
   const named = args.filter((a): a is Mode => MODES.includes(a as Mode))
   if (named.length > 1) {
     throw new Error(`pick one mode, not ${named.join(" and ")}`)
   }
-  const names = args.filter((a) => !MODES.includes(a as Mode))
+  const names = args.filter(
+    (a) => !MODES.includes(a as Mode) && a !== LOCAL && a !== REPLACE,
+  )
+  const replace = args.includes(REPLACE)
   const mode = named[0] ?? (names.length > 0 ? "manual" : undefined)
-  return { ...(mode ? { mode } : {}), names }
+  return {
+    ...(mode ? { mode } : {}),
+    ...(replace || args.includes(LOCAL) ? { local: true as const } : {}),
+    ...(replace ? { replace: true as const } : {}),
+    names,
+  }
 }
 
 const PATCH_SHAPE =
   '{"sections": {"<path>": {...} | [{"name": ..., ...}, ...] | null}, "skip": ["<path>", ...]}'
 
-function parsePatch(input: string): ConfigPatch {
+/** The patch on stdin; `optional` reads no input (or `{}`) as no changes. */
+function parsePatch(input: string, optional = false): ConfigPatch {
+  if (optional && !input.trim()) {
+    return {}
+  }
   let patch: unknown
   try {
     patch = JSON.parse(input)
@@ -427,37 +528,76 @@ function parsePatch(input: string): ConfigPatch {
   const extra = Object.keys(patch).filter(
     (k) => k !== "sections" && k !== "skip",
   )
-  if (!sectionsOk || !skipOk || extra.length > 0 || (!sections && !skip)) {
+  if (
+    !sectionsOk ||
+    !skipOk ||
+    extra.length > 0 ||
+    (!sections && !skip && !optional)
+  ) {
     throw new Error(`write expects ${PATCH_SHAPE}`)
   }
   return patch as ConfigPatch
 }
 
-async function write(root: string): Promise<void> {
-  const patch = parsePatch(await readStdin())
-  const current = loadConfig(root)
+/**
+ * Patch the committed config, or with `local`, this machine's override of it,
+ * switching the override to `mode` when given. The committed file must be
+ * valid on its own, since the team shares it; the override must make a valid
+ * config once applied.
+ */
+async function write(
+  root: string,
+  local?: { mode?: OverrideMode },
+): Promise<void> {
+  const patch = parsePatch(await readStdin(), Boolean(local?.mode))
+  const sharedPath = path.join(root, CONFIG_PATH)
+  const configPath = local ? localConfigFile(root) : sharedPath
+  if (!configPath) {
+    throw new Error("write --local needs a git repository")
+  }
+  const current = readConfigFile(configPath)
   // An invalid file is patched as it stands, so a write can repair it; the
   // result must be valid, like any write. Only a file that isn't a config at
   // all (bad JSON, a newer version) has to be fixed by hand.
   if (current.exists && !current.draft) {
     throw new Error(
-      `${CONFIG_PATH} can't be read; fix it by hand:\n- ${current.issues.join("\n- ")}`,
+      `${configPath} can't be read; fix it by hand:\n- ${current.issues.join("\n- ")}`,
     )
   }
   const patchIssues = checkPatch(patch)
   if (patchIssues.length > 0) {
-    printJson({
-      configPath: current.configPath,
-      written: false,
-      issues: patchIssues,
-    })
+    printJson({ configPath, written: false, issues: patchIssues })
     process.exitCode = 1
     return
   }
-  const next = applyPatch(current.draft, patch)
-  const { issues, warnings } = checkConfig(next)
+  let next: RawConfig
+  let effective: RawConfig
+  if (local) {
+    const shared = readConfigFile(sharedPath)
+    if (shared.exists && !shared.draft) {
+      throw new Error(
+        `${CONFIG_PATH} can't be read; fix it by hand:\n- ${shared.issues.join("\n- ")}`,
+      )
+    }
+    const applied = current.draft
+      ? overlay(shared.draft, current.draft)
+      : undefined
+    const mode = local.mode ?? applied?.mode ?? "merge"
+    // Switching to replace starts from the config as it reads now, so the
+    // override begins as a copy of what it stops following.
+    const base =
+      mode === "replace" && applied?.mode !== "replace"
+        ? (applied?.config ?? shared.draft)
+        : applied?.own
+    next = joinOverride(mode, applyPatch(base, patch))
+    effective = overlay(shared.draft, next).config
+  } else {
+    next = applyPatch(current.draft, patch)
+    effective = next
+  }
+  const { issues, warnings } = checkConfig(effective)
   if (issues.length > 0) {
-    printJson({ configPath: current.configPath, written: false, issues })
+    printJson({ configPath, written: false, issues })
     process.exitCode = 1
     return
   }
@@ -465,28 +605,32 @@ async function write(root: string): Promise<void> {
   const content = serializeConfig(next)
   let existing: string | undefined
   try {
-    existing = fs.readFileSync(current.configPath, "utf8")
+    existing = fs.readFileSync(configPath, "utf8")
   } catch {
     existing = undefined
   }
   const changed = existing !== content
   if (changed) {
-    fs.mkdirSync(path.dirname(current.configPath), { recursive: true })
-    fs.writeFileSync(current.configPath, content)
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, content)
   }
   printJson({
-    configPath: current.configPath,
+    configPath,
+    ...(local ? { local: true } : {}),
     written: changed,
     config: next,
-    coverage: coverage(next),
+    coverage: coverage(effective),
     ...(warnings.length > 0 ? { warnings } : {}),
   })
 }
 
 const HELP = `Usage: configure.ts <command>
 
-  show            Print ${CONFIG_PATH} with its issues and warnings.
-  detect [auto | manual] [section | capability ...]
+  show            Print the config with its issues and warnings: ${CONFIG_PATH},
+                  with this machine's override (localPath) applied when there
+                  is one: how it applies (override: merge or replace), and,
+                  merged, the sections it overrides.
+  detect [auto | manual] [local | replace] [section | capability ...]
                   Print the current config, what each section's detector found
                   (values and evidence), and a plan: what's new, which required
                   fields are missing, and whether it's already upToDate. Given
@@ -494,7 +638,9 @@ const HELP = `Usage: configure.ts <command>
                   (issueTracker: every integration providing it), detects and
                   plans only those, including ones skipped before. manual with
                   no names plans every section the same way. Prints the mode
-                  (names alone mean manual; none at all, no mode).
+                  (names alone mean manual; none at all, no mode), and
+                  "local": true when local or replace was given, so the run
+                  writes with --local ("replace": true: --local --replace).
   get <path>... [--optional]
                   Print {"values": {"<path>": value}} for sections or fields
                   (repo.baseBranch, integrations.linear). A field of an
@@ -518,7 +664,8 @@ const HELP = `Usage: configure.ts <command>
                   Exits ${NOT_CONFIGURED_EXIT} with {"configured": false} when the config is
                   missing or invalid, or (without --optional) a capability has
                   no integration.
-  write           Read ${PATCH_SHAPE}
+  write [--local [--merge | --replace]]
+                  Read ${PATCH_SHAPE}
                   on stdin. Each section given replaces its entry (a list of
                   named instances, for an integration configured more than
                   once), null removes it, skip marks sections as deliberately
@@ -528,6 +675,18 @@ const HELP = `Usage: configure.ts <command>
                   stands, so a write that fixes it goes through; one that
                   isn't a config at all (bad JSON, a newer version) has to be
                   fixed by hand.
+                  With --local, patches this machine's override instead, in
+                  the repo's git dir (shared by its worktrees, never
+                  committed): for a repo whose config isn't yours to change.
+                  Each section it sets replaces the committed one, its skip
+                  list drops committed ones, and null removes a section from
+                  the override so the committed one applies again. The
+                  override must make a valid config once applied.
+                  --replace makes the override the whole config, ignoring
+                  ${CONFIG_PATH}; switching to it starts from the config as it
+                  reads now. --merge goes back to layering it over the
+                  committed file. Either one persists in the file ("override")
+                  and takes an empty patch to just switch.
 `
 
 /** Suggestions whose command isn't already a hook at that point. */
@@ -562,7 +721,7 @@ async function main(): Promise<void> {
     return
   }
   if (command === "detect") {
-    const { mode, names } = parseMode(args)
+    const { mode, local, replace, names } = parseMode(args)
     const { paths, unknown } = resolveNames(names)
     if (unknown.length > 0) {
       throw new Error(
@@ -587,6 +746,8 @@ async function main(): Promise<void> {
     )
     printJson({
       mode,
+      ...(local ? { local } : {}),
+      ...(replace ? { replace } : {}),
       ...loaded,
       ...(only ? { requested: only } : {}),
       ...(loaded.config ? { coverage: coverage(loaded.config) } : {}),
@@ -621,7 +782,22 @@ async function main(): Promise<void> {
     return
   }
   if (command === "write") {
-    await write(root)
+    const flags = OVERRIDE_MODES.map((m) => `--${m}`)
+    const modes = args.filter((a) => flags.includes(a))
+    const unknown = args.filter((a) => a !== "--local" && !flags.includes(a))
+    if (unknown.length > 0 || modes.length > 1) {
+      throw new Error(
+        `write takes --local, optionally with ${flags.join(" or ")}, not ${args.join(" ")}`,
+      )
+    }
+    if (modes.length > 0 && !args.includes("--local")) {
+      throw new Error(`${modes[0]} applies only to write --local`)
+    }
+    const mode = modes[0]?.slice(2) as OverrideMode | undefined
+    await write(
+      root,
+      args.includes("--local") ? (mode ? { mode } : {}) : undefined,
+    )
     return
   }
   throw new Error(

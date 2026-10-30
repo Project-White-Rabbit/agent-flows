@@ -81,12 +81,13 @@ export const configureFlow: Flow = devKit.defineFlow({
   title: "{{cmd}}configure",
   frontmatter: {
     description: `Set up or update ${CONFIG_PATH}, the repo's shared dev configuration: base branch and the integrations it uses for each capability (source control, issue tracker, deployments, error tracking, …).`,
-    argumentHint: "[auto | manual] [section | capability ...]",
+    argumentHint:
+      "[auto | manual] [local | replace] [section | capability ...]",
   },
   commands: DEV_COMMANDS.defineCommands({
     configure: {
       description:
-        "`show` the config, `detect [auto|manual]` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, `write` a patch read from stdin (JSON), or `token <integration> --env|--file|--command <where>` to record where an API token is on this machine",
+        "`show` the config, `detect [auto|manual]` what this checkout uses and plan changes, `get <path>...` values, `integrations <capability>...` for a capability's configured integrations, `write [--local [--merge|--replace]]` a patch read from stdin (JSON), to the committed config or this machine's override, or `token <integration> --env|--file|--command <where>` to record where an API token is on this machine",
       args: "<subcommand>",
     },
     hooks: {
@@ -171,6 +172,11 @@ Each integration also records what the team **uses** it for, under \`use\`: per 
 
 An integration can be reached in up to three ways: its **MCP server**, its **CLI**, or its **HTTP API** directly, with a token from an environment variable. Which ones work depends on the machine, not the repo, so it's never written to the config: every flow checks at run time and uses the first that works, in that order. Configure uses the same check to offer integrations this machine can already reach, even when the repo shows no sign of them.
 
+**A local override** is for a repo whose config isn't yours to change (someone else's), or settings only you want: \`{{cmd}}configure local\` (with a mode or sections as usual) writes to this machine's override instead of \`{{configPath}}\`. It lives in the repo's git dir, so the repo's worktrees share it and it can never be committed. It's the same format, and applies one of two ways, recorded in the file as \`"override"\`:
+
+- **Merge** (the default): each section it sets replaces the committed one, and each it skips is dropped; the rest follows the committed file as the team changes it. A repo with no config at all can be configured entirely this way.
+- **Replace** (\`{{cmd}}configure replace\`): the override is the whole config and the committed file is ignored. Switching to it starts from the config as it reads now, so nothing is lost, but later changes to the committed file no longer reach this machine.
+
 Re-running is safe: values already in the file are kept, skipped sections stay skipped (until a manual run or naming them brings them back), and when nothing new turns up the command says so and changes nothing.`,
   invariants: [
     "Never write a token, key, password, or connection string into the config, and never read a real `.env` file to find one. If the user pastes a secret, don't save it, and tell them it doesn't belong in this file.",
@@ -187,7 +193,7 @@ Re-running is safe: values already in the file are kept, skipped sections stay s
           id: "mode",
           kind: "branch",
           title: "Pick the mode",
-          body: `If the user typed \`auto\`, \`manual\`, or any section names, that settles it: go straight to detect. Otherwise {{askVerb}} how to run it:
+          body: `If the user typed \`local\` or \`replace\`, or asked for a configuration only they use (it's someone else's repo, or they don't want to change the team's file), this run writes to the local override: carry the word through to detect (\`replace\` when they want to ignore the committed config entirely rather than layer over it). If the user typed \`auto\`, \`manual\`, or any section names, that settles it: go straight to detect. Otherwise {{askVerb}} how to run it:
 
 {{branches}}`,
           branches: [
@@ -217,12 +223,12 @@ Re-running is safe: values already in the file are kept, skipped sections stay s
           title: "Detect",
           commandCalls: ["configure"],
           body: `\`\`\`bash
-{{command:configure}} detect [auto | manual] [section | capability ...]
+{{command:configure}} detect [auto | manual] [local | replace] [section | capability ...]
 \`\`\`
 
-Pass the mode (typed or picked) and the sections or capabilities the user named, if any, as they typed them. An unknown name fails with the list of known sections, capabilities, and modes: show it and ask which they meant.
+Pass the mode (typed or picked), \`local\` or \`replace\` for a local run, and the sections or capabilities the user named, if any, as they typed them. An unknown name fails with the list of known sections, capabilities, and modes: show it and ask which they meant.
 
-The JSON has \`mode\` (\`auto\` or \`manual\`; names alone mean \`manual\`), \`configPath\`, \`exists\`, the current \`config\` (when valid), its \`issues\`, \`requested\` (when you passed names: the section paths they resolved to, with each capability expanded to its integrations), \`coverage\` (per capability, the integrations configured for it), \`detected\` (per section path: guessed \`values\` and the \`evidence\` behind them, from local files and git metadata only), \`hookSuggestions\` (hooks the checkout suggests, not already configured: each with its \`point\`, the \`hook\`, and the \`evidence\`, which says what to check before taking it; offered in the hooks walk, never planned), and a \`plan\`:
+The JSON has \`mode\` (\`auto\` or \`manual\`; names alone mean \`manual\`), \`local\` (true for a local run) and \`replace\` (true when it should replace the committed config), \`configPath\`, \`exists\`, \`localPath\`, \`override\` (\`merge\` or \`replace\`), and \`overridden\` (when this machine has an override: its file, how it applies, and, merged, the sections it sets or skips), the current \`config\` (when valid, with the override applied), its \`issues\`, \`requested\` (when you passed names: the section paths they resolved to, with each capability expanded to its integrations), \`coverage\` (per capability, the integrations configured for it), \`detected\` (per section path: guessed \`values\` and the \`evidence\` behind them, from local files and git metadata only), \`hookSuggestions\` (hooks the checkout suggests, not already configured: each with its \`point\`, the \`hook\`, and the \`evidence\`, which says what to check before taking it; offered in the hooks walk, never planned), and a \`plan\`:
 
 - \`changes\`: sections to \`add\`, and empty fields of configured sections to \`fill\`.
 - \`needs\`: required fields still missing after those changes (per instance, with its \`instance\` name, for a list).
@@ -347,7 +353,9 @@ Then {{askVerb}}:
           kind: "action",
           title: "Write",
           commandCalls: ["configure"],
-          body: `Pass only what changes on stdin, keyed by section path. Each section you include **replaces** that section's whole entry (so include its existing fields too: filling \`ready\`'s \`fix\` and \`checks\` keeps its \`skip\`, \`ignoreChecks\`, and hooks); \`null\` removes one; \`skip\` marks sections as deliberately not configured; everything you omit stays as it is.
+          body: `For a local run, add \`--local\` (\`{{command:configure}} write --local\`): the patch then applies to this machine's override, \`null\` removes a section from the override so the committed one applies again, and \`skip\` drops a committed section for this machine only. When detect said \`replace\`, add \`--replace\` too: the override then becomes the whole config, starting from the config as it reads now, with the patch on top. To go back to layering over the committed file, add \`--merge\`. Either one is remembered in the file, so later local writes need only \`--local\`, and with no changes to make, \`echo '{}' | {{command:configure}} write --local --replace\` just switches. Otherwise it writes \`{{configPath}}\`.
+
+Pass only what changes on stdin, keyed by section path. Each section you include **replaces** that section's whole entry (so include its existing fields too: filling \`ready\`'s \`fix\` and \`checks\` keeps its \`skip\`, \`ignoreChecks\`, and hooks); \`null\` removes one; \`skip\` marks sections as deliberately not configured; everything you omit stays as it is.
 
 \`\`\`bash
 {{command:configure}} write <<'JSON'
@@ -371,9 +379,9 @@ It validates the whole result and writes only if the content changed, in a fixed
 {{command:configure}} show
 \`\`\`
 
-Show it as one table: section (with the instance name, for a list), its fields and values, and what the team uses it for (\`use\`). Then list the \`skipped\` sections, and any \`warnings\`.
+Show it as one table: section (with the instance name, for a list), its fields and values, what the team uses it for (\`use\`), and, when \`overridden\` lists it, that it comes from the local override (when \`override\` is \`replace\`, say the whole config is this machine's and the committed file is ignored). Then list the \`skipped\` sections, and any \`warnings\`.
 
-Say what changed in \`{{configPath}}\`, or that nothing did (\`"written": false\` with no issues). Then, from \`coverage\`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from \`access\`, plus your MCP check; for the API, \`access.api.source\`, which says where the token comes from, never what it is), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (\`access.cli.auth\`), or record where its token is (\`token\`). That part is about this machine only and never goes in the config. If the file changed, remind the user to commit it so the team shares it.`,
+Say what changed in \`{{configPath}}\` (or, for a local run, in the override at the write's \`configPath\`), or that nothing did (\`"written": false\` with no issues). Then, from \`coverage\`, say which integrations cover each capability, and which capabilities have none, so the user knows what flows can reach. For each configured integration, say how this machine reaches it (from \`access\`, plus your MCP check; for the API, \`access.api.source\`, which says where the token comes from, never what it is), and for any it can't reach at all, the fix: connect its MCP server, install or sign in to its CLI (\`access.cli.auth\`), or record where its token is (\`token\`). That part is about this machine only and never goes in the config. If the committed file changed, remind the user to commit it so the team shares it; a local override is never committed, so say it applies on this machine only. When \`show\` has \`overridden\`, name those sections as coming from this machine's override.`,
           next: null,
         },
       ],

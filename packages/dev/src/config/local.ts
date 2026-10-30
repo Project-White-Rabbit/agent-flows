@@ -24,6 +24,15 @@ export function localPath(gitCommonDir: string): string {
   return path.join(gitCommonDir, "agent-flows", "local.json")
 }
 
+/**
+ * This machine's override of the committed config, in the same format: for a
+ * repo whose config isn't yours to change (someone else's), or settings only
+ * you want. Shared by the repo's worktrees, and never committed.
+ */
+export function localConfigPath(gitCommonDir: string): string {
+  return path.join(gitCommonDir, "agent-flows", "config.json")
+}
+
 export function gitCommonDir(root: string): string | undefined {
   try {
     return execFileSync(
