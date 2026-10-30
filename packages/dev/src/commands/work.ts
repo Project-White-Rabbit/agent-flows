@@ -15,6 +15,7 @@ import {
   branchFromDescription,
   withoutLinkLines,
 } from "../config/branch-line.ts"
+import { DEFAULT_RANKS, ranksProblem } from "../config/sections/tickets.ts"
 import { worktreePaths } from "../config/sections/worktree.ts"
 import { repoRoot } from "./configure.ts"
 import {
@@ -29,14 +30,15 @@ import {
   USAGE_EXIT,
   UsageError,
 } from "./lib.ts"
-import { readRules, PRIORITIES as TRACKER_PRIORITIES } from "./tickets.ts"
+import {
+  type Priority,
+  priorityNamed,
+  readRules,
+  PRIORITIES as TRACKER_PRIORITIES,
+} from "./tickets.ts"
 
 /** The issue tracker's priorities, most urgent first, then none. */
 export const PRIORITIES = TRACKER_PRIORITIES
-export type Priority = (typeof PRIORITIES)[number]
-
-/** What each priority is called, in PRIORITIES order, unless `--ranks` says. */
-export const DEFAULT_RANKS = ["Urgent", "High", "Medium", "Low", "No priority"]
 
 /** Workflow states as the issue tracker's `updateIssue` op names them. */
 export type Stage = "todo" | "in progress" | "in review" | "done" | "canceled"
@@ -464,15 +466,13 @@ export function parsePriorities(
     .map((name) => name.trim().toLowerCase())
     .filter(Boolean)
   return names.map((name) => {
-    const index = [...PRIORITIES].indexOf(name as Priority)
-    const rank = ranks.findIndex((r) => r.toLowerCase() === name)
-    const found = index >= 0 ? index : rank
-    if (found < 0) {
+    const found = priorityNamed(name, ranks)
+    if (!found) {
       throw new UsageError(
         `unknown priority \`${name}\` (use ${[...new Set([...PRIORITIES, ...ranks])].join(", ")})`,
       )
     }
-    return PRIORITIES[found]
+    return found
   })
 }
 
@@ -491,17 +491,20 @@ const SWITCHES = new Set(["section-by-rank", "no-section", "project", "yes"])
 
 type Args = Flags
 
+/** The priorities' names: `--ranks`, else the config's `tickets.ranks`, else the defaults. */
 function ranksOf(args: Args): string[] {
   const ranks = args
     .get("ranks")
     ?.split(",")
     .map((r) => r.trim())
-  if (ranks && ranks.length !== PRIORITIES.length) {
-    throw new UsageError(
-      `--ranks takes ${PRIORITIES.length} names, for ${PRIORITIES.join(", ")}`,
-    )
+  if (!ranks) {
+    return readRules(repoRoot()).ranks ?? DEFAULT_RANKS
   }
-  return ranks ?? DEFAULT_RANKS
+  const problem = ranksProblem(ranks)
+  if (problem) {
+    throw new UsageError(`--ranks ${problem}`)
+  }
+  return ranks
 }
 
 /** The section flags, of which at most one is given. */
@@ -670,8 +673,8 @@ const USAGE = `Usage: work.ts <command>
                   and --limit).
 
 --ranks names the priorities ${PRIORITIES.join(", ")}, in that order, for
-sections and --priority (default: ${DEFAULT_RANKS.join(", ")}). Exits ${USAGE_EXIT} on bad
-arguments or input.`
+sections, TICKET lines, and --priority (default: the config's tickets.ranks,
+else ${DEFAULT_RANKS.join(", ")}). Exits ${USAGE_EXIT} on bad arguments or input.`
 
 const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   plan,

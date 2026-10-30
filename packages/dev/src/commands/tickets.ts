@@ -27,7 +27,11 @@ import {
   upsertPlanningLine,
   upsertSection,
 } from "../config/planning.ts"
-import { ISSUE_PRIORITIES } from "../config/sections/tickets.ts"
+import {
+  DEFAULT_RANKS,
+  ISSUE_PRIORITIES,
+  ranksProblem,
+} from "../config/sections/tickets.ts"
 import { loadConfig, repoRoot } from "./configure.ts"
 import {
   type Flags,
@@ -43,6 +47,29 @@ import {
 
 /** The tracker's priorities, most urgent first; `none` is a team's lowest rank. */
 export const PRIORITIES = ISSUE_PRIORITIES
+export type Priority = (typeof PRIORITIES)[number]
+
+/**
+ * A priority named on the tracker's scale (`high`) or by the team's rank name
+ * for it (`P0`, from `tickets.ranks`), any case; undefined for neither.
+ */
+export function priorityNamed(
+  name: string,
+  ranks: string[] = DEFAULT_RANKS,
+): Priority | undefined {
+  const lower = name.trim().toLowerCase()
+  const index = PRIORITIES.indexOf(lower as Priority)
+  const rank = ranks.findIndex((r) => r.trim().toLowerCase() === lower)
+  return PRIORITIES[index >= 0 ? index : rank]
+}
+
+/** A priority as the table shows it: `high (P0)` when the team calls it otherwise. */
+export function showPriority(priority: string, ranks?: string[]): string {
+  const rank = ranks?.[PRIORITIES.indexOf(priority as Priority)]
+  return rank && rank.toLowerCase() !== priority
+    ? `${priority} (${rank})`
+    : priority
+}
 
 /** The fields an item can set on an issue, in table order. */
 const FIELDS = ["priority", "cycle", "dueDate", "assignee", "project"] as const
@@ -155,6 +182,8 @@ export type Rules = {
   estimateScale?: number[]
   parentFollowsSubIssues?: boolean
   blockerMark?: string
+  /** The team's names for the priorities, in PRIORITIES order. */
+  ranks?: string[]
 }
 
 export type Action = "file" | "update" | "unchanged"
@@ -265,7 +294,26 @@ export function parentsFirst<T extends PlanItem>(
   return { ordered, looped: [...looped].sort() }
 }
 
-function shapeProblems(plan: Plan): string[] {
+/** The plan with each item's priority on the tracker's scale, where a rank name gave it. */
+function onTrackerScale(plan: Plan, ranks?: string[]): Plan {
+  if (!Array.isArray(plan.items)) {
+    return plan
+  }
+  return {
+    ...plan,
+    items: plan.items.map((item) => {
+      const priority =
+        typeof item.priority === "string"
+          ? priorityNamed(item.priority, ranks)
+          : undefined
+      return priority && priority !== item.priority
+        ? { ...item, priority }
+        : item
+    }),
+  }
+}
+
+function shapeProblems(plan: Plan, ranks?: string[]): string[] {
   const problems: string[] = []
   if (!Array.isArray(plan.items) || plan.items.length === 0) {
     return ["the plan has no items"]
@@ -288,7 +336,10 @@ function shapeProblems(plan: Plan): string[] {
       item.priority !== undefined &&
       !PRIORITIES.includes(item.priority as never)
     ) {
-      problems.push(`${key}: priority must be one of ${PRIORITIES.join(", ")}`)
+      const names = ranks
+        ? [...new Set([...PRIORITIES, ...ranks])]
+        : [...PRIORITIES]
+      problems.push(`${key}: priority must be one of ${names.join(", ")}`)
     }
     if (
       item.dueDate !== undefined &&
@@ -707,7 +758,7 @@ function applyRules(
       !isParent
     ) {
       problems.push(
-        `${item.key}: every ${priority} issue needs a due date (tickets.dueDateRequired): set "dueDate", or ask for one`,
+        `${item.key}: every ${showPriority(priority, rules.ranks)} issue needs a due date (tickets.dueDateRequired): set "dueDate", or ask for one`,
       )
     }
     if (
@@ -774,7 +825,8 @@ export function checkPlan(
   today: string,
   rules: Rules = {},
 ): Checked {
-  const shape = shapeProblems(plan)
+  plan = onTrackerScale(plan, rules.ranks)
+  const shape = shapeProblems(plan, rules.ranks)
   if (shape.length > 0) {
     return { problems: shape, checks: [], rows: [] }
   }
@@ -818,9 +870,14 @@ function cell(text: string | undefined | null): string {
 }
 
 /** `old → new` for a field the plan changes, the value for one it keeps. */
-function fieldCell(item: Planned, field: Field): string {
-  const planned = item[field]
-  const existing = item.existing?.[field]
+function fieldCell(
+  item: Planned,
+  field: Field,
+  show: (value: string) => string = (value) => value,
+): string {
+  const shown = (value: string | null | undefined) => value && show(value)
+  const planned = shown(item[field])
+  const existing = shown(item.existing?.[field])
   let text: string
   if (planned === undefined) {
     text = existing ?? ""
@@ -838,7 +895,7 @@ function fieldCell(item: Planned, field: Field): string {
   return item.defaults?.includes(field) && text ? `${text} (default)` : text
 }
 
-export function renderTable(rows: Row[]): string {
+export function renderTable(rows: Row[], ranks?: string[]): string {
   const rowOf = new Map(rows.map((r) => [r.item.key, r]))
   // A plan key reads as the row it's filed in, or as its issue once it has one.
   const ref = (key: string): string => {
@@ -867,7 +924,15 @@ export function renderTable(rows: Row[]): string {
       isNew(item) ? "new" : (item.match as string),
       cell(item.retitle ?? item.title ?? item.existing?.title),
       parentCell(item),
-      ...FIELDS.map((f) => cell(fieldCell(item, f))),
+      ...FIELDS.map((f) =>
+        cell(
+          fieldCell(
+            item,
+            f,
+            f === "priority" ? (p) => showPriority(p, ranks) : undefined,
+          ),
+        ),
+      ),
       (item.blockedBy ?? []).map(ref).join(", "),
     ]
     lines.push(`| ${cells.join(" | ")} |`)
@@ -1066,6 +1131,9 @@ export function readRules(root: string): Rules {
     ...(typeof s.blockerMark === "string"
       ? { blockerMark: s.blockerMark }
       : {}),
+    ...(Array.isArray(s.ranks) && !ranksProblem(s.ranks as string[])
+      ? { ranks: s.ranks as string[] }
+      : {}),
   }
 }
 
@@ -1086,17 +1154,22 @@ function readText(file: string): string {
 }
 
 function check(args: Args): void {
+  const rules = readRules(repoRoot())
   const checked = checkPlan(
     readPlan(requiredFlag(args, "plan")),
     args.get("today") ?? today(),
-    readRules(repoRoot()),
+    rules,
   )
   if (checked.problems.length > 0) {
     console.log(checked.problems.map((p) => `PROBLEM ${p}`).join("\n"))
     process.exitCode = 1
     return
   }
-  const lines = [renderTable(checked.rows), "", summaryLine(checked.rows)]
+  const lines = [
+    renderTable(checked.rows, rules.ranks),
+    "",
+    summaryLine(checked.rows),
+  ]
   if (checked.names?.length) {
     lines.push("", ...checked.names.map((n) => `NAME ${n}`))
   }

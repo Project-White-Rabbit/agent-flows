@@ -75,6 +75,8 @@ export type FieldSpec = {
   required?: boolean
   /** Required for any field an op uses, since ops become shell commands. */
   pattern?: FieldPattern
+  /** A rule the value as a whole must meet, past its type and pattern: what's wrong, or undefined. */
+  check?(value: FieldValue): string | undefined
 }
 
 export type SectionValues = Record<string, FieldValue>

@@ -177,6 +177,15 @@ function checkField(
     : `${where} must list only ${field.pattern?.hint} (not \`${bad}\`)`
 }
 
+function checkWhole(
+  field: FieldSpec,
+  value: FieldValue,
+  where: string,
+): string | undefined {
+  const problem = field.check?.(value)
+  return problem ? `${where} ${problem}` : undefined
+}
+
 const UNKNOWN_NOTE = "kept as is; it may come from a newer plugin"
 
 /** Field problems in one entry (or instance), reported at `where`. */
@@ -206,7 +215,9 @@ function checkEntry(
       issues.push(...checkHooks(fieldValue, `${where}.${key}`, warnings))
       continue
     }
-    const problem = checkField(field, fieldValue, `${where}.${key}`)
+    const problem =
+      checkField(field, fieldValue, `${where}.${key}`) ??
+      checkWhole(field, fieldValue as FieldValue, `${where}.${key}`)
     if (problem) {
       issues.push(problem)
     }
