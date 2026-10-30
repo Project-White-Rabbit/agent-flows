@@ -126,7 +126,7 @@ export const syncFlow: Flow = devKit.defineFlow({
 >   - \`remote\` -- remote only: refresh the PR and its issue. No commits, catch-up, or push; never creates a PR.
 >   - \`help\` -- show this and exit
 >
-> Pass an issue id (\`{{cmd}}sync ENG-123\`) to link the branch to that issue. \`--leave-issue\` (merge passes it when the tracker closes issues itself) links the issue but never files or changes one.
+> Pass an issue id (\`{{cmd}}sync ENG-123\`) to link the branch to that issue. \`--leave-issue\` (merge passes it unless \`merge.issueOnMerge\` is \`close\`) links the issue but never files or changes one.
 >
 > A re-run with nothing changed since the last sync (no new commits, clean tree, base not advanced, PR state unchanged) stops at the no-op gate.
 >
@@ -141,7 +141,7 @@ export const syncFlow: Flow = devKit.defineFlow({
           title: "Survey",
           refName: "survey",
           commandCalls: ["configure", "sync"],
-          body: `Parse the argument for a mode keyword (\`local\`, \`remote\`, \`help\`), an optional issue id, and \`--leave-issue\`. No keyword means default mode. With \`--leave-issue\` (\`{{cmd}}merge\` passes it when the issue tracker closes the issue itself on merge), find and link the issue as usual, but file none (skip 8 of 1a and 3b) and leave it as it is (skip 3d).
+          body: `Parse the argument for a mode keyword (\`local\`, \`remote\`, \`help\`), an optional issue id, and \`--leave-issue\`. No keyword means default mode. With \`--leave-issue\` (\`{{cmd}}merge\` passes it when \`merge.issueOnMerge\` isn't \`close\`), find and link the issue as usual, but file none (skip 8 of 1a and 3b) and leave it as it is (skip 3d).
 
 | Mode | Survey | Local git work | Remote writes |
 |------|--------|-------|--------|
@@ -151,7 +151,7 @@ export const syncFlow: Flow = devKit.defineFlow({
 
 The issue tracks the work (a stable Description plus a regenerated Status); the PR describes the change (a regenerated Summary and Test plan). Don't put Status in the PR or the Test plan in the issue.
 
-1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG}
+1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then \`{{command:configure}} get merge.issueOnMerge --optional\`: \`<issueOnMerge>\`, \`close\`, \`tracker\`, or \`leave\` (\`null\` reads as \`close\`); \`leave\` means merging should leave the issue's state alone.
 2. **Integrations:** \`{{command:configure}} integrations sourceControl stacking issueTracker errorTracking sessions --optional\` prints every entry the repo configured for each. ${USE_INTEGRATIONS}
    - **Source control:** keep the entry whose repository (from its \`values\`) is this checkout's \`origin\` in \`git remote -v\`. Outside \`local\` mode, with none, stop: \`No configured source-control repository is this checkout's origin. Run {{cmd}}configure sourceControl, then re-run.\` With one at \`level\` \`read\`, stop too: \`The team uses <entry> read-only, so sync can't push or edit its pull requests. Run {{cmd}}configure <integration> to change that, or use {{cmd}}sync local.\`
    - **Stacking:** use the first entry, if any. With none, the branch is a plain branch off the base.
@@ -314,7 +314,7 @@ Sync owns one block of the PR body:
 ${PR_BLOCK}
 \`\`\`
 
-- **Links:** a \`> Issue:\` line for the issue, its link text the bare id with the title after the link (a tracker reading the PR for the issue takes the link text as the id, so an id with the title inside it doesn't link, and merging doesn't close the issue), an \`> Errors:\` line for each of the survey's \`errorRefs\`, and a session line, named for the session-sharing entry (its \`name\`), with the URL 3a shared. When 3a didn't share one, keep the session line the body already has, from this block or one an earlier sync tool wrote. When the tracker's \`prLink\` op puts its link in the body, add that line too: the closing form for an entry at \`track\` (merging closes the issue even if sync doesn't run again), the linking-only form at \`link\`, which never changes the issue.
+- **Links:** a \`> Issue:\` line for the issue, its link text the bare id with the title after the link (a tracker reading the PR for the issue takes the link text as the id, so an id with the title inside it doesn't link, and merging doesn't close the issue), an \`> Errors:\` line for each of the survey's \`errorRefs\`, and a session line, named for the session-sharing entry (its \`name\`), with the URL 3a shared. When 3a didn't share one, keep the session line the body already has, from this block or one an earlier sync tool wrote. When the tracker's \`prLink\` op puts its link in the body, add that line too: the closing form for an entry at \`track\` (merging closes the issue even if sync doesn't run again), the linking-only form at \`link\`, which never changes the issue. With \`<issueOnMerge>\` \`leave\`, write the linking-only form at \`track\` too, since the closing form would have the tracker's own integration move the issue to done on merge; sync still files and updates the issue itself in 3b and 3d.
 - **The survey's \`format\`:** with \`linkLabels\` \`integration\`, label the issue and error lines with the \`name\` of the entry each links to (\`> <tracker name>:\` in place of \`> Issue:\`), in this block and in 3d. With an \`errorVerb\`, each error line starts with it (\`> Errors: <errorVerb> <short id> ([<title>](<URL>))\`). \`blockMarkers\` is \`splice\`'s to apply; write the block the same either way.
 - **The repo's PR template:** when the repo has one (\`.github/pull_request_template.md\`, \`.github/PULL_REQUEST_TEMPLATE.md\`, or \`docs/\` or the root with either name), the block follows it instead of the Summary and Test plan headings: the template's sections in its order, filled in from the change. A "what and why" or summary section gets the Summary's content, a test section the Test plan's, and a checklist keeps its items, checked only for what's true and verified, with a short note where an item doesn't apply. Drop the template's HTML comments. The link lines stay on top and the last-synced line at the end.
 - **Summary:** regenerated every sync, 1-3 bullets on what the change does and why. Don't restate the issue (the link does) or add progress (that's the issue's Status).

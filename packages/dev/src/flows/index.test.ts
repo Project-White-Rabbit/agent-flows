@@ -232,6 +232,34 @@ describe("dev flows", () => {
     expect(remote?.content).toContain("Only an explicit yes passes `workState`")
   })
 
+  it("picks the PR's issue link form from merge.issueOnMerge", () => {
+    const main =
+      files.find((f) => f.path === "skills/sync/SKILL.md")?.content ?? ""
+    const remote =
+      files.find((f) => f.path === "skills/sync-remote/SKILL.md")?.content ?? ""
+    expect(main).toMatch(/configure\.ts" get merge\.issueOnMerge --optional/)
+    expect(main).toContain("(`null` reads as `close`)")
+    // close (or unset) and tracker: the closing form at track
+    expect(remote).toContain(
+      "the closing form for an entry at `track` (merging closes the issue even if sync doesn't run again), the linking-only form at `link`",
+    )
+    // leave: the linking-only form at track, with sync's own issue writes kept
+    expect(remote).toContain(
+      "With `<issueOnMerge>` `leave`, write the linking-only form at `track` too",
+    )
+    expect(remote).toContain(
+      "sync still files and updates the issue itself in 3b and 3d",
+    )
+  })
+
+  it("leaves the issue to sync's close-out only with merge.issueOnMerge close", () => {
+    const run =
+      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+    expect(run).toContain(
+      "`--leave-issue` when `<issueOnMerge>` is `tracker` or `leave`",
+    )
+  })
+
   it("never cancels an issue close only looked up, and keeps one other pull requests used", () => {
     const run =
       files.find((f) => f.path === "skills/close-run/SKILL.md")?.content ?? ""

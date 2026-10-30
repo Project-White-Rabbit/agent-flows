@@ -252,6 +252,23 @@ describe("sync format", () => {
   })
 })
 
+describe("merge section", () => {
+  it("takes only the issueOnMerge values merge and sync act on", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    for (const issueOnMerge of ["close", "tracker", "leave"]) {
+      expect(checkConfig({ ...base, merge: { issueOnMerge } }).issues).toEqual(
+        [],
+      )
+    }
+    expect(
+      checkConfig({ ...base, merge: { issueOnMerge: false } }).issues,
+    ).toEqual([expect.stringContaining("merge.issueOnMerge")])
+    expect(
+      checkConfig({ ...base, merge: { issueOnMerge: "never" } }).issues,
+    ).toEqual(["merge.issueOnMerge must be `close`, `tracker`, or `leave`"])
+  })
+})
+
 describe("parseGithubRemote", () => {
   it.each([
     "git@github.com:acme/web.git",

@@ -190,12 +190,31 @@ describe("migrate", () => {
       }),
     ).toEqual({
       config: {
-        version: 2,
+        version: 3,
         repo: { baseBranch: "main" },
         integrations: { github: { owner: "acme", repo: "web" } },
         skipped: ["integrations.sentry"],
       },
       issues: [],
+    })
+  })
+
+  it("turns v2 merge.closeIssue into merge.issueOnMerge", () => {
+    const merged = (closeIssue: boolean) =>
+      migrate({
+        version: 2,
+        merge: { closeIssue, after: [] },
+        skipped: ["merge.closeIssue"],
+      }).config
+    expect(merged(true)).toEqual({
+      version: 3,
+      merge: { after: [], issueOnMerge: "close" },
+      skipped: ["merge.issueOnMerge"],
+    })
+    expect(merged(false)?.merge).toEqual({ after: [], issueOnMerge: "leave" })
+    expect(migrate({ version: 2, merge: {} }).config).toEqual({
+      version: 3,
+      merge: {},
     })
   })
 
