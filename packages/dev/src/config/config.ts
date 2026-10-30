@@ -151,6 +151,18 @@ function checkField(
       ? undefined
       : `${where} must be true or false`
   }
+  if (type === "number[]") {
+    if (
+      !Array.isArray(value) ||
+      value.length === 0 ||
+      !value.every((v) => typeof v === "number" && Number.isFinite(v) && v >= 0)
+    ) {
+      return `${where} must be a non-empty list of numbers, 0 or more`
+    }
+    return value.every((v, i) => i === 0 || v > value[i - 1])
+      ? undefined
+      : `${where} must list its numbers smallest first, without repeats`
+  }
   if (
     !Array.isArray(value) ||
     !value.every((v) => typeof v === "string" && v.trim() !== "")

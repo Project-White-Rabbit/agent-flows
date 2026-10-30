@@ -43,9 +43,16 @@ export const tickets: SectionSpec = {
       key: "dueDateRequired",
       type: "string[]",
       description:
-        "Priorities (`urgent`, `high`, `medium`, `low`, `none`, on the tracker's scale) whose issues must have a due date: create-tickets won't file one without it, unless the issue is a parent whose sub-issues carry the dates",
+        "Priorities (`urgent`, `high`, `medium`, `low`, `none`, on the tracker's scale) whose issues must have a due date: create-tickets won't file one without it, unless the issue is a parent whose sub-issues carry the dates, and sync asks for one when it files or ranks the branch's issue at one of them",
       example: ["high"],
       pattern: PRIORITY,
+    },
+    {
+      key: "estimateScale",
+      type: "number[]",
+      description:
+        "The estimates the team sizes work in, smallest first: sync and create-tickets estimate on it, and create-tickets refuses an estimate off it",
+      example: [1, 2, 4, 8],
     },
     {
       key: "parentFollowsSubIssues",
@@ -56,5 +63,5 @@ export const tickets: SectionSpec = {
     },
   ],
   lookup:
-    "Leave it out unless the repo's agent instructions say how the team ranks and files work: a planning document per cycle, a mark for customer blockers, due dates required at some priorities, parents ranked by their sub-issues",
+    "Leave it out unless the repo's agent instructions say how the team ranks and files work: a planning document per cycle, a mark for customer blockers, due dates required at some priorities, parents ranked by their sub-issues, the estimates the team sizes work in",
 }
