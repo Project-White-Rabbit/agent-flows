@@ -178,6 +178,8 @@ export type Plan = {
 /** The config's `tickets` section: how the team files and ranks work. */
 export type Rules = {
   dueDateRequired?: string[]
+  /** The estimates the team sizes work in, smallest first. */
+  estimateScale?: number[]
   parentFollowsSubIssues?: boolean
   blockerMark?: string
   /** The team's names for the priorities, in PRIORITIES order. */
@@ -759,6 +761,15 @@ function applyRules(
         `${item.key}: every ${showPriority(priority, rules.ranks)} issue needs a due date (tickets.dueDateRequired): set "dueDate", or ask for one`,
       )
     }
+    if (
+      rules.estimateScale &&
+      item.estimate !== undefined &&
+      !rules.estimateScale.includes(Number(item.estimate))
+    ) {
+      problems.push(
+        `${item.key}: estimate ${item.estimate} isn't on the team's scale (tickets.estimateScale: ${rules.estimateScale.join(", ")}): pick one of those`,
+      )
+    }
     const start = startOf(item)
     if (due && start && due < start) {
       problems.push(
@@ -1110,6 +1121,9 @@ export function readRules(root: string): Rules {
   return {
     ...(Array.isArray(s.dueDateRequired)
       ? { dueDateRequired: s.dueDateRequired as string[] }
+      : {}),
+    ...(Array.isArray(s.estimateScale)
+      ? { estimateScale: s.estimateScale as number[] }
       : {}),
     ...(s.parentFollowsSubIssues === true
       ? { parentFollowsSubIssues: true }

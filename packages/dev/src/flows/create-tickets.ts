@@ -95,7 +95,7 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
 >   - \`{{cmd}}create-tickets match [--branch <branch>] <text>\` -- only find the issues that already describe the work. Files and changes nothing. Sync uses it to find a branch's issue.
 >   - \`help\` -- show this and exit
 >
-> Priority, labels, estimate, cycle, project, assignee, and due date come from the notes, then the repo's agent instructions, then the issue tracker's config. Names the tracker doesn't know (people, projects, labels, cycles, and blocked-by issues) are reported before anything is filed. The config's \`tickets\` section adds the team's rules: due dates required at some priorities, a parent ranked by its sub-issues, a blocker mark on titles, and a planning document per cycle that records the notes and links each issue back. New issues are filed in the todo state. It needs an issue tracker (\`{{cmd}}configure issueTracker\`), at \`track\` to file.`,
+> Priority, labels, estimate, cycle, project, assignee, and due date come from the notes, then the repo's agent instructions, then the issue tracker's config. Names the tracker doesn't know (people, projects, labels, cycles, and blocked-by issues) are reported before anything is filed. The config's \`tickets\` section adds the team's rules: due dates required at some priorities, the estimates the team sizes work in, a parent ranked by its sub-issues, a blocker mark on titles, and a planning document per cycle that records the notes and links each issue back. New issues are filed in the todo state. It needs an issue tracker (\`{{cmd}}configure issueTracker\`), at \`track\` to file.`,
           next: null,
         },
         {
@@ -113,7 +113,7 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
    - **Pasted notes** (often a flat list with no headings, copied from a chat channel or a doc) **or a sentence:** use the text as given.
    - **Nothing:** ask for the notes or a link, and stop.
 3. **Where the plan goes:** \`<dir>\` is ${flowDir("create-tickets")} (create it), so the plan never lands in the tree. The plan is \`<dir>/plan.json\` in default mode and \`<dir>/match.json\` in \`match\` mode, so looking never overwrites a notes plan or the issues it recorded as filed. In default mode, write the notes as you read them, unedited, to \`<dir>/notes.md\`: the planning document records them as they are.
-4. **The team's rules:** \`{{command:configure}} get tickets.planningDoc tickets.blockerMark tickets.dueDateRequired tickets.parentFollowsSubIssues --optional\`. \`null\` means the team doesn't use that rule. \`tickets.ts check\` applies the last three itself; you need them to draft (a blocker, a date to ask for) and \`planningDoc\` to apply.`,
+4. **The team's rules:** \`{{command:configure}} get tickets.planningDoc tickets.blockerMark tickets.dueDateRequired tickets.parentFollowsSubIssues tickets.estimateScale --optional\`. \`null\` means the team doesn't use that rule. \`tickets.ts check\` applies the last four itself; you need them to draft (a blocker, a date to ask for, an estimate on the scale) and \`planningDoc\` to apply.`,
           next: "main/draft",
         },
         {
@@ -140,7 +140,7 @@ ${PLAN_EXAMPLE}
 | \`assignee\` | The person the notes name (a first name is enough). Leave it out for the person running this. One person per issue. |
 | \`project\` | The one the notes name for the area (part of its name is enough when only one project has it), else the entry's \`values.project\`, listed in \`defaults\`. A new sub-issue the notes give no project takes its parent's, which the check fills in. |
 | \`label\` | One label from the set the agent instructions or the entry's \`values.labels\` give, by the kind of work. Leave it out with no set. |
-| \`estimate\` | Only when the agent instructions or the entry's \`values.estimate\` ask for one. |
+| \`estimate\` | Only when the agent instructions, the entry's \`values.estimate\`, or \`tickets.estimateScale\` ask for one: a number on \`tickets.estimateScale\` when it's set, else on the agent instructions' scale. |
 | \`blockedBy\` | Only when the notes say one piece of work waits on another. Work that holds up a teammate is not a reason on its own. |
 | \`tracker\` | The entry to file in (its \`instance\` or \`integration\`), only when it isn't the first at \`track\`. |
 | \`defaults\` | The fields set from a default rather than read from the notes, so the table marks them for checking. |

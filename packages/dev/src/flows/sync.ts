@@ -132,7 +132,7 @@ export const syncFlow: Flow = devKit.defineFlow({
 >
 > It uses the integrations in \`.agent-flows/config.json\`: source control for the PR (required outside \`local\` mode), and, when configured, stacking for restack and push, an issue tracker for the issue, error tracking to link and resolve the errors the work fixes, and session sharing to link the session behind the work. Set them up with \`{{cmd}}configure\`.
 >
-> Before filing an issue, it searches open and recently closed ones for the same work (with \`{{cmd}}create-tickets match\`), and reuses a match or files a sub-issue under a larger one. The PR's Summary and Test plan and the issue's Status are regenerated each sync. The issue's Description is written once; the issue's state follows the PR (todo, in progress, in review, done, canceled), except that a done or canceled issue stays closed unless you say to reopen it. Its priority is set once and then left to people; its labels, estimate, cycle, and project follow the config and the repo's agent instructions.`,
+> Before filing an issue, it searches open and recently closed ones for the same work (with \`{{cmd}}create-tickets match\`), and reuses a match or files a sub-issue under a larger one. The PR's Summary and Test plan and the issue's Status are regenerated each sync. The issue's Description is written once; the issue's state follows the PR (todo, in progress, in review, done, canceled), except that a done or canceled issue stays closed unless you say to reopen it. Its priority is set once and then left to people, with a due date asked for when the config's \`tickets.dueDateRequired\` covers that priority; its labels, estimate (on \`tickets.estimateScale\`, when set), cycle, and project follow the config and the repo's agent instructions.`,
           next: null,
         },
         {
@@ -300,7 +300,11 @@ With an issue tracker and a new issue planned in 1a: file it with that entry's \
 
 For an entry at \`track\`, on filing and on every full update; the same rules \`{{cmd}}create-tickets\` files by. Take each field from, in order: the user or this session, the repo's agent instructions (\`AGENTS.md\`, \`CLAUDE.md\`, and the docs they point to for ranking or filing work), then the entry's \`values\` of the same name. With none of those, leave the field out. Pass as \`<fields>\` only the fields that change.
 
+First read the team's rules: \`{{command:configure}} get tickets.dueDateRequired tickets.estimateScale --optional\`. \`null\` means the team doesn't use that rule.
+
 ${ISSUE_FIELD_RULES}
+
+**A required due date:** when this write files the issue or sets its priority (an issue with none, or one the user re-ranks), and \`tickets.dueDateRequired\` lists that priority, the issue needs a due date. With none from the user and none on the issue (from \`getIssue\`), ask once before the write: "<ID, or the new issue's title> is <priority>, and the team needs a due date on every <priority> issue. When is it due?" Pass the answer as \`dueDate\`. No answer, or a run nobody can answer, writes everything else, and the report says "<ID> is <priority> with no due date (tickets.dueDateRequired)". An issue whose priority this write leaves alone isn't asked about.
 
 ### 3c. Pull request
 
@@ -388,7 +392,7 @@ Otherwise lead with anything that needs the user's attention (an unresolved conf
 - **Mode** that ran, and what was skipped and why (the local git work in \`remote\` mode or on \`runLocal: false\`; 1a and the remote writes in \`local\` mode or on \`runRemote: false\`).
 - **Branch:** existing or created; what was committed; whether it caught up to the base (and any conflicts resolved, by file: a resolution nobody sees is one nobody checked); whether it was pushed.
 - **PR:** URL (and the stacking tool's link, when there is one), draft or ready, existing or created, and its mergeability; and a \`submit\` that failed, with the push it fell back to.
-- **Issue:** id, URL, and state (and, when it was closed and stayed closed, the state sync would have set); existing, found by the search (and which issue matched), created, or created as a sub-issue (of which); updated, or left alone with \`--leave-issue\`; or none, with no issue tracker configured. The fields set or changed (priority, labels, estimate, cycle, project), and a closed issue the search found for the same work.
+- **Issue:** id, URL, and state (and, when it was closed and stayed closed, the state sync would have set); existing, found by the search (and which issue matched), created, or created as a sub-issue (of which); updated, or left alone with \`--leave-issue\`; or none, with no issue tracker configured. The fields set or changed (priority, labels, estimate, cycle, project, due date), a priority left without the due date \`tickets.dueDateRequired\` asks for, and a closed issue the search found for the same work.
 - **Session:** the shared URL, or skipped or failed, and why.
 - **Errors:** refs linked, and any resolved.`,
           next: null,
