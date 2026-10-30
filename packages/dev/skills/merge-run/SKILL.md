@@ -63,7 +63,7 @@ For `stack`, instead: the stacking entry's `mergeStack` op. It can take minutes;
 
 ### Close out
 
-Run the `/dev-flows:sync` skill with the argument `remote` (and `--leave-issue` when `<closeIssue>` is false: the tracker closes the issue itself on merge, so sync leaves it alone). With the pull request merged, it moves the issue to done and resolves the errors the pull request fixed, as far as each integration's `level` allows. A failure here goes in the report; the merge stands.
+Run the `/dev-flows:sync` skill with the argument `remote` (and `--leave-issue` when `<issueOnMerge>` is `tracker` or `leave`: the tracker moves the issue itself, or nothing does, so sync leaves it as it is). With the pull request merged, it moves the issue to done and resolves the errors the pull request fixed, as far as each integration's `level` allows. A failure here goes in the report; the merge stands.
 
 ### Delete the remote branch
 
@@ -78,6 +78,6 @@ Lead with anything that needs the user's attention: a stop and its reason, a cha
 - **Method:** the method and why; for a chain, `set by the stacking tool or the host`, and a method argument that wasn't used.
 - **CI:** the commit it passed on (short sha), how long it waited, the checks it didn't wait on (not required by the base, or ignored by `ready.ignoreChecks`), and any failed checks the host didn't require.
 - **Hooks:** what the `beforeCi` hooks committed and pushed, if anything.
-- **Close-out:** the issue and its state (or left to the tracker, with `merge.closeIssue` false), errors resolved, and any to resolve by hand, from the remote sync.
+- **Close-out:** the issue and its state (or left to the tracker, or as it was, with `merge.issueOnMerge` `tracker` or `leave`), errors resolved, and any to resolve by hand, from the remote sync.
 - **Remote branch:** deleted, already gone, or kept (and why).
 - **Local:** still on `<branch>`; deleting it and its worktree is the user's call.

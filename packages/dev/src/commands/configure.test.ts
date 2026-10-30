@@ -417,7 +417,7 @@ describe("configure.ts (as a script)", () => {
       }),
     )
     expect(JSON.parse(fs.readFileSync(configFile(), "utf8"))).toEqual({
-      version: 2,
+      version: 3,
       repo: { baseBranch: "main" },
       integrations: {
         github: { owner: "acme", repo: "web" },

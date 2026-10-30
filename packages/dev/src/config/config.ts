@@ -26,7 +26,7 @@ import { checkUse, USE_KEY } from "./use.ts"
 export const CONFIG_PATH = ".agent-flows/config.json"
 
 export { INSTANCE_KEY }
-export const CONFIG_VERSION = 2
+export const CONFIG_VERSION = 3
 
 /** Upgrades from each older version. */
 export const MIGRATIONS: Migration[] = [
@@ -43,6 +43,28 @@ export const MIGRATIONS: Migration[] = [
         )
       }
       return out
+    },
+  },
+  {
+    // `merge.closeIssue` became `merge.issueOnMerge` when a team could leave
+    // the issue to the tracker's integration or leave it open. False meant
+    // leaving it open for the teams that set it.
+    from: 2,
+    migrate(config) {
+      const merge = config.merge
+      if (isRecord(merge) && "closeIssue" in merge) {
+        const { closeIssue, ...rest } = merge
+        config.merge =
+          typeof closeIssue === "boolean"
+            ? { ...rest, issueOnMerge: closeIssue ? "close" : "leave" }
+            : merge
+      }
+      if (Array.isArray(config.skipped)) {
+        config.skipped = config.skipped.map((p: unknown) =>
+          p === "merge.closeIssue" ? "merge.issueOnMerge" : p,
+        )
+      }
+      return config
     },
   },
 ]
