@@ -126,13 +126,13 @@ export const syncFlow: Flow = devKit.defineFlow({
 >   - \`remote\` -- remote only: refresh the PR and its issue. No commits, catch-up, or push; never creates a PR.
 >   - \`help\` -- show this and exit
 >
-> Pass an issue id (\`{{cmd}}sync ENG-123\`) to link the branch to that issue. \`--leave-issue\` (merge passes it when the tracker closes issues itself) links the issue but never files or changes one.
+> Pass an issue id (\`{{cmd}}sync ENG-123\`) to link the branch to that issue. \`--leave-issue\` (merge passes it unless \`merge.issueOnMerge\` is \`close\`) links the issue but never files or changes one.
 >
 > A re-run with nothing changed since the last sync (no new commits, clean tree, base not advanced, PR state unchanged) stops at the no-op gate.
 >
 > It uses the integrations in \`.agent-flows/config.json\`: source control for the PR (required outside \`local\` mode), and, when configured, stacking for restack and push, an issue tracker for the issue, error tracking to link and resolve the errors the work fixes, and session sharing to link the session behind the work. Set them up with \`{{cmd}}configure\`.
 >
-> Before filing an issue, it searches open and recently closed ones for the same work (with \`{{cmd}}create-tickets match\`), and reuses a match or files a sub-issue under a larger one. The PR's Summary and Test plan and the issue's Status are regenerated each sync. The issue's Description is written once; the issue's state follows the PR (todo, in progress, in review, done, canceled), except that a done or canceled issue stays closed unless you say to reopen it. Its priority is set once and then left to people; its labels, estimate, cycle, and project follow the config and the repo's agent instructions.`,
+> Before filing an issue, it searches open and recently closed ones for the same work (with \`{{cmd}}create-tickets match\`), and reuses a match or files a sub-issue under a larger one. The PR's Summary and Test plan and the issue's Status are regenerated each sync. The issue's Description is written once; the issue's state follows the PR (todo, in progress, in review, done, canceled), except that a done or canceled issue stays closed unless you say to reopen it. Its priority is set once and then left to people, with a due date asked for when the config's \`tickets.dueDateRequired\` covers that priority; its labels, estimate (on \`tickets.estimateScale\`, when set), cycle, and project follow the config and the repo's agent instructions.`,
           next: null,
         },
         {
@@ -141,7 +141,7 @@ export const syncFlow: Flow = devKit.defineFlow({
           title: "Survey",
           refName: "survey",
           commandCalls: ["configure", "sync"],
-          body: `Parse the argument for a mode keyword (\`local\`, \`remote\`, \`help\`), an optional issue id, and \`--leave-issue\`. No keyword means default mode. With \`--leave-issue\` (\`{{cmd}}merge\` passes it when the issue tracker closes the issue itself on merge), find and link the issue as usual, but file none (skip 8 of 1a and 3b) and leave it as it is (skip 3d).
+          body: `Parse the argument for a mode keyword (\`local\`, \`remote\`, \`help\`), an optional issue id, and \`--leave-issue\`. No keyword means default mode. With \`--leave-issue\` (\`{{cmd}}merge\` passes it when \`merge.issueOnMerge\` isn't \`close\`), find and link the issue as usual, but file none (skip 8 of 1a and 3b) and leave it as it is (skip 3d).
 
 | Mode | Survey | Local git work | Remote writes |
 |------|--------|-------|--------|
@@ -151,7 +151,7 @@ export const syncFlow: Flow = devKit.defineFlow({
 
 The issue tracks the work (a stable Description plus a regenerated Status); the PR describes the change (a regenerated Summary and Test plan). Don't put Status in the PR or the Test plan in the issue.
 
-1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG}
+1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then \`{{command:configure}} get merge.issueOnMerge --optional\`: \`<issueOnMerge>\`, \`close\`, \`tracker\`, or \`leave\` (\`null\` reads as \`close\`); \`leave\` means merging should leave the issue's state alone.
 2. **Integrations:** \`{{command:configure}} integrations sourceControl stacking issueTracker errorTracking sessions --optional\` prints every entry the repo configured for each. ${USE_INTEGRATIONS}
    - **Source control:** keep the entry whose repository (from its \`values\`) is this checkout's \`origin\` in \`git remote -v\`. Outside \`local\` mode, with none, stop: \`No configured source-control repository is this checkout's origin. Run {{cmd}}configure sourceControl, then re-run.\` With one at \`level\` \`read\`, stop too: \`The team uses <entry> read-only, so sync can't push or edit its pull requests. Run {{cmd}}configure <integration> to change that, or use {{cmd}}sync local.\`
    - **Stacking:** use the first entry, if any. With none, the branch is a plain branch off the base.
@@ -300,7 +300,11 @@ With an issue tracker and a new issue planned in 1a: file it with that entry's \
 
 For an entry at \`track\`, on filing and on every full update; the same rules \`{{cmd}}create-tickets\` files by. Take each field from, in order: the user or this session, the repo's agent instructions (\`AGENTS.md\`, \`CLAUDE.md\`, and the docs they point to for ranking or filing work), then the entry's \`values\` of the same name. With none of those, leave the field out. Pass as \`<fields>\` only the fields that change.
 
+First read the team's rules: \`{{command:configure}} get tickets.dueDateRequired tickets.estimateScale --optional\`. \`null\` means the team doesn't use that rule.
+
 ${ISSUE_FIELD_RULES}
+
+**A required due date:** when this write files the issue or sets its priority (an issue with none, or one the user re-ranks), and \`tickets.dueDateRequired\` lists that priority, the issue needs a due date. With none from the user and none on the issue (from \`getIssue\`), ask once before the write: "<ID, or the new issue's title> is <priority>, and the team needs a due date on every <priority> issue. When is it due?" Pass the answer as \`dueDate\`. No answer, or a run nobody can answer, writes everything else, and the report says "<ID> is <priority> with no due date (tickets.dueDateRequired)". An issue whose priority this write leaves alone isn't asked about.
 
 ### 3c. Pull request
 
@@ -310,7 +314,7 @@ Sync owns one block of the PR body:
 ${PR_BLOCK}
 \`\`\`
 
-- **Links:** a \`> Issue:\` line for the issue, its link text the bare id with the title after the link (a tracker reading the PR for the issue takes the link text as the id, so an id with the title inside it doesn't link, and merging doesn't close the issue), an \`> Errors:\` line for each of the survey's \`errorRefs\`, and a session line, named for the session-sharing entry (its \`name\`), with the URL 3a shared. When 3a didn't share one, keep the session line the body already has, from this block or one an earlier sync tool wrote. When the tracker's \`prLink\` op puts its link in the body, add that line too: the closing form for an entry at \`track\` (merging closes the issue even if sync doesn't run again), the linking-only form at \`link\`, which never changes the issue.
+- **Links:** a \`> Issue:\` line for the issue, its link text the bare id with the title after the link (a tracker reading the PR for the issue takes the link text as the id, so an id with the title inside it doesn't link, and merging doesn't close the issue), an \`> Errors:\` line for each of the survey's \`errorRefs\`, and a session line, named for the session-sharing entry (its \`name\`), with the URL 3a shared. When 3a didn't share one, keep the session line the body already has, from this block or one an earlier sync tool wrote. When the tracker's \`prLink\` op puts its link in the body, add that line too: the closing form for an entry at \`track\` (merging closes the issue even if sync doesn't run again), the linking-only form at \`link\`, which never changes the issue. With \`<issueOnMerge>\` \`leave\`, write the linking-only form at \`track\` too, since the closing form would have the tracker's own integration move the issue to done on merge; sync still files and updates the issue itself in 3b and 3d.
 - **The survey's \`format\`:** with \`linkLabels\` \`integration\`, label the issue and error lines with the \`name\` of the entry each links to (\`> <tracker name>:\` in place of \`> Issue:\`), in this block and in 3d. With an \`errorVerb\`, each error line starts with it (\`> Errors: <errorVerb> <short id> ([<title>](<URL>))\`). \`blockMarkers\` is \`splice\`'s to apply; write the block the same either way.
 - **The repo's PR template:** when the repo has one (\`.github/pull_request_template.md\`, \`.github/PULL_REQUEST_TEMPLATE.md\`, or \`docs/\` or the root with either name), the block follows it instead of the Summary and Test plan headings: the template's sections in its order, filled in from the change. A "what and why" or summary section gets the Summary's content, a test section the Test plan's, and a checklist keeps its items, checked only for what's true and verified, with a short note where an item doesn't apply. Drop the template's HTML comments. The link lines stay on top and the last-synced line at the end.
 - **Summary:** regenerated every sync, 1-3 bullets on what the change does and why. Don't restate the issue (the link does) or add progress (that's the issue's Status).
@@ -388,7 +392,7 @@ Otherwise lead with anything that needs the user's attention (an unresolved conf
 - **Mode** that ran, and what was skipped and why (the local git work in \`remote\` mode or on \`runLocal: false\`; 1a and the remote writes in \`local\` mode or on \`runRemote: false\`).
 - **Branch:** existing or created; what was committed; whether it caught up to the base (and any conflicts resolved, by file: a resolution nobody sees is one nobody checked); whether it was pushed.
 - **PR:** URL (and the stacking tool's link, when there is one), draft or ready, existing or created, and its mergeability; and a \`submit\` that failed, with the push it fell back to.
-- **Issue:** id, URL, and state (and, when it was closed and stayed closed, the state sync would have set); existing, found by the search (and which issue matched), created, or created as a sub-issue (of which); updated, or left alone with \`--leave-issue\`; or none, with no issue tracker configured. The fields set or changed (priority, labels, estimate, cycle, project), and a closed issue the search found for the same work.
+- **Issue:** id, URL, and state (and, when it was closed and stayed closed, the state sync would have set); existing, found by the search (and which issue matched), created, or created as a sub-issue (of which); updated, or left alone with \`--leave-issue\`; or none, with no issue tracker configured. The fields set or changed (priority, labels, estimate, cycle, project, due date), a priority left without the due date \`tickets.dueDateRequired\` asks for, and a closed issue the search found for the same work.
 - **Session:** the shared URL, or skipped or failed, and why.
 - **Errors:** refs linked, and any resolved.`,
           next: null,

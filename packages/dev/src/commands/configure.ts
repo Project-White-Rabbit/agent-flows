@@ -24,9 +24,11 @@ import {
   planConfig,
   type RawConfig,
   resolveSections,
+  sameConfig,
   serializeConfig,
 } from "../config/config.ts"
 import { createDetectContext, detectSections } from "../config/detect.ts"
+import { type FormatResult, formatFile } from "../config/format.ts"
 import {
   type HookSuggestion,
   suggestHooks,
@@ -539,6 +541,37 @@ function parsePatch(input: string, optional = false): ConfigPatch {
   return patch as ConfigPatch
 }
 
+function readJson(file: string): unknown {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"))
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Write the config, then lay it out with the repo's formatter. A formatter
+ * that changed what the file holds is undone: the file must stay this config.
+ */
+function writeFormatted(
+  root: string,
+  configPath: string,
+  config: RawConfig,
+): FormatResult {
+  const content = serializeConfig(config)
+  fs.mkdirSync(path.dirname(configPath), { recursive: true })
+  fs.writeFileSync(configPath, content)
+  const result = formatFile(root, path.relative(root, configPath))
+  if (result.formatted && !sameConfig(readJson(configPath), config)) {
+    fs.writeFileSync(configPath, content)
+    return {
+      formatted: false,
+      reason: `${result.formatted} changed the config's content`,
+    }
+  }
+  return result
+}
+
 /**
  * Patch the committed config, or with `local`, this machine's override of it,
  * switching the override to `mode` when given. The committed file must be
@@ -601,23 +634,29 @@ async function write(
     process.exitCode = 1
     return
   }
-  // Leave the file alone when nothing changed, so re-running is a no-op.
-  const content = serializeConfig(next)
-  let existing: string | undefined
-  try {
-    existing = fs.readFileSync(configPath, "utf8")
-  } catch {
-    existing = undefined
-  }
-  const changed = existing !== content
-  if (changed) {
+  // Leave the file alone when its content is the same, however it's laid out,
+  // so re-running is a no-op.
+  const changed = !sameConfig(readJson(configPath), next)
+  let format: FormatResult | undefined
+  if (changed && local) {
+    // The override is in the git dir, out of the repo formatter's reach.
     fs.mkdirSync(path.dirname(configPath), { recursive: true })
-    fs.writeFileSync(configPath, content)
+    fs.writeFileSync(configPath, serializeConfig(next))
+  } else if (changed) {
+    format = writeFormatted(root, configPath, next)
   }
   printJson({
     configPath,
     ...(local ? { local: true } : {}),
     written: changed,
+    ...(format
+      ? {
+          formatted: format.formatted,
+          ...(format.formatted === false
+            ? { formatReason: format.reason }
+            : {}),
+        }
+      : {}),
     config: next,
     coverage: coverage(effective),
     ...(warnings.length > 0 ? { warnings } : {}),
@@ -670,7 +709,10 @@ const HELP = `Usage: configure.ts <command>
                   named instances, for an integration configured more than
                   once), null removes it, skip marks sections as deliberately
                   not configured.
-                  Validates, and writes only if the content changed; on issues,
+                  Validates, and writes only if the content changed (layout
+                  and key order don't count), then formats the file with the
+                  repo's installed Biome or Prettier, if any ("formatted",
+                  and "formatReason" when it couldn't). On issues,
                   prints them and exits 1. An invalid file is patched as it
                   stands, so a write that fixes it goes through; one that
                   isn't a config at all (bad JSON, a newer version) has to be
@@ -681,7 +723,8 @@ const HELP = `Usage: configure.ts <command>
                   Each section it sets replaces the committed one, its skip
                   list drops committed ones, and null removes a section from
                   the override so the committed one applies again. The
-                  override must make a valid config once applied.
+                  override must make a valid config once applied, and isn't
+                  formatted (it's outside the repo).
                   --replace makes the override the whole config, ignoring
                   ${CONFIG_PATH}; switching to it starts from the config as it
                   reads now. --merge goes back to layering it over the

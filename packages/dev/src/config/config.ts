@@ -26,7 +26,7 @@ import { checkUse, USE_KEY } from "./use.ts"
 export const CONFIG_PATH = ".agent-flows/config.json"
 
 export { INSTANCE_KEY }
-export const CONFIG_VERSION = 2
+export const CONFIG_VERSION = 3
 
 /** Upgrades from each older version. */
 export const MIGRATIONS: Migration[] = [
@@ -43,6 +43,28 @@ export const MIGRATIONS: Migration[] = [
         )
       }
       return out
+    },
+  },
+  {
+    // `merge.closeIssue` became `merge.issueOnMerge` when a team could leave
+    // the issue to the tracker's integration or leave it open. False meant
+    // leaving it open for the teams that set it.
+    from: 2,
+    migrate(config) {
+      const merge = config.merge
+      if (isRecord(merge) && "closeIssue" in merge) {
+        const { closeIssue, ...rest } = merge
+        config.merge =
+          typeof closeIssue === "boolean"
+            ? { ...rest, issueOnMerge: closeIssue ? "close" : "leave" }
+            : merge
+      }
+      if (Array.isArray(config.skipped)) {
+        config.skipped = config.skipped.map((p: unknown) =>
+          p === "merge.closeIssue" ? "merge.issueOnMerge" : p,
+        )
+      }
+      return config
     },
   },
 ]
@@ -151,6 +173,18 @@ function checkField(
       ? undefined
       : `${where} must be true or false`
   }
+  if (type === "number[]") {
+    if (
+      !Array.isArray(value) ||
+      value.length === 0 ||
+      !value.every((v) => typeof v === "number" && Number.isFinite(v) && v >= 0)
+    ) {
+      return `${where} must be a non-empty list of numbers, 0 or more`
+    }
+    return value.every((v, i) => i === 0 || v > value[i - 1])
+      ? undefined
+      : `${where} must list its numbers smallest first, without repeats`
+  }
   if (
     !Array.isArray(value) ||
     !value.every((v) => typeof v === "string" && v.trim() !== "")
@@ -163,6 +197,15 @@ function checkField(
   return bad === undefined
     ? undefined
     : `${where} must list only ${field.pattern?.hint} (not \`${bad}\`)`
+}
+
+function checkWhole(
+  field: FieldSpec,
+  value: FieldValue,
+  where: string,
+): string | undefined {
+  const problem = field.check?.(value)
+  return problem ? `${where} ${problem}` : undefined
 }
 
 const UNKNOWN_NOTE = "kept as is; it may come from a newer plugin"
@@ -194,7 +237,9 @@ function checkEntry(
       issues.push(...checkHooks(fieldValue, `${where}.${key}`, warnings))
       continue
     }
-    const problem = checkField(field, fieldValue, `${where}.${key}`)
+    const problem =
+      checkField(field, fieldValue, `${where}.${key}`) ??
+      checkWhole(field, fieldValue as FieldValue, `${where}.${key}`)
     if (problem) {
       issues.push(problem)
     }
@@ -552,6 +597,33 @@ export function overlay(
 
 export function serializeConfig(config: RawConfig): string {
   return `${JSON.stringify(config, null, 2)}\n`
+}
+
+/**
+ * True when two JSON values hold the same config: arrays in the same order,
+ * objects with the same keys in any order. A file the repo's formatter laid
+ * out, or someone reordered by hand, is the same config as long as this holds.
+ */
+export function sameConfig(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, i) => sameConfig(item, b[i]))
+    )
+  }
+  if (isRecord(a) || isRecord(b)) {
+    if (!isRecord(a) || !isRecord(b)) {
+      return false
+    }
+    const keys = Object.keys(a)
+    return (
+      keys.length === Object.keys(b).length &&
+      keys.every((k) => Object.hasOwn(b, k) && sameConfig(a[k], b[k]))
+    )
+  }
+  return a === b
 }
 
 export type PlannedChange =

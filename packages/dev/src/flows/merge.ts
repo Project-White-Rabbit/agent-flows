@@ -73,7 +73,7 @@ export const mergeFlow: Flow = devKit.defineFlow({
 ### 1a. Survey
 
 1. **Arguments:** a scope (\`stack\`, \`branch\`, \`no-stack\`) and a method (\`squash\`, \`merge\`, \`no-squash\`, \`rebase\`), each at most once, in any order. Anything else: stop and show the usage, \`{{cmd}}merge [stack | branch] [squash | merge | rebase]\`.
-2. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then \`{{command:configure}} get ready.ignoreChecks merge.closeIssue --optional\`: \`<ignoreChecks>\`, the CI check patterns the team never waits on (\`null\` for none), and \`<closeIssue>\`, false when the issue tracker closes the issue itself on merge (\`null\` reads as true).
+2. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then \`{{command:configure}} get ready.ignoreChecks merge.issueOnMerge --optional\`: \`<ignoreChecks>\`, the CI check patterns the team never waits on (\`null\` for none), and \`<issueOnMerge>\`, what happens to the issue on merge: \`close\` (merge moves it to done; \`null\` reads as \`close\`), \`tracker\` (the tracker's own integration moves it), or \`leave\` (nothing moves it).
 3. **Integrations:** \`{{command:configure}} integrations sourceControl stacking --optional\`. ${USE_INTEGRATIONS}
    - **Source control:** keep the entry whose repository (from its \`values\`) is this checkout's \`origin\` in \`git remote -v\`. With none, stop: \`No configured source-control repository is this checkout's origin. Run {{cmd}}configure sourceControl, then re-run.\` At \`level\` \`read\`, stop too: \`The team uses <entry> read-only, so merge can't land pull requests. Run {{cmd}}configure <integration> to change that.\`
    - **Stacking:** the first entry, if any.
@@ -185,7 +185,7 @@ For \`stack\`, instead: the stacking entry's \`mergeStack\` op. It can take minu
 
 ### Close out
 
-Run the \`{{cmd}}sync\` skill with the argument \`remote\` (and \`--leave-issue\` when \`<closeIssue>\` is false: the tracker closes the issue itself on merge, so sync leaves it alone). With the pull request merged, it moves the issue to done and resolves the errors the pull request fixed, as far as each integration's \`level\` allows. A failure here goes in the report; the merge stands.
+Run the \`{{cmd}}sync\` skill with the argument \`remote\` (and \`--leave-issue\` when \`<issueOnMerge>\` is \`tracker\` or \`leave\`: the tracker moves the issue itself, or nothing does, so sync leaves it as it is). With the pull request merged, it moves the issue to done and resolves the errors the pull request fixed, as far as each integration's \`level\` allows. A failure here goes in the report; the merge stands.
 
 ### Delete the remote branch
 
@@ -204,7 +204,7 @@ Only after the host said merged. When \`above\` is more than 0, keep it: the pul
 - **Method:** the method and why; for a chain, \`set by the stacking tool or the host\`, and a method argument that wasn't used.
 - **CI:** the commit it passed on (short sha), how long it waited, the checks it didn't wait on (not required by the base, or ignored by \`ready.ignoreChecks\`), and any failed checks the host didn't require.
 - **Hooks:** what the \`beforeCi\` hooks committed and pushed, if anything.
-- **Close-out:** the issue and its state (or left to the tracker, with \`merge.closeIssue\` false), errors resolved, and any to resolve by hand, from the remote sync.
+- **Close-out:** the issue and its state (or left to the tracker, or as it was, with \`merge.issueOnMerge\` \`tracker\` or \`leave\`), errors resolved, and any to resolve by hand, from the remote sync.
 - **Remote branch:** deleted, already gone, or kept (and why).
 - **Local:** still on \`<branch>\`; deleting it and its worktree is the user's call.`,
           next: null,
