@@ -8,6 +8,7 @@ import {
   hooksInvariant,
   REQUIRE_CONFIG,
   STACK_PARENT,
+  UNKNOWN_FLAGS,
   USE_INTEGRATIONS,
 } from "./kit.ts"
 
@@ -59,7 +60,10 @@ export const syncFlow: Flow = devKit.defineFlow({
   frontmatter: {
     description:
       "Commit, catch up to the base branch, push, and keep the draft PR and its issue in step with the branch. Only for the named dev-flows sync workflow, not generic commit or push requests.",
-    argumentHint: { deriveFromModes: true, suffix: "[ISSUE-ID]" },
+    argumentHint: {
+      deriveFromModes: true,
+      suffix: "[ISSUE-ID] [--tracker <entry>] [--tracker-project <name>]",
+    },
   },
   commands: DEV_COMMANDS.defineCommands({
     hooks: HOOKS_COMMAND,
@@ -126,13 +130,13 @@ export const syncFlow: Flow = devKit.defineFlow({
 >   - \`remote\` -- remote only: refresh the PR and its issue. No commits, catch-up, or push; never creates a PR.
 >   - \`help\` -- show this and exit
 >
-> Pass an issue id (\`{{cmd}}sync ENG-123\`) to link the branch to that issue. \`--leave-issue\` (merge passes it unless \`merge.issueOnMerge\` is \`close\`) links the issue but never files or changes one.
+> Pass an issue id (\`{{cmd}}sync ENG-123\`) to link the branch to that issue. \`--tracker <entry>\` files a new issue in that issue tracker, when the repo has several, and \`--tracker-project <name>\` puts the issue in that project. \`--leave-issue\` (merge passes it unless \`merge.issueOnMerge\` is \`close\`) links the issue but never files or changes one.
 >
 > A re-run with nothing changed since the last sync (no new commits, clean tree, base not advanced, PR state unchanged) stops at the no-op gate.
 >
 > It uses the integrations in \`.agent-flows/config.json\`: source control for the PR (required outside \`local\` mode), and, when configured, stacking for restack and push, an issue tracker for the issue, error tracking to link and resolve the errors the work fixes, and session sharing to link the session behind the work. Set them up with \`{{cmd}}configure\`.
 >
-> Before filing an issue, it searches open and recently closed ones for the same work (with \`{{cmd}}create-tickets match\`), and reuses a match or files a sub-issue under a larger one. The PR's Summary and Test plan and the issue's Status are regenerated each sync. The issue's Description is written once; the issue's state follows the PR (todo, in progress, in review, done, canceled), except that a done or canceled issue stays closed unless you say to reopen it. Its priority is set once and then left to people, with a due date asked for when the config's \`tickets.dueDateRequired\` covers that priority; its labels, estimate (on \`tickets.estimateScale\`, when set), cycle, and project follow the config and the repo's agent instructions.`,
+> Before filing an issue, it searches open and recently closed ones for the same work (with \`{{cmd}}create-tickets match\`), and reuses a match or files a sub-issue under a larger one. The PR's Summary and Test plan and the issue's Status are regenerated each sync. The issue's Description is written once; the issue's state follows the PR (todo, in progress, in review, done, canceled), except that a done or canceled issue stays closed unless you say to reopen it. Its priority is set once and then left to people, with a due date asked for when the config's \`tickets.dueDateRequired\` covers that priority; its labels, estimate (on \`tickets.estimateScale\`, when set), cycle, and project follow the config and the repo's agent instructions. A tracker entry's \`projects\` can claim paths (\`apps/mobile/**\`): a new issue goes in the project whose paths the branch's changes match most, else the entry's default \`project\`. Say which project when that isn't right (\`{{cmd}}sync --tracker-project Mobile\`, or "this is in Mobile"): sync files the issue there, or moves it there when it's in another.`,
           next: null,
         },
         {
@@ -141,7 +145,7 @@ export const syncFlow: Flow = devKit.defineFlow({
           title: "Survey",
           refName: "survey",
           commandCalls: ["configure", "sync"],
-          body: `Parse the argument for a mode keyword (\`local\`, \`remote\`, \`help\`), an optional issue id, and \`--leave-issue\`. No keyword means default mode. With \`--leave-issue\` (\`{{cmd}}merge\` passes it when \`merge.issueOnMerge\` isn't \`close\`), find and link the issue as usual, but file none (skip 8 of 1a and 3b) and leave it as it is (skip 3d).
+          body: `Parse the argument for a mode keyword (\`local\`, \`remote\`, \`help\`), an optional issue id, \`--leave-issue\`, \`--tracker <entry>\`, and \`--tracker-project <name>\`. No keyword means default mode. ${UNKNOWN_FLAGS} Read plain words the same way: "this is in Mobile" or "file it in the Mobile project" is \`--tracker-project Mobile\`, and "file it in <tracker>" is \`--tracker <entry>\`. \`--tracker\` names the issue-tracker entry a new issue is filed in (its \`instance\`, else its \`integration\`); when it names none at \`level\` \`track\`, say so, list the entries at \`track\`, and stop. \`--tracker-project\` is the project the branch's issue goes in: the user naming it, for the issue fields' project rule. With \`--leave-issue\` (\`{{cmd}}merge\` passes it when \`merge.issueOnMerge\` isn't \`close\`), find and link the issue as usual, but file none (skip 8 of 1a and 3b) and leave it as it is (skip 3d).
 
 | Mode | Survey | Local git work | Remote writes |
 |------|--------|-------|--------|
@@ -155,12 +159,12 @@ The issue tracks the work (a stable Description plus a regenerated Status); the 
 2. **Integrations:** \`{{command:configure}} integrations sourceControl stacking issueTracker errorTracking sessions --optional\` prints every entry the repo configured for each. ${USE_INTEGRATIONS}
    - **Source control:** keep the entry whose repository (from its \`values\`) is this checkout's \`origin\` in \`git remote -v\`. Outside \`local\` mode, with none, stop: \`No configured source-control repository is this checkout's origin. Run {{cmd}}configure sourceControl, then re-run.\` With one at \`level\` \`read\`, stop too: \`The team uses <entry> read-only, so sync can't push or edit its pull requests. Run {{cmd}}configure <integration> to change that, or use {{cmd}}sync local.\`
    - **Stacking:** use the first entry, if any. With none, the branch is a plain branch off the base.
-   - **Issue tracker:** look issues up in every entry. Only entries at \`level\` \`track\` get issues filed or updated: file a new one in the first of those, unless the user or the repo's agent instructions name another. At \`link\`, an existing issue is only linked from the PR. With none, skip everything about issues.
+   - **Issue tracker:** look issues up in every entry. Only entries at \`level\` \`track\` get issues filed or updated: file a new one in the one \`--tracker\` names, else the first of those, unless the user or the repo's agent instructions name another. At \`link\`, an existing issue is only linked from the PR. With none, skip everything about issues.
    - **Error tracking:** every entry, if any. Only entries at \`level\` \`resolve\` resolve errors on merge; at \`link\`, errors are only linked.
    - **Session sharing:** the first entry, if any. With none, nothing is shared.
 3. **Pull request:** outside \`local\` mode, run the source-control entry's \`currentPr\` op. \`<pr>\` is \`<number>:<open|merged|closed>:<true|false>\` (the last part is whether it's a draft), or \`none\`. A merged or closed PR still counts: its state is what the issue follows. In \`local\` mode \`<pr>\` is \`none\`.
 4. **Error refs:** outside \`local\` mode, scan the triggering message, this session, and the PR body's \`> \` link lines (an earlier sync tool may have written its own, named for the error tracker) for strings any error-tracking entry's \`issueRef\` op says name one of its issues. The conversation is the one input no fingerprint sees, so pass each as \`--error-ref <ref>\` (a short id, or the URL).
-5. **Survey:** \`{{command:sync}} survey <mode> --base <base> --pr <pr> [--error-ref <ref>]...\` fetches the base (except in \`remote\` mode) and prints JSON: \`branch\`, \`baseRef\` (the ref to compare against), \`onBase\`, \`dirty\`, \`ahead\`, \`behind\`, \`unpushed\`, \`head\`, \`pr\`, \`issue\` (cached for this branch, or left for it by an earlier sync tool's state in the worktree), \`errorRefs\` (every ref this branch has collected), \`newErrorRefs\` (not yet linked), \`lastSyncedHead\`, \`format\` (how sync writes this branch's lines and title: the config's \`sync\` section, then the format the branch was last written in; see 3c), and the gate: \`runLocal\`, \`runRemote\`, \`noop\`. If it fails because HEAD is detached, stop and tell the user to check out a branch.
+5. **Survey:** \`{{command:sync}} survey <mode> --base <base> --pr <pr> [--error-ref <ref>]...\` fetches the base (except in \`remote\` mode) and prints JSON: \`branch\`, \`baseRef\` (the ref to compare against), \`onBase\`, \`dirty\`, \`ahead\`, \`behind\`, \`unpushed\`, \`head\`, \`pr\`, \`issue\` (cached for this branch, or left for it by an earlier sync tool's state in the worktree), \`errorRefs\` (every ref this branch has collected), \`newErrorRefs\` (not yet linked), \`lastSyncedHead\`, \`format\` (how sync writes this branch's lines and title: the config's \`sync\` section, then the format the branch was last written in; see 3c), \`projects\` (for each issue-tracker entry whose \`values.projects\` give paths, by its \`instance\`, else its \`integration\`: \`{"project", "files", "tied"}\`, the project whose paths match the most of the branch's changed files, with \`tied\` the ones that matched as many (name them in the report when the issue is filed there), or \`null\` when none match; empty when no entry gives paths), and the gate: \`runLocal\`, \`runRemote\`, \`noop\`. If it fails because HEAD is detached, stop and tell the user to check out a branch.
 
 ### Routing
 

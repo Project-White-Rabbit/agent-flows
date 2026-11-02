@@ -29,7 +29,7 @@ export const ticketsToWorkFlow: Flow = devKit.defineFlow({
     description:
       "Go through your open issues that have no pull request or workspace yet, most urgent first, and start, skip, or close each one.",
     argumentHint:
-      "[--priority <ranks>] [--limit <n>] [--section <name> | --section-by-rank] [--in <integration>] [help]",
+      "[--priority <ranks>] [--limit <n>] [--section <name> | --section-by-rank] [--workspaces <entry>] [help]",
   },
   commands: DEV_COMMANDS.defineCommands({
     hooks: HOOKS_COMMAND,
@@ -66,7 +66,7 @@ export const ticketsToWorkFlow: Flow = devKit.defineFlow({
 \`\`\`
 {{cmd}}tickets-to-work  [--priority <ranks>] [--limit <n>]
                               [--section <name> | --section-by-rank]
-                              [--in <integration>] [help]
+                              [--workspaces <entry>] [help]
 
 Goes through your open issues that have no pull request, workspace, or git
 worktree yet, most urgent first (then the ones whose title has the team's
@@ -85,8 +85,8 @@ An issue with open sub-issues is left out: its sub-issues are the work.
   it they go in no section
 --section-by-rank: puts each started workspace in the section named after
   its issue's priority, making it when there is none yet
---in <integration>: opens them with that workspaces integration, when the
-  repo configured more than one
+--workspaces <entry>: opens them with that workspaces integration (its
+  instance or integration name), when the repo configured more than one
 \`\`\``,
           next: "main/list",
         },
@@ -95,7 +95,7 @@ An issue with open sub-issues is left out: its sub-issues are the work.
           kind: "action",
           title: "List the issues",
           commandCalls: ["configure", "work"],
-          body: `1. **Flags.** Take \`--priority <ranks>\`, \`--limit <n>\`, \`--section <name>\`, \`--section-by-rank\`, and \`--in <integration>\` out of \`{{argsToken}}\`. ${UNKNOWN_FLAGS} Read plain words the same way: "only urgent and P0" is \`--priority urgent,p0\`, "just 5" or "top 5" is \`--limit 5\`, "sort them into sections by priority" is \`--section-by-rank\`. When both \`--section-by-rank\` and \`--section\` are given, \`--section-by-rank\` wins: say once that \`--section\` is ignored.
+          body: `1. **Flags.** Take \`--priority <ranks>\`, \`--limit <n>\`, \`--section <name>\`, \`--section-by-rank\`, and \`--workspaces <entry>\` out of \`{{argsToken}}\`. ${UNKNOWN_FLAGS} Read plain words the same way: "only urgent and P0" is \`--priority urgent,p0\`, "just 5" or "top 5" is \`--limit 5\`, "sort them into sections by priority" is \`--section-by-rank\`. When both \`--section-by-rank\` and \`--section\` are given, \`--section-by-rank\` wins: say once that \`--section\` is ignored.
 2. **Integrations.** \`{{command:configure}} integrations issueTracker workspaces\`. ${REQUIRE_CONFIG} ${USE_INTEGRATIONS} Closing an issue needs its entry at \`level\` \`track\`; at \`link\`, its issues can be started or skipped, not closed.
 3. **The issues.** \`<dir>\` is ${flowDir("tickets-to-work")} (create it). Run every \`issueTracker\` entry's \`assignedIssues\` op and every \`workspaces\` entry's \`workspaces\` op, and write them to \`<dir>/issues.json\`:
 
@@ -127,7 +127,7 @@ When \`COUNT\` is 0, say there is nothing waiting and stop; when \`TOTAL\` is ab
 
 Act on the answer before asking about the next issue:
 
-- **Start:** run the \`{{cmd}}start-work\` skill with \`<ID> --yes\`, plus \`--section-by-rank\` when it was given, else \`--section "<name>"\` when that was, else \`--no-section\` (so the workspace lands in no section rather than this one's), plus \`--in <integration>\` when given, and follow it through. The answer is the go-ahead, which is what \`--yes\` tells it, so it doesn't ask again. Report its row for the issue; on a failure, say so and keep going.
+- **Start:** run the \`{{cmd}}start-work\` skill with \`<ID> --yes\`, plus \`--section-by-rank\` when it was given, else \`--section "<name>"\` when that was, else \`--no-section\` (so the workspace lands in no section rather than this one's), plus \`--workspaces <entry>\` when given, and follow it through. The answer is the go-ahead, which is what \`--yes\` tells it, so it doesn't ask again. Report its row for the issue; on a failure, say so and keep going.
 - **Skip:** move on.
 - **Close:** the entry's \`updateIssue\` op with only the state \`canceled\`, or \`done\` when the person says the work is already done. Leave the title, description, and fields out.
 - **Stop:** go to the report.`,

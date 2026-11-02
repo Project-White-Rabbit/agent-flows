@@ -317,6 +317,7 @@ describe("dev flows", () => {
       "skills/create-tickets/SKILL.md",
       "skills/ready/SKILL.md",
       "skills/start-work/SKILL.md",
+      "skills/sync/SKILL.md",
       "skills/tickets-to-work/SKILL.md",
     ])
     for (const file of files) {

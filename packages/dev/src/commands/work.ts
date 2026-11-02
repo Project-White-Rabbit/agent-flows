@@ -84,11 +84,11 @@ export type Workspace = {
 export type StartOptions = {
   /**
    * Every new workspace's section; null for none. Undefined: the current
-   * one's, or none in another project, whose sections aren't this one's.
+   * one's, or none in another repository, whose sections aren't this one's.
    */
   section?: string | null
-  /** The workspaces open in another project (`--project`). */
-  otherProject?: boolean
+  /** The workspaces open in another repository (`--workspaces-repository`). */
+  otherRepository?: boolean
   byRank?: boolean
   ranks?: string[]
 }
@@ -211,7 +211,7 @@ export function planStart(
     ? rankName(ticket.priority, options.ranks)
     : options.section !== undefined
       ? options.section
-      : options.otherProject
+      : options.otherRepository
         ? null
         : current?.section?.trim() || null
   return {
@@ -487,7 +487,12 @@ export function describeTicket(
   return `TICKET ${issue.id} "${rankName(issue.priority, ranks)}" due=${issue.dueDate ?? "none"}${state}${blocker}${blocks} "${issue.title}" ${issue.url}`
 }
 
-const SWITCHES = new Set(["section-by-rank", "no-section", "project", "yes"])
+const SWITCHES = new Set([
+  "section-by-rank",
+  "no-section",
+  "workspaces-repository",
+  "yes",
+])
 
 type Args = Flags
 
@@ -525,7 +530,10 @@ function placement(args: Args): StartOptions {
 function plan(args: Args): void {
   const file = requiredFlag(args, "input")
   const input = readJson<{ tickets?: Ticket[]; workspaces?: Workspace[] }>(file)
-  const options = { ...placement(args), otherProject: args.has("project") }
+  const options = {
+    ...placement(args),
+    otherRepository: args.has("workspaces-repository"),
+  }
   const workspaces = [...(input.workspaces ?? []), ...listWorktrees()]
   const prompts =
     args.get("prompts") ?? path.join(path.dirname(file), "prompts")
@@ -630,7 +638,7 @@ function list(args: Args): void {
 const USAGE = `Usage: work.ts <command>
 
   plan --input <file> [--section <name> | --section-by-rank | --no-section]
-       [--project] [--ranks <names>] [--prompts <dir>]
+       [--workspaces-repository] [--ranks <names>] [--prompts <dir>]
                   Decide each ticket in <file> ({"tickets": [...], "workspaces":
                   [...]}) against the open workspaces and this repo's git
                   worktrees. Writes nothing to any tracker. Prints one line each:
@@ -641,8 +649,8 @@ const USAGE = `Usage: work.ts <command>
                     SKIP <ID> <not found|done|canceled>
                   and writes each START's agent prompt to <file>. Without a
                   placement flag, a workspace goes in the section of the one
-                  this session runs in, or none; with --project (the
-                  workspaces open in another project), in none.
+                  this session runs in, or none; with --workspaces-repository (the
+                  workspaces open in another repository), in none.
   reuse (--input <file> | --title "<title>")
         [--section <name> | --section-by-rank | --no-section] [--ranks <names>]
         [--yes [--rename <command>]]

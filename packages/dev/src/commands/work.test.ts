@@ -119,18 +119,20 @@ describe("planStart", () => {
     ).toMatchObject({ section: "No priority" })
   })
 
-  it("puts a workspace in another project in no section unless a flag says", () => {
+  it("puts a workspace in another repository in no section unless a flag says", () => {
     const current: Workspace[] = [
       { branch: "main", section: "P1", current: true },
     ]
-    expect(planStart(ticket(), current, { otherProject: true })).toMatchObject({
+    expect(
+      planStart(ticket(), current, { otherRepository: true }),
+    ).toMatchObject({
       section: null,
     })
     expect(
-      planStart(ticket(), current, { otherProject: true, section: "Bugs" }),
+      planStart(ticket(), current, { otherRepository: true, section: "Bugs" }),
     ).toMatchObject({ section: "Bugs" })
     expect(
-      planStart(ticket(), current, { otherProject: true, byRank: true }),
+      planStart(ticket(), current, { otherRepository: true, byRank: true }),
     ).toMatchObject({ section: "High" })
   })
 })
@@ -382,7 +384,7 @@ describe("work.ts", () => {
     expect(fs.readFileSync(prompt, "utf8")).toMatch(/^Work on issue ENG-12/)
   })
 
-  it("takes --project as no section in the other project", () => {
+  it("takes --workspaces-repository as no section in the other repository", () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-"))
     const input = path.join(dir, "start.json")
     fs.writeFileSync(
@@ -393,9 +395,9 @@ describe("work.ts", () => {
       }),
     )
     expect(capture(["plan", "--input", input])).toContain('section="P1"')
-    expect(capture(["plan", "--input", input, "--project"])).toContain(
-      "section=none",
-    )
+    expect(
+      capture(["plan", "--input", input, "--workspaces-repository"]),
+    ).toContain("section=none")
   })
 
   it("adds a branch line to a description file in place", () => {

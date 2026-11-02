@@ -17,6 +17,13 @@ export type FieldType =
   | "string[]"
   | "number[]"
   | "hook[]"
+  | "project[]"
+
+/**
+ * A tracker project this repo's work goes in: its name, or its name and the
+ * paths (globs, repo-relative) whose changes belong to it. See `projects.ts`.
+ */
+export type ProjectRoute = string | { name: string; paths?: string[] }
 
 /**
  * A repo's own step at a named point in a flow (`ready.before`), for work no
@@ -61,7 +68,13 @@ export const HOOK_KEYS = [
   "prompt",
 ] as const
 
-export type FieldValue = string | boolean | string[] | number[] | Hook[]
+export type FieldValue =
+  | string
+  | boolean
+  | string[]
+  | number[]
+  | Hook[]
+  | ProjectRoute[]
 
 /** A shape a string field must match, and how to describe it in an error. */
 export type FieldPattern = { regex: RegExp; hint: string }

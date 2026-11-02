@@ -138,11 +138,11 @@ export const CAPABILITIES: CapabilitySpec[] = [
       "Open a branch in a workspace of its own, with a coding agent already working on it",
     ops: {
       workspaces:
-        "Every open (not archived) workspace of this repository, or of the integration's project <project> when one is given (another repository it manages, by name): each with its id, name, branch, and sidebar section (none when it has none), and whether this session runs in it",
+        "Every open (not archived) workspace of this repository, or of <repository> when one is given (another repository the integration manages, by name): each with its id, name, branch, and sidebar section (none when it has none), and whether this session runs in it",
       renameWorkspace:
         "Rename the workspace <id> to <name>. With <section>, file it in that sidebar section, making the section when there's none yet; with <section> `none`, take it out of every section; with no <section>, leave its section as it is. Its git branch is renamed separately",
       createWorkspace:
-        "Open a new workspace of this repository, or of the integration's project <project> when one is given (another repository it manages, by name), named <name>, on the branch <branch> (made from <base> when it doesn't exist): exactly <branch> when <exact> is `yes`, else under the prefix the integration or the repo puts on new branches. File it in the sidebar section <section> when one is given, making the section when there's none yet. Start a coding agent in it on the prompt in the file <prompt-file>, or, when the integration can't start one, print the command that does. Prints the workspace's id, the branch it's on, and a link or path to open it",
+        "Open a new workspace of this repository, or of <repository> when one is given (another repository the integration manages, by name), named <name>, on the branch <branch> (made from <base> when it doesn't exist): exactly <branch> when <exact> is `yes`, else under the prefix the integration or the repo puts on new branches. File it in the sidebar section <section> when one is given, making the section when there's none yet. Start a coding agent in it on the prompt in the file <prompt-file>, or, when the integration can't start one, print the command that does. Prints the workspace's id, the branch it's on, and a link or path to open it",
     },
   },
   {

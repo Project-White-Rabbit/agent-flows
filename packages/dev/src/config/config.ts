@@ -11,6 +11,7 @@
 
 import { checkHooks } from "./hooks.ts"
 import { freeInstanceName, INSTANCE_KEY, INSTANCE_NAME } from "./instances.ts"
+import { checkProjects } from "./projects.ts"
 import { SECTIONS } from "./sections/index.ts"
 import type {
   Detection,
@@ -235,6 +236,10 @@ function checkEntry(
     }
     if (field.type === "hook[]") {
       issues.push(...checkHooks(fieldValue, `${where}.${key}`, warnings))
+      continue
+    }
+    if (field.type === "project[]") {
+      issues.push(...checkProjects(fieldValue, `${where}.${key}`, warnings))
       continue
     }
     const problem =
