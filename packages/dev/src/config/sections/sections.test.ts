@@ -195,8 +195,16 @@ function typeOf(value: FieldSpec["example"]): string {
     if (value.every((item) => typeof item === "string")) {
       return "string[]"
     }
-    return value.every((item) => typeof item === "number")
-      ? "number[]"
+    if (value.every((item) => typeof item === "number")) {
+      return "number[]"
+    }
+    // A project is a name, or an object with a name and no hook command.
+    return value.every(
+      (item) =>
+        typeof item === "string" ||
+        (typeof item === "object" && !("run" in item) && !("prompt" in item)),
+    )
+      ? "project[]"
       : "hook[]"
   }
   return typeof value

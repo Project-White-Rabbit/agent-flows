@@ -1,4 +1,5 @@
 import { checks } from "../adapters/github.ts"
+import { projectsField } from "../projects.ts"
 import type { IntegrationSpec } from "../types.ts"
 import { SLUG } from "./patterns.ts"
 
@@ -101,6 +102,7 @@ export const github: IntegrationSpec = {
         "GitHub project new issues go in (its title), when GitHub tracks the repo's issues",
       example: "Roadmap",
     },
+    projectsField("GitHub projects (their titles)"),
   ],
   multiple: true,
   lookup:

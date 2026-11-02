@@ -12,7 +12,12 @@
 import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
+import { getAt, INSTANCE_KEY, instancesOf } from "../config/config.ts"
+import { integrationId } from "../config/integrations.ts"
+import { type Routed, routeProject, routesOf } from "../config/projects.ts"
+import { INTEGRATIONS } from "../config/sections/index.ts"
 import { BITFAB_DEV_FORMAT } from "../config/sections/sync.ts"
+import { usesOf } from "../config/use.ts"
 import { loadConfig } from "./configure.ts"
 import { isMain, printJson, run, runMain, runSubcommand } from "./lib.ts"
 
@@ -287,10 +292,66 @@ function treeHash(): string {
   return createHash("sha256").update(status).digest("hex")
 }
 
+/** `routedProjects` for this checkout, reading the changed files only when needed. */
+function surveyProjects(
+  baseRef: string | undefined,
+): Record<string, Routed | null> {
+  const root = git(["rev-parse", "--show-toplevel"])
+  let changed: string[] | undefined
+  return routedProjects(root ? loadConfig(root).config : undefined, () => {
+    changed ??= changedFiles(baseRef)
+    return changed
+  })
+}
+
 /** The branch's sync format, with the config's sync section over `recorded`. */
 function readFormat(recorded: SyncFormat | undefined): SyncFormat {
   const root = git(["rev-parse", "--show-toplevel"])
   return syncFormat(root ? loadConfig(root).config : undefined, recorded)
+}
+
+/** What the pull request will hold: changed since the merge base, uncommitted, and untracked. */
+function changedFiles(baseRef: string | undefined): string[] {
+  const lines = (text: string | undefined) =>
+    (text ?? "").split("\n").filter((line) => line !== "")
+  return [
+    ...new Set([
+      ...(baseRef
+        ? lines(git(["diff", "--name-only", `${baseRef}...HEAD`]))
+        : []),
+      ...lines(git(["diff", "--name-only", "HEAD"])),
+      ...lines(git(["ls-files", "--others", "--exclude-standard"])),
+    ]),
+  ].sort()
+}
+
+/**
+ * For each issue-tracker entry whose `projects` claim paths (by its instance
+ * name, else its integration), the project the branch's changes put its
+ * issue in: null when none match, so the entry's default applies.
+ */
+export function routedProjects(
+  config: Record<string, unknown> | undefined,
+  changed: () => string[],
+): Record<string, Routed | null> {
+  const out: Record<string, Routed | null> = {}
+  for (const spec of INTEGRATIONS) {
+    if (!("issueTracker" in spec.provides) || !config) {
+      continue
+    }
+    for (const values of instancesOf(getAt(config, spec.path))) {
+      if (
+        routesOf(values.projects).length === 0 ||
+        !usesOf(spec, values).issueTracker
+      ) {
+        continue
+      }
+      const instance = values[INSTANCE_KEY]
+      const key = typeof instance === "string" ? instance : integrationId(spec)
+      out[key] = routeProject(values.projects, changed()) ?? null
+    }
+  }
+  return out
 }
 
 function gitPath(flag: string): string {
@@ -583,6 +644,7 @@ function survey(args: Args): void {
     newErrorRefs: signals.newErrorRefs,
     lastSyncedHead: current?.remote?.head ?? null,
     format: readFormat(current?.format),
+    projects: surveyProjects(baseRef),
     runLocal: signals.runLocal,
     runRemote: signals.runRemote,
     noop: signals.noop,

@@ -34,7 +34,8 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
       "File issues from planning notes, a page link, or a sentence, updating issues that already describe the same work. Not for syncing a branch.",
     argumentHint: {
       deriveFromModes: true,
-      suffix: "[notes URL | pasted notes | sentence] [--yes]",
+      suffix:
+        "[notes URL | pasted notes | sentence] [--yes] [--tracker <entry>] [--tracker-project <name>]",
     },
   },
   commands: DEV_COMMANDS.defineCommands({
@@ -91,7 +92,7 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
 > \`{{cmd}}create-tickets\` files issues from planning notes.
 >
 > Usage:
->   - \`{{cmd}}create-tickets <notes URL | pasted notes | sentence> [--yes]\` -- each planned item becomes one issue, its action items a checklist in the description. Issues that already describe the same work are updated instead, and work closed in the last 90 days is flagged, not filed again. Shows one table and files everything on one confirmation (\`--yes\` skips it when nothing needs an answer). Running it again on the same notes only updates.
+>   - \`{{cmd}}create-tickets <notes URL | pasted notes | sentence> [--yes] [--tracker <entry>] [--tracker-project <name>]\` -- each planned item becomes one issue, its action items a checklist in the description. Issues that already describe the same work are updated instead, and work closed in the last 90 days is flagged, not filed again. Shows one table and files everything on one confirmation (\`--yes\` skips it when nothing needs an answer). \`--tracker\` files in that issue tracker, when the repo has several; \`--tracker-project\` puts every item the notes give no project in that one. Running it again on the same notes only updates.
 >   - \`{{cmd}}create-tickets match [--branch <branch>] <text>\` -- only find the issues that already describe the work. Files and changes nothing. Sync uses it to find a branch's issue.
 >   - \`help\` -- show this and exit
 >
@@ -105,10 +106,10 @@ export const createTicketsFlow: Flow = devKit.defineFlow({
           refName: "read the notes",
           commandCalls: ["configure"],
           body: `1. **Issue tracker:** \`{{command:configure}} integrations issueTracker\` prints every entry the repo configured. ${REQUIRE_CONFIG} ${USE_INTEGRATIONS}
-   - Every entry is searched. Only entries at \`level\` \`track\` get issues filed or updated: file in the first of those, unless the notes, the user, or the repo's agent instructions name another. An entry at \`link\` is read-only here.
+   - Every entry is searched. Only entries at \`level\` \`track\` get issues filed or updated: file in the one \`--tracker\` names, else the first of those, unless the notes, the user, or the repo's agent instructions name another. An entry at \`link\` is read-only here.
    - In default mode with no entry at \`track\`, stop: \`Every issue tracker here is linked only, so create-tickets can't file. Run {{cmd}}configure <integration> to track issues, or use {{cmd}}create-tickets match to look without filing.\`
 2. **The notes**, from the arguments (minus the mode keyword and flags):
-   - **Flags:** \`--yes\` in default mode, \`--branch <branch>\` in \`match\` mode. ${UNKNOWN_FLAGS}
+   - **Flags:** \`--yes\`, \`--tracker <entry>\`, and \`--tracker-project <name>\` in default mode, \`--branch <branch>\` in \`match\` mode. ${UNKNOWN_FLAGS} \`--tracker\` names an issue-tracker entry (its \`instance\`, else its \`integration\`): when it names none at \`level\` \`track\`, say so, list the entries at \`track\`, and stop.
    - **A URL:** read the page with this session's tools for that site (an MCP server's fetch or read tool; search for deferred ones before deciding there are none), else a plain web fetch. When nothing can read it (it needs a sign-in no tool has), ask the person to paste the page and stop until they do.
    - **Pasted notes** (often a flat list with no headings, copied from a chat channel or a doc) **or a sentence:** use the text as given.
    - **Nothing:** ask for the notes or a link, and stop.
@@ -138,11 +139,11 @@ ${PLAN_EXAMPLE}
 | \`dueDate\` | \`YYYY-MM-DD\`, only from the notes (or the agent instructions or \`tickets.dueDateRequired\`, when they require one for some work: ask for it at the confirmation). \`null\` clears a matched issue's date; leaving it out keeps it. |
 | \`blocker\` | \`true\` only when the work stops a customer from making progress, and only with \`tickets.blockerMark\`: the title gets the mark. Work that holds up a teammate or another issue isn't a blocker: use \`blockedBy\` on the issue it holds up. |
 | \`assignee\` | The person the notes name (a first name is enough). Leave it out for the person running this. One person per issue. |
-| \`project\` | The one the notes name for the area (part of its name is enough when only one project has it), else the entry's \`values.project\`, listed in \`defaults\`. A new sub-issue the notes give no project takes its parent's, which the check fills in. |
+| \`project\` | The one the notes name for the area, matched against the entry's \`values.project\` and \`values.projects\` first, then the tracker's (part of its name is enough when only one project has it), else \`--tracker-project\`'s, else the entry's \`values.project\` (listed in \`defaults\`). A new sub-issue the notes give no project takes its parent's, which the check fills in. |
 | \`label\` | One label from the set the agent instructions or the entry's \`values.labels\` give, by the kind of work. Leave it out with no set. |
 | \`estimate\` | Only when the agent instructions, the entry's \`values.estimate\`, or \`tickets.estimateScale\` ask for one: a number on \`tickets.estimateScale\` when it's set, else on the agent instructions' scale. |
 | \`blockedBy\` | Only when the notes say one piece of work waits on another. Work that holds up a teammate is not a reason on its own. |
-| \`tracker\` | The entry to file in (its \`instance\` or \`integration\`), only when it isn't the first at \`track\`. |
+| \`tracker\` | The entry to file in (its \`instance\` or \`integration\`): the one the notes put the item in, else \`--tracker\`'s; only when it isn't the first at \`track\`. |
 | \`defaults\` | The fields set from a default rather than read from the notes, so the table marks them for checking. |
 | \`match\`, \`existing\` | Leave them out: matching sets them. |
 
@@ -183,7 +184,7 @@ Don't invent work the notes don't mention.
 - **In an entry at \`link\`:** never a match, since it can't be updated here. When it's the same work, drop the item and name the issue in the confirmation as already tracked there. With \`--branch\`, keep the item and list the issue as \`also tracked\`.
 - **A loose overlap, or nothing fits:** leave the item new. Take a match only when it's clearly the same work.
 
-**Open issues in the item's project:** when an item names a project (or gets one by default), run the entry's \`projectIssues\` op for it once per project, and judge those issues against the item too, even when the words barely overlap: an issue that covers the work under another name shows up there. When the op is \`unsupported\`, skip it.
+**Open issues in the item's project:** when an item names a project (or gets one by default), run the entry's \`projectIssues\` op for it once per project, and for the entry's \`values.project\` and each of its \`values.projects\` too, so work filed in a sibling project isn't filed again; judge those issues against the item too, even when the words barely overlap: an issue that covers the work under another name shows up there. When the op is \`unsupported\`, skip it.
 
 For each candidate you weigh, look at its parent and its open sub-issues (\`getIssue\`): a parent that already covers the work as a whole is where a new item belongs (\`parent\`), and an open sub-issue may be the match itself.
 

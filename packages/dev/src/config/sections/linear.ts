@@ -7,6 +7,7 @@ import {
   recordNotes,
   searchIssues,
 } from "../adapters/linear.ts"
+import { projectsField } from "../projects.ts"
 import type { IntegrationSpec, SectionValues } from "../types.ts"
 import { jiraLinkedKeys } from "./jira.ts"
 import { ISSUE_KEY } from "./patterns.ts"
@@ -77,9 +78,11 @@ export const linear: IntegrationSpec = {
     },
     {
       key: "project",
-      description: "Project new issues go in (its name)",
+      description:
+        "Default project new issues go in (its name), when the branch's changes and the person name no other",
       example: "Web app",
     },
+    projectsField("projects (their names)"),
     {
       key: "priority",
       description:
