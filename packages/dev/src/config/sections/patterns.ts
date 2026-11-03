@@ -35,6 +35,24 @@ export const VISIBILITY: FieldPattern = {
   hint: "`private`, `workspace`, or `public`",
 }
 
+/** A GitHub Actions workflow's file name: `claude.yml`. */
+export const WORKFLOW_FILE: FieldPattern = {
+  regex: /^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/,
+  hint: "a file name in `.github/workflows`, ending in `.yml` or `.yaml` (`claude.yml`)",
+}
+
+/** A mention that wakes a bot: `@claude`. */
+export const MENTION: FieldPattern = {
+  regex: /^@[A-Za-z0-9][A-Za-z0-9._/-]*$/,
+  hint: "`@`, then letters, digits, `.`, `_`, `/`, or `-` (`@claude`)",
+}
+
+/** A bot's login: `claude[bot]`. */
+export const BOT_LOGIN: FieldPattern = {
+  regex: /^[A-Za-z0-9][A-Za-z0-9._-]*(\[bot\])?$/,
+  hint: "a login, optionally ending in `[bot]` (`claude[bot]`)",
+}
+
 /** A file system path: `../worktrees`, `~/src/worktrees`. */
 export const PATH: FieldPattern = {
   regex: /^[A-Za-z0-9._~/-]+$/,

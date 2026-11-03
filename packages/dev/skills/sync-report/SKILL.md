@@ -25,7 +25,7 @@ node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" finish --base <base> --pr <pr>
 
 **The stacking tool's link:** with a stacking entry and a pull request, when `submit` printed no URL in the tool's own app (it pushed nothing, failed, or didn't run), its `prUrl` op with `<url>` the pull request's URL gives it; `null` means there's none.
 
-**If this run hit the no-op gate**, print only `Already synced: nothing changed since <short lastSyncedHead>.` with the PR's URL (and the stacking tool's link) and the issue's URL, then stop.
+**If this run hit the no-op gate:** outside `local` mode, with an open PR, run the source-control entry's `prMergeability` op once (`pending` counts as clean), since the base can move under a branch that didn't change: nothing changed is never the same as safe to merge. When it's `conflicting` or `behind`, lead with `<branch> no longer merges cleanly into <base> (<state>). Run /dev-flows:sync local to catch it up.` Then print only `Already synced: nothing changed since <short lastSyncedHead>.` with the PR's URL (and the stacking tool's link) and the issue's URL, and stop.
 
 Otherwise lead with anything that needs the user's attention (an unresolved conflict, a mergeability problem, a failed write, an ambiguous issue match, a skipped issue search, a failed session share, errors to resolve by hand), then print:
 

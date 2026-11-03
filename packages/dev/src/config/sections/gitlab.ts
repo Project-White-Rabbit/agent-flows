@@ -124,6 +124,11 @@ export const gitlab: IntegrationSpec = {
         cli: `\`glab mr view <N> ${REPO} --output json\`: ${MR_FIELDS}`,
         api: `${API}/merge_requests/<N>"\`: ${MR_FIELDS}`,
       },
+      mergeCommit: {
+        mcp: "The GitLab MCP's merge request read tool for project `{project}` !<N>: once `state` is `merged`, its `merge_commit_sha`, else its `squash_commit_sha`, else its `sha`; null before then",
+        cli: `\`glab mr view <N> ${REPO} --output json\`: once \`state\` is \`merged\`, its \`merge_commit_sha\`, else its \`squash_commit_sha\`, else its \`sha\`; null before then`,
+        api: `${API}/merge_requests/<N>"\`: once \`state\` is \`merged\`, its \`merge_commit_sha\`, else its \`squash_commit_sha\`, else its \`sha\`; null before then`,
+      },
       branchPr: {
         mcp: `The GitLab MCP's merge request search for project \`{project}\` with source branch \`<branch>\`, any state, the most recent: ${MR_FIELDS}`,
         cli: `\`glab api 'projects/{project:encoded}/merge_requests?source_branch=<branch>&state=all&order_by=updated_at&per_page=1' --hostname {host|gitlab.com}\`, the first: ${MR_FIELDS}. An empty list means none`,

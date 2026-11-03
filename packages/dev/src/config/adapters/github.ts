@@ -162,3 +162,94 @@ export const checks: Adapter = {
     return { checks: githubChecks(runs, statuses, required) }
   },
 }
+
+export type GithubRun = {
+  id: number
+  html_url: string
+  status: string
+  conclusion: string | null
+  created_at: string
+}
+
+export type GithubJob = {
+  name: string
+  status: string
+  conclusion: string | null
+}
+
+export type DeployState = "none" | "pending" | "success" | "failed"
+export type StepState = "pending" | "success" | "failed" | "skipped"
+
+/** A workflow run's state, read as a deployment's. */
+export function deployState(run: GithubRun | undefined): DeployState {
+  if (!run) {
+    return "none"
+  }
+  if (run.status !== "completed") {
+    return "pending"
+  }
+  return run.conclusion === "success" ? "success" : "failed"
+}
+
+export function stepState(job: GithubJob): StepState {
+  if (job.status !== "completed") {
+    return "pending"
+  }
+  switch (job.conclusion) {
+    case "success":
+    case "neutral":
+      return "success"
+    case "skipped":
+      return "skipped"
+    default:
+      return "failed"
+  }
+}
+
+/** The latest run on the commit: a re-run of the deploy is the one that counts. */
+export function latestRun(runs: GithubRun[]): GithubRun | undefined {
+  return [...runs].sort(
+    (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
+  )[0]
+}
+
+export const deployment: Adapter = {
+  needs: "cli",
+  args: ["sha"],
+  async run({ values, args }) {
+    const workflow = values.deployWorkflow
+    if (typeof workflow !== "string") {
+      throw new Error(
+        "set the entry's `deployWorkflow` (the workflow file that deploys a push to the base branch) to watch its deployments",
+      )
+    }
+    if (!/^[0-9a-f]{7,40}$/i.test(args.sha ?? "")) {
+      throw new Error(`--sha must be a commit sha, got \`${args.sha}\``)
+    }
+    const repo = `repos/${values.owner}/${values.repo}`
+    const { workflow_runs: runs } = JSON.parse(
+      cli("gh", [
+        "api",
+        `${repo}/actions/workflows/${workflow}/runs?head_sha=${args.sha}&per_page=100`,
+      ]),
+    ) as { workflow_runs: GithubRun[] }
+    const run = latestRun(runs)
+    if (!run) {
+      return { state: "none", url: null, steps: [] }
+    }
+    const jobs = jsonLines<GithubJob>(
+      cli("gh", [
+        "api",
+        "--paginate",
+        `${repo}/actions/runs/${run.id}/jobs?per_page=100`,
+        "--jq",
+        ".jobs[] | {name, status, conclusion}",
+      ]),
+    )
+    return {
+      state: deployState(run),
+      url: run.html_url,
+      steps: jobs.map((job) => ({ name: job.name, state: stepState(job) })),
+    }
+  },
+}

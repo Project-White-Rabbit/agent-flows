@@ -92,6 +92,8 @@ describe("dev flows", () => {
         "errorTracking",
         "sessions",
         "workspaces",
+        "codeReview",
+        "deployments",
       ].flatMap((id) => Object.keys(findCapability(id)?.ops ?? {})),
     )
     const flows = files.filter((f) => !f.path.includes("configure"))
@@ -115,6 +117,10 @@ describe("dev flows", () => {
         "checkLog",
         "reviewThreads",
         "resolveThread",
+        "requestReview",
+        "reviewResult",
+        "mergeCommit",
+        "deployment",
       ]),
     )
     for (const op of named) {

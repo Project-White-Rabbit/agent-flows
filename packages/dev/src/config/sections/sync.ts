@@ -19,8 +19,8 @@ const WORDS: FieldPattern = {
 }
 
 const TITLE_TEMPLATE: FieldPattern = {
-  regex: /^([^{}]|\{(issueId|title)\})+$/,
-  hint: "text with `{issueId}` and `{title}` placeholders (`{issueId}: {title}`)",
+  regex: /^([^{}]|\{(issueId|title|summary)\})+$/,
+  hint: "text with `{issueId}`, `{title}`, and `{summary}` placeholders (`{issueId}: {title}`, `{summary} ({issueId})`)",
 }
 
 export const sync: SectionSpec = {
@@ -45,9 +45,33 @@ export const sync: SectionSpec = {
     {
       key: "prTitle",
       description:
-        "PR title template, with `{issueId}` and `{title}` the issue's; unset, the repo's convention",
+        "PR title template: `{issueId}` and `{title}` are the issue's, `{summary}` a summary of the change in the repo's title convention; unset, the repo's convention",
       example: "{issueId}: {title}",
       pattern: TITLE_TEMPLATE,
+    },
+    {
+      key: "quoteLinks",
+      type: "boolean",
+      description:
+        "Write the PR body's link lines as quotes (`> Issue:`, the default); false writes them plain (`Issue:`). The issue's own lines stay quoted",
+      example: false,
+    },
+    {
+      key: "prSections",
+      type: "string[]",
+      description:
+        "The headings of sync's sections in the PR body, in order, in place of the repo's PR template or Summary and Test plan",
+      example: ["Summary", "Verification"],
+      check: (value) =>
+        Array.isArray(value) &&
+        (value as unknown[]).every(
+          (heading) =>
+            typeof heading === "string" &&
+            /^[A-Za-z][\w ()/&-]*$/.test(heading),
+        ) &&
+        new Set(value as unknown[]).size === value.length
+          ? undefined
+          : "must be distinct headings, each starting with a letter (`Summary`, `Verification`)",
     },
     {
       key: "blockMarkers",

@@ -1,18 +1,25 @@
 import path from "node:path"
 import { uniqueInstanceNames } from "../instances.ts"
 import type { Detection, IntegrationSpec, SectionValues } from "../types.ts"
+import { SLUG } from "./patterns.ts"
 
 export const vercel: IntegrationSpec = {
   path: "integrations.vercel",
   name: "Vercel",
   purpose: "Preview and production deployments, runtime logs",
   fields: [
-    { key: "team", description: "Team id or slug", example: "team_abc123" },
+    {
+      key: "team",
+      description: "Team id or slug",
+      example: "team_abc123",
+      pattern: SLUG,
+    },
     {
       key: "project",
       description: "Project id or name",
       example: "prj_abc123",
       required: true,
+      pattern: SLUG,
     },
     {
       key: "directory",
@@ -27,7 +34,15 @@ export const vercel: IntegrationSpec = {
     cli: { bin: "vercel", auth: ["vercel", "whoami"] },
     api: { base: "https://api.vercel.com", token: ["VERCEL_TOKEN"] },
   },
-  provides: { deployments: {} },
+  provides: {
+    deployments: {
+      deployment: {
+        mcp: "The Vercel MCP's `list_deployments` for project `{project}` (with the entry's `team`, when it has one), the deployment whose git commit sha (`meta.githubCommitSha`, or the GitLab or Bitbucket one) is <sha>: none is `none`; its `state` (or `readyState`) `READY` is `success`, `ERROR` or `CANCELED` is `failed`, anything else `pending`. `url` its inspector URL; no `steps`",
+        cli: "`vercel list {project} --meta githubCommitSha=<sha>` (with `--scope <team>` when the entry has a `team`; `gitlabCommitSha` or `bitbucketCommitSha` for those hosts): no row is `none`; a `Status` of `Ready` is `success`, `Error` or `Canceled` is `failed`, anything else `pending`. `url` its deployment URL; no `steps`",
+        api: '`curl -fsSL -H "Authorization: Bearer {token}" "https://api.vercel.com/v6/deployments?projectId={project}&sha=<sha>"` (with `&teamId=<team>` when the entry has a `team`): no deployment is `none`; its `state` read as the MCP variant says, `url` its `inspectorUrl`; no `steps`',
+      },
+    },
+  },
   detect(ctx) {
     const evidence = ctx.dependsOn(/^(@vercel\/|vercel$)/)
     // A monorepo app keeps its own .vercel/ next to its package.json, so each
