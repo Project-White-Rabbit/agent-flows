@@ -51,6 +51,8 @@ export const CAPABILITIES: CapabilitySpec[] = [
         "Whether the host would merge pull request <N> now: `ready` (checks it doesn't require may still be failing), `blocked` with the reasons it gives (a required check, an approval, a rule, a draft), `conflicting`, `behind` (the base moved and the host requires it caught up), or `pending` (the host is still computing it)",
       prMerge:
         "Merge pull request <N> into its base by <method> (`squash`, `merge` for a merge commit, or `rebase`), only while its head is still commit <sha>, deleting no branch and bypassing no rule. A host that can't honor <method> per pull request says what it does instead; a refusal (a rule, a required check, a moved head) prints the host's reason",
+      mergeCommit:
+        'The commit merged pull request <N> landed as on its base (a merge commit, or the squashed or last rebased one): `{"sha": <its full sha>}`, or `{"sha": null}` while the pull request isn\'t merged',
       prClose:
         "Close pull request <N> without merging it, deleting no branch. One that's already closed stays as it is",
       prReady:
@@ -61,6 +63,31 @@ export const CAPABILITIES: CapabilitySpec[] = [
       reviewThreads:
         "Pull request <N>'s unresolved review threads, all pages: each with its id, file path and line, and its comments oldest first, each with its author, whether the author is a bot, and its text",
       resolveThread: "Mark review thread <id> on pull request <N> resolved",
+    },
+  },
+  {
+    id: "codeReview",
+    name: "Code review on request",
+    purpose:
+      "An automated reviewer that reviews a pull request when asked (ready)",
+    levels: [
+      {
+        id: "request",
+        description:
+          "Request a review only when a ready run asks for one (`--review`)",
+      },
+      {
+        id: "every",
+        description:
+          "Request one on every ready run, unless it says `--no-review`",
+      },
+    ],
+    defaultLevel: "request",
+    ops: {
+      requestReview:
+        'Ask the reviewer to review pull request <pr>, whose head is commit <sha>, and print `{"requested": <when the host recorded the request, ISO 8601>, "url": <the request\'s link>}`. Every call is a new request, and may cost a paid run',
+      reviewResult:
+        'How the review requested at <requested> on pull request <pr> is going, as JSON: `{"state", "run", "findings": [{"author", "kind", "body", "url"}], "inline"}`. `state` is `pending` (not started or still running), `done`, `failed` (its run failed or was cancelled), or `missing` (no run picked the request up within 3 minutes); `run` is its run\'s link, or null. `findings` are the reviewer\'s comments and review summaries posted since <requested> (`kind` `comment` or `review`); its inline comments are review threads, read through the source-control `reviewThreads` op, and `inline` counts them',
     },
   },
   {
@@ -149,7 +176,10 @@ export const CAPABILITIES: CapabilitySpec[] = [
     id: "deployments",
     name: "Deployments",
     purpose: "Preview and production deployments, runtime logs",
-    ops: {},
+    ops: {
+      deployment:
+        'The deployment of commit <sha>, which just landed on its base: `{"state", "url", "steps": [{"name", "state"}]}`. `state` is `none` (nothing has started deploying it yet), `pending` (queued or running), `success`, or `failed` (failed or cancelled); `url` is its page, or null with `none`; `steps` are the parts it ran, each `pending`, `success`, `failed`, or `skipped`, when the tool reports them (else an empty list)',
+    },
   },
   {
     id: "database",

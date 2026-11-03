@@ -50,6 +50,30 @@ export const sync: SectionSpec = {
       pattern: TITLE_TEMPLATE,
     },
     {
+      key: "quoteLinks",
+      type: "boolean",
+      description:
+        "Write the PR body's link lines as quotes (`> Issue:`, the default); false writes them plain (`Issue:`). The issue's own lines stay quoted",
+      example: false,
+    },
+    {
+      key: "prSections",
+      type: "string[]",
+      description:
+        "The headings of sync's sections in the PR body, in order, in place of the repo's PR template or Summary and Test plan",
+      example: ["Summary", "Verification"],
+      check: (value) =>
+        Array.isArray(value) &&
+        (value as unknown[]).every(
+          (heading) =>
+            typeof heading === "string" &&
+            /^[A-Za-z][\w ()/&-]*$/.test(heading),
+        ) &&
+        new Set(value as unknown[]).size === value.length
+          ? undefined
+          : "must be distinct headings, each starting with a letter (`Summary`, `Verification`)",
+    },
+    {
       key: "blockMarkers",
       type: "boolean",
       description:

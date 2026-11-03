@@ -3,6 +3,7 @@
 // next to these and list it in INTEGRATIONS; nothing else needs to change.
 
 import type { IntegrationSpec, SectionSpec } from "../types.ts"
+import { claude } from "./claude.ts"
 import { close } from "./close.ts"
 import { conductor } from "./conductor.ts"
 import { github } from "./github.ts"
@@ -29,6 +30,7 @@ export const INTEGRATIONS: IntegrationSpec[] = [
   github,
   gitlab,
   graphite,
+  claude,
   linear,
   jira,
   vercel,

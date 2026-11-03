@@ -258,6 +258,24 @@ describe("sync format", () => {
       "sync.blockMarkers must be true or false",
     ])
   })
+
+  it("takes plain link lines and the PR body's own headings", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({
+        ...base,
+        sync: { quoteLinks: false, prSections: ["Summary", "Verification"] },
+      }).issues,
+    ).toEqual([])
+    for (const prSections of [["Summary", "Summary"], ["## Summary"]]) {
+      expect(checkConfig({ ...base, sync: { prSections } }).issues).toEqual([
+        "sync.prSections must be distinct headings, each starting with a letter (`Summary`, `Verification`)",
+      ])
+    }
+    expect(checkConfig({ ...base, sync: { prSections: [""] } }).issues).toEqual(
+      [expect.stringContaining("sync.prSections")],
+    )
+  })
 })
 
 describe("merge section", () => {
@@ -274,6 +292,36 @@ describe("merge section", () => {
     expect(
       checkConfig({ ...base, merge: { issueOnMerge: "never" } }).issues,
     ).toEqual(["merge.issueOnMerge must be `close`, `tracker`, or `leave`"])
+  })
+
+  it("takes the gates and the deploy watch merge acts on", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    for (const unresolvedThreads of ["allow", "bots", "all"]) {
+      expect(
+        checkConfig({
+          ...base,
+          merge: {
+            requireAllChecks: true,
+            unresolvedThreads,
+            watchDeploy: true,
+          },
+        }).issues,
+      ).toEqual([])
+    }
+    expect(
+      checkConfig({
+        ...base,
+        merge: {
+          requireAllChecks: "yes",
+          unresolvedThreads: "people",
+          watchDeploy: 1,
+        },
+      }).issues,
+    ).toEqual([
+      "merge.requireAllChecks must be true or false",
+      "merge.unresolvedThreads must be `allow`, `bots`, or `all`",
+      "merge.watchDeploy must be true or false",
+    ])
   })
 })
 

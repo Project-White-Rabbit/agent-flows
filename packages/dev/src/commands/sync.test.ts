@@ -192,6 +192,8 @@ describe("syncFormat", () => {
       errorVerb: null,
       prTitle: null,
       blockMarkers: true,
+      quoteLinks: true,
+      prSections: null,
     }
     expect(syncFormat(undefined)).toEqual(own)
     expect(syncFormat({ version: 2 })).toEqual(own)
@@ -203,6 +205,8 @@ describe("syncFormat", () => {
       errorVerb: "Fixes",
       prTitle: "{issueId}: {title}",
       blockMarkers: false,
+      quoteLinks: false,
+      prSections: ["Summary", "Verification"],
     }
     expect(syncFormat({ sync })).toEqual(sync)
   })
@@ -213,6 +217,8 @@ describe("syncFormat", () => {
       errorVerb: "Fixes",
       prTitle: null,
       blockMarkers: false,
+      quoteLinks: true,
+      prSections: null,
     }
     expect(syncFormat(undefined, recorded)).toEqual(recorded)
     expect(
@@ -221,6 +227,17 @@ describe("syncFormat", () => {
         recorded,
       ),
     ).toEqual({ ...recorded, blockMarkers: true, prTitle: "{title}" })
+  })
+
+  it("reads a format recorded before quoteLinks and prSections with their defaults", () => {
+    expect(
+      syncFormat(undefined, {
+        linkLabels: "integration",
+        errorVerb: "Fixes",
+        prTitle: null,
+        blockMarkers: false,
+      }),
+    ).toMatchObject({ quoteLinks: true, prSections: null })
   })
 })
 
@@ -616,6 +633,8 @@ describe("sync.ts (as a script)", () => {
       errorVerb: "Fixes",
       prTitle: "{issueId}: {title}",
       blockMarkers: false,
+      quoteLinks: false,
+      prSections: ["Summary", "Verification"],
     }
     fs.mkdirSync(path.join(work(), ".agent-flows"))
     fs.writeFileSync(

@@ -41,6 +41,10 @@ export type SyncFormat = {
   /** A title template with `{issueId}` and `{title}`; null follows the repo. */
   prTitle: string | null
   blockMarkers: boolean
+  /** The PR body's link lines as quotes (`> Issue:`), or plain (`Issue:`). */
+  quoteLinks: boolean
+  /** The headings of sync's PR body sections; null follows the template, else Summary and Test plan. */
+  prSections: string[] | null
 }
 
 export function syncFormat(
@@ -58,6 +62,13 @@ export function syncFormat(
     errorVerb: typeof values.errorVerb === "string" ? values.errorVerb : null,
     prTitle: typeof values.prTitle === "string" ? values.prTitle : null,
     blockMarkers: values.blockMarkers !== false,
+    quoteLinks: values.quoteLinks !== false,
+    prSections:
+      Array.isArray(values.prSections) &&
+      values.prSections.length > 0 &&
+      values.prSections.every((heading) => typeof heading === "string")
+        ? values.prSections
+        : null,
   }
 }
 

@@ -1,7 +1,7 @@
-import { checks } from "../adapters/github.ts"
+import { checks, deployment } from "../adapters/github.ts"
 import { projectsField } from "../projects.ts"
 import type { IntegrationSpec } from "../types.ts"
-import { SLUG } from "./patterns.ts"
+import { SLUG, WORKFLOW_FILE } from "./patterns.ts"
 
 const PR_JSON =
   "number,url,title,body,state,isDraft,baseRefName,headRefName,additions,deletions,changedFiles"
@@ -103,6 +103,13 @@ export const github: IntegrationSpec = {
       example: "Roadmap",
     },
     projectsField("GitHub projects (their titles)"),
+    {
+      key: "deployWorkflow",
+      description:
+        "The workflow file in `.github/workflows` that deploys a push to the base branch, when GitHub Actions deploys the repo (`use.deployments`)",
+      example: "deploy.yml",
+      pattern: WORKFLOW_FILE,
+    },
   ],
   multiple: true,
   lookup:
@@ -174,6 +181,11 @@ export const github: IntegrationSpec = {
         api: `\`PUT\` ${API_BARE}/pulls/<N>/merge\` (header \`Authorization: Bearer {token}\`) with JSON \`merge_method\` <method> and \`sha\` <sha>: 405 is refused, with the reason in \`message\`; 409 is a moved head`,
         mcp: "The GitHub MCP's `merge_pull_request` for {owner}/{repo} #<N> with `merge_method: <method>`. It can't pin the head, so read the pull request's `head.sha` with its read tool just before, and don't merge unless it's <sha>",
       },
+      mergeCommit: {
+        mcp: "The GitHub MCP's pull request read tool for {owner}/{repo} #<N>: its `merge_commit_sha` once `merged` is true, else null",
+        cli: "`gh pr view <N> --repo {owner}/{repo} --json state,mergeCommit`: `mergeCommit.oid` once `state` is `MERGED`, else null",
+        api: `${API}/pulls/<N>"\`: its \`merge_commit_sha\` once \`merged_at\` is set, else null`,
+      },
       prClose: {
         mcp: "The GitHub MCP's `update_pull_request` for {owner}/{repo} #<N> with `state: closed`",
         cli: "`gh pr close <N> --repo {owner}/{repo}`. Never with `--delete-branch`, which deletes the local branch too",
@@ -204,6 +216,13 @@ export const github: IntegrationSpec = {
       resolveThread: {
         cli: `\`gh api graphql -f query='${RESOLVE_MUTATION}' -f id=<id>\``,
         api: `${GRAPHQL} with JSON \`query\` \`${RESOLVE_MUTATION}\` and \`variables\` \`{"id": "<id>"}\``,
+      },
+    },
+    // Opt-in (`optIn` below): most repos deploy some other way. Also an
+    // adapter (`adapters/github.ts`), run first.
+    deployments: {
+      deployment: {
+        cli: "The runs of the entry's `deployWorkflow` on the commit, `gh api 'repos/{owner}/{repo}/actions/workflows/<deployWorkflow>/runs?head_sha=<sha>&per_page=100'`, the most recently created: none is `none`; a `status` other than `completed` is `pending`; then `conclusion` `success` is `success`, anything else `failed`. `url` its `html_url`; `steps` its jobs, `gh api --paginate 'repos/{owner}/{repo}/actions/runs/<id>/jobs?per_page=100'`, each by its `status` and `conclusion` the same way (`skipped` is skipped)",
       },
     },
     // Opt-in (`optIn` below): most repos on GitHub track issues elsewhere.
@@ -263,8 +282,8 @@ export const github: IntegrationSpec = {
         "Closing: a `Fixes #<N>` line in the pull request body, which closes the issue when the pull request merges into the default branch (merging into another base closes nothing). Linking only: a `Part of #<N>` line, which only cross-references it. Either way the title can stay as the repo writes it",
     },
   },
-  optIn: ["issueTracker"],
-  adapters: { checks },
+  optIn: ["issueTracker", "deployments"],
+  adapters: { checks, deployment },
   detect(ctx) {
     const remote = ctx.git(["remote", "get-url", "origin"])
     const parsed = remote ? parseGithubRemote(remote) : undefined
