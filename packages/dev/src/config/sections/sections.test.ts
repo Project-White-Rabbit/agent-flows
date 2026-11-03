@@ -254,7 +254,7 @@ describe("sync format", () => {
     ).toEqual([
       "sync.linkLabels must be `capability` or `integration`",
       "sync.errorVerb must be a word or a few, letters only (`Fixes`)",
-      "sync.prTitle must be text with `{issueId}` and `{title}` placeholders (`{issueId}: {title}`)",
+      "sync.prTitle must be text with `{issueId}`, `{title}`, and `{summary}` placeholders (`{issueId}: {title}`, `{summary} ({issueId})`)",
       "sync.blockMarkers must be true or false",
     ])
   })
@@ -264,7 +264,11 @@ describe("sync format", () => {
     expect(
       checkConfig({
         ...base,
-        sync: { quoteLinks: false, prSections: ["Summary", "Verification"] },
+        sync: {
+          quoteLinks: false,
+          prSections: ["Summary", "Verification"],
+          prTitle: "{summary} ({issueId})",
+        },
       }).issues,
     ).toEqual([])
     for (const prSections of [["Summary", "Summary"], ["## Summary"]]) {

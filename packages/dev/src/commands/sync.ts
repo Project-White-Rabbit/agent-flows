@@ -38,7 +38,7 @@ export type SyncFormat = {
   linkLabels: "capability" | "integration"
   /** A word that starts each error line, like bitfab-dev's `Fixes`. */
   errorVerb: string | null
-  /** A title template with `{issueId}` and `{title}`; null follows the repo. */
+  /** A title template with `{issueId}`, `{title}`, and `{summary}`; null follows the repo. */
   prTitle: string | null
   blockMarkers: boolean
   /** The PR body's link lines as quotes (`> Issue:`), or plain (`Issue:`). */

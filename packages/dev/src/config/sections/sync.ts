@@ -19,8 +19,8 @@ const WORDS: FieldPattern = {
 }
 
 const TITLE_TEMPLATE: FieldPattern = {
-  regex: /^([^{}]|\{(issueId|title)\})+$/,
-  hint: "text with `{issueId}` and `{title}` placeholders (`{issueId}: {title}`)",
+  regex: /^([^{}]|\{(issueId|title|summary)\})+$/,
+  hint: "text with `{issueId}`, `{title}`, and `{summary}` placeholders (`{issueId}: {title}`, `{summary} ({issueId})`)",
 }
 
 export const sync: SectionSpec = {
@@ -45,7 +45,7 @@ export const sync: SectionSpec = {
     {
       key: "prTitle",
       description:
-        "PR title template, with `{issueId}` and `{title}` the issue's; unset, the repo's convention",
+        "PR title template: `{issueId}` and `{title}` are the issue's, `{summary}` a summary of the change in the repo's title convention; unset, the repo's convention",
       example: "{issueId}: {title}",
       pattern: TITLE_TEMPLATE,
     },

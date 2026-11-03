@@ -137,7 +137,7 @@ The optional `sync` section changes how sync writes, for a team whose PRs anothe
 
 - `linkLabels`: `capability` (the default: `> Issue:`, `> Errors:`) or `integration` (each line named for its integration: `> Linear:`, `> Sentry:`).
 - `errorVerb`: a word that starts each error line (`> Sentry: Fixes WEB-4P (...)`).
-- `prTitle`: a title template, with `{issueId}` and `{title}` the issue's. Unset, the title follows the repo's convention.
+- `prTitle`: a title template, with `{issueId}` and `{title}` the issue's, and `{summary}` a summary of the change in the repo's title convention: `"{summary} ({issueId})"` gives `fix(auth): keep the session on refresh (ENG-42)`. A branch with no issue gets just the summary. Unset, the title follows the repo's convention.
 - `quoteLinks`: `false` writes the PR body's link lines plain (`Issue: …`) instead of quoted (`> Issue: …`). The issue's own lines stay quoted, since sync finds a branch's issue by its `> Branch:` line.
 - `prSections`: the headings of sync's sections in the PR body, in order (`["Summary", "Verification"]`), in place of the repo's PR template or Summary and Test plan. Sync fills a summary heading with the summary, a test or verification heading with what proves the change works (the commands run and what they showed), and any other with what its name asks for.
 - `blockMarkers`: `false` writes sync's part of the PR body without its `<!-- agent-flows:sync -->` markers, bounded instead by the link lines on top and the `_Last synced_` line, which is how bitfab-dev's sync finds its own.
