@@ -14,6 +14,7 @@ Winds down a branch whose work is being abandoned: the destructive sibling of `/
 | `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), or a failure that stops the command (`stop`) |
 | `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
 | `sync.ts <subcommand>` | `issue` prints the issue a sync recorded for the current branch, reading only |
+| `tickets.ts <subcommand>` | `match` ranks the tracker's recent issues against the branch's work, as create-tickets does, writing only its plan file |
 
 ## Invariants
 
@@ -55,7 +56,7 @@ If mode is `help`, print the block below verbatim and exit. No reads, no writes.
 >   - closes the pull request
 >   - deletes the remote branch
 >   - cancels the issue the branch names (left open when another pull request, open or merged, is attached to it)
->   - when the branch names no issue, looks for one (a `> Branch:` line naming the branch, then a search) and asks which, if any, to cancel or mark done; `force` changes none of them
+>   - when the branch names no issue, looks for one (a `> Branch:` line naming the branch, then a search and create-tickets' ranking of recent issues) and asks which, if any, to cancel or mark done; `force` changes none of them
 >   - runs the repo's teardown (`close.after` hooks)
 >
-> It never deletes the local branch, switches branches, or touches the working tree. It refuses on the base branch, on a branch other branches are stacked on, and on a pull request that merged.
+> It never deletes the local branch, switches branches, or touches the working tree. It refuses on the base branch (and the config's `repo.protectedBranches`), on a branch other branches are stacked on, and on a pull request that merged.

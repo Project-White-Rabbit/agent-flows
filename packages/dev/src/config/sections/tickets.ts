@@ -5,6 +5,7 @@ import type {
   FieldValue,
   SectionSpec,
 } from "../types.ts"
+import { timeZoneProblem } from "./sync.ts"
 
 /** The priorities on the issue tracker's scale, most urgent first. */
 export const ISSUE_PRIORITIES = [
@@ -191,6 +192,20 @@ export const tickets: SectionSpec = {
       description:
         "A parent issue takes the priority of its most urgent open sub-issue, and, when it has no cycle, the cycle of its earliest one",
       example: true,
+    },
+    {
+      key: "assignOnSync",
+      type: "boolean",
+      description:
+        "Sync assigns the branch's issue to the person running it on every remote pass, not only when it files the issue (default false: sync never reassigns)",
+      example: true,
+    },
+    {
+      key: "timezone",
+      description:
+        'IANA time zone for what "today" is when create-tickets checks due dates and dates planning sections (default: this machine\'s)',
+      example: "America/Los_Angeles",
+      check: timeZoneProblem,
     },
   ],
   lookup:

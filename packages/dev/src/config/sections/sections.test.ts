@@ -308,6 +308,84 @@ describe("sync format", () => {
       "sync.adoptHeader must be a valid regular expression",
     ])
   })
+
+  it("takes a bare-URL issue line and a time zone for the last-synced line", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({
+        ...base,
+        sync: { linkStyle: "url", timezone: "America/Los_Angeles" },
+      }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        sync: { linkStyle: "bare", timezone: "Pacific" },
+      }).issues,
+    ).toEqual([
+      "sync.linkStyle must be `link` or `url`",
+      "sync.timezone must be an IANA time zone (`UTC`, `America/Los_Angeles`)",
+    ])
+  })
+})
+
+describe("repo section", () => {
+  it("takes the branches no flow works on directly", () => {
+    const repo = {
+      baseBranch: "dev",
+      protectedBranches: ["main", "release/prod"],
+    }
+    expect(checkConfig({ version: 3, repo }).issues).toEqual([])
+    expect(
+      checkConfig({
+        version: 3,
+        repo: { baseBranch: "dev", protectedBranches: ["main branch"] },
+      }).issues,
+    ).toEqual([
+      "repo.protectedBranches must list only branch names (`main`, `release/prod`) (not `main branch`)",
+    ])
+  })
+})
+
+describe("ticket rules for sync and dates", () => {
+  it("takes assignOnSync and a time zone for today", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({
+        ...base,
+        tickets: { assignOnSync: true, timezone: "Europe/Berlin" },
+      }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        tickets: { assignOnSync: "yes", timezone: "Berlin" },
+      }).issues,
+    ).toEqual([
+      "tickets.assignOnSync must be true or false",
+      "tickets.timezone must be an IANA time zone (`UTC`, `America/Los_Angeles`)",
+    ])
+  })
+})
+
+describe("issue tracker states", () => {
+  it("moves an issue to the state named for its stage before one of the same type", () => {
+    const linearOps = INTEGRATIONS.find((s) => s.path === "integrations.linear")
+      ?.provides.issueTracker?.updateIssue as Record<string, string>
+    for (const variant of Object.values(linearOps)) {
+      expect(variant).toContain(
+        "named for <state>, any case: `todo` → Todo, `in progress` → In Progress",
+      )
+      expect(variant).toContain("`canceled` → `canceled` (not Duplicate)")
+    }
+    const jiraOps = INTEGRATIONS.find((s) => s.path === "integrations.jira")
+      ?.provides.issueTracker?.updateIssue as Record<string, string>
+    for (const variant of Object.values(jiraOps)) {
+      expect(variant).toContain(
+        "`canceled` → Canceled (or Cancelled, Won't Do); when there's no status of that name",
+      )
+    }
+  })
 })
 
 describe("merge section", () => {
