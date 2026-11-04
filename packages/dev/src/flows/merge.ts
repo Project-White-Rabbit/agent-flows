@@ -58,7 +58,8 @@ export const mergeFlow: Flow = devKit.defineFlow({
     hooksInvariant("merge", {
       afterPoint: true,
       extra:
-        "--branch <branch> --pr <N> --prs '<the numbers of every pull request it lands, bottom first, space-separated>'",
+        "--branch <branch> --pr <N> --prs '<the numbers of every pull request it lands, bottom first, space-separated>' [--merged --merge-commit <landed>]",
+      note: "Pass `--merged` whenever the host said <N> merged, even when what came after (the close-out, the deploy watch) failed, with `--merge-commit` the merge commit the run step read; leave both out when nothing merged.",
     }),
   ],
   phases: [
@@ -208,6 +209,10 @@ Then the \`prMetadata\` op for <N>: its state must be merged. If it isn't, stop:
 
 For \`stack\`, instead: the stacking entry's \`mergeStack\` op. It can take minutes; run it in the foreground. Then the \`branchPr\` op for every branch in the chain. All merged: go on. Otherwise stop and say plainly that **part of the chain is merged**: list which pull requests merged and which didn't, with the op's output. The usual next step is \`{{cmd}}sync\` to restack what's left, fix the blocked one, and re-run \`{{cmd}}merge\`. When it says local branches differ from their remotes, it refused rather than land unpushed work: \`{{cmd}}sync\`, then re-run.
 
+### Merge commit
+
+Once the host said merged: the source-control entry's \`mergeCommit\` op for <N> (for \`stack\`, the top of the chain) is \`<landed>\`; while it's null, ask again every 5 seconds, up to 3 times, then go on without it and say in the report that the merge commit couldn't be read. The repo's \`after\` hooks get it as \`--merge-commit\`.
+
 ### Close out
 
 Run the \`{{cmd}}sync\` skill with the argument \`remote\` (and \`--leave-issue\` when \`<issueOnMerge>\` is \`tracker\` or \`leave\`: the tracker moves the issue itself, or nothing does, so sync leaves it as it is). With the pull request merged, it moves the issue to done and resolves the errors the pull request fixed, as far as each integration's \`level\` allows. A failure here goes in the report; the merge stands.
@@ -218,7 +223,7 @@ Only after the host said merged. When \`above\` is more than 0, keep it: the pul
 
 ### Watch the deployment
 
-**Only when \`<watchDeploy>\` is true.** With no deployments entry, say so in the report (\`merge.watchDeploy is on, but no deployments integration is configured: run {{cmd}}configure deployments\`) and skip this. Otherwise the source-control entry's \`mergeCommit\` op for <N> (for \`stack\`, the top of the chain) is \`<landed>\`; while it's null, ask again every 5 seconds, up to 3 times, then report that the merge commit couldn't be read and skip this.
+**Only when \`<watchDeploy>\` is true.** With no deployments entry, say so in the report (\`merge.watchDeploy is on, but no deployments integration is configured: run {{cmd}}configure deployments\`) and skip this. Otherwise it watches \`<landed>\`, the merge commit read above; without one, skip this.
 
 For each deployments entry, its \`deployment\` op with \`<landed>\` as \`<sha>\`, every 30 seconds for the first 5 minutes and every 60 seconds after, until it's \`success\` or \`failed\` or \`<deployTimeout>\` minutes have gone by. Relay its state and steps in one line at least once a minute. \`none\` for 5 minutes: that entry deployed nothing for this commit (it may not deploy this branch); say so and stop watching it. Past \`<deployTimeout>\` minutes: report it still \`pending\`, with its \`url\` (\`merge.deployTimeout\` waits longer).
 

@@ -29,31 +29,46 @@ export type ProjectRoute = string | { name: string; paths?: string[] }
 /**
  * A repo's own step at a named point in a flow (`ready.before`), for work no
  * integration covers. It's a command (`run`) whose result the flow acts on,
- * or a `prompt` the agent acts on at that point. `paths`, `modes`, and `on`
- * narrow when it applies. The points and their rules are in `hooks.ts`.
+ * or a `prompt` the agent acts on at that point. `paths`, `flows`, `modes`,
+ * and `on` narrow when it applies. The points and their rules are in
+ * `hooks.ts`.
  *
  * A command runs from the repo root, with the point's values in its
  * environment (`AGENT_FLOWS_BASE` and friends) and as `{base}`-style
  * placeholders. Exit 0 passes. Exit 2 hands its stderr to the agent as a task,
- * for a check that found something only judgment can fix. Any other exit, or
- * running past `timeout`, fails: with a `fix`, the flow runs it once and the
- * command again. A prompt is a task too. Either way, the agent works under the
- * command's own rules for what it may change.
+ * for a check that found something only judgment can fix; with `recheck`, the
+ * command runs again once the task is done, and still failing stops. Any other
+ * exit, or running past `timeout`, fails: with a `fix`, the flow runs it once
+ * and the command again. A prompt is a task too. Either way, the agent works
+ * under the command's own rules for what it may change.
  */
 export type Hook = {
   /** Shown in progress and the report; unique at its point. */
   name: string
   /** Globs, repo-relative: `*` within a directory, `**` across them. Only when the branch changed a match. */
   paths?: string[]
-  /** Only in these modes of the point's flow. */
+  /** Only at a general point: only around these flows. */
+  flows?: string[]
+  /** Only in these modes of the point's flow (at a general point, of its `flows`). */
   modes?: string[]
-  /** Only at an `after` point: only when the command succeeded, or failed. */
-  on?: "success" | "failure"
+  /**
+   * Only at an `after` point: only when the command succeeded, or failed;
+   * `merged` (at `merge.after` and `hooks.after`) when the pull request merged,
+   * whatever came after.
+   */
+  on?: "success" | "failure" | "merged"
   run?: string
   /** Only with `run`: a command that repairs what it found. */
   fix?: string
   /** Only with `run`: seconds before it counts as failed (default 60). */
   timeout?: number
+  /** Only with `run`: after the task an exit 2 hands over, run the command again; still failing stops. */
+  recheck?: boolean
+  /**
+   * Only with `run`, at a point whose output is findings (`evaluate.scan`):
+   * a regex; only the lines it matches go to the reviewer.
+   */
+  findings?: string
   prompt?: string
 }
 
@@ -61,11 +76,14 @@ export type Hook = {
 export const HOOK_KEYS = [
   "name",
   "paths",
+  "flows",
   "modes",
   "on",
   "run",
   "fix",
   "timeout",
+  "recheck",
+  "findings",
   "prompt",
 ] as const
 

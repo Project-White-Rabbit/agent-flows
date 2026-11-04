@@ -107,7 +107,11 @@ export const syncFlow: Flow = devKit.defineFlow({
     "**Stage everything** with `git add -A` for a commit; for conflict resolution, stage each file with `git add <file>`, never `-A`.",
     "**Don't prompt** for anything inferable from the branch, commits, diff, session, or config.",
     "**Write only what sync owns.** In the PR body that's its block; in the issue description, the branch, error, and session lines, `## Status`, and the last-synced line; on the issue, the fields under Issue fields, within their rules. A section a person wrote stays as they wrote it.",
-    hooksInvariant("sync"),
+    hooksInvariant("sync", {
+      extra:
+        "--pr <the pull request's number> --issue <the branch's issue id> --result <result> [--issue-filed]",
+      note: "`<result>` is which of sync's phases ran: `noop` (neither: the no-op gate, or nothing to do), `local` (only the local git work), `remote` (only the remote writes), or `full` (both). Pass `--issue-filed` only when this run filed the issue (3b).",
+    }),
   ],
   phases: [
     {

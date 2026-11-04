@@ -463,6 +463,81 @@ describe("dev flows", () => {
     expect(run).toContain("Skip in `draft` mode")
   })
 
+  it("tells every hook run how to wait on a long hook and recheck a task", () => {
+    const runs = files.filter((f) => f.content.includes('hooks.ts" run '))
+    expect(runs.length).toBeGreaterThan(0)
+    for (const file of runs) {
+      expect(file.content, file.path).toContain(
+        "run the same command again with `--wait <running.resume>` in place of any `--after`",
+      )
+      expect(file.content, file.path).toContain(
+        "add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`",
+      )
+      expect(file.content, file.path).toContain("with `agent.recheck`")
+    }
+  })
+
+  it("passes the pull request to ready's hooks, and runs beforeFixPush between a fix batch's commit and its push", () => {
+    const main =
+      files.find((f) => f.path === "skills/ready/SKILL.md")?.content ?? ""
+    const run =
+      files.find((f) => f.path === "skills/ready-run/SKILL.md")?.content ?? ""
+    for (const point of ["ready.before", "ready.beforePublish"]) {
+      expect(main).toContain(
+        `run ${point} --flow ready --mode <mode> --base <mergeBase> --pr <pr>\``,
+      )
+    }
+    expect(run).toContain(
+      "run ready.beforePush --flow ready --mode <mode> --base <mergeBase> --pr <its number>`",
+    )
+    expect(main).toContain(
+      "run ready.after after --flow ready --mode <mode> --base <mergeBase> --pr <the pull request's number> --outcome",
+    )
+    const batch = run.indexOf("Then commit them in one batch")
+    const fixPush = run.indexOf(
+      'hooks.ts" run ready.beforeFixPush --flow ready --mode <mode> --base <mergeBase> --pr',
+    )
+    const push = run.indexOf("Push as the publish step does", batch)
+    expect(batch).toBeGreaterThan(-1)
+    expect(fixPush).toBeGreaterThan(batch)
+    expect(push).toBeGreaterThan(fixPush)
+  })
+
+  it("tells sync's after hooks what the run did, and merge's whether it merged and on which commit", () => {
+    const sync =
+      files.find((f) => f.path === "skills/sync/SKILL.md")?.content ?? ""
+    expect(sync).toContain(
+      "run after --flow sync --mode <mode> --pr <the pull request's number> --issue <the branch's issue id> --result <result> [--issue-filed] --outcome",
+    )
+    expect(sync).toContain("`noop` (neither: the no-op gate, or nothing to do)")
+
+    const merge =
+      files.find((f) => f.path === "skills/merge/SKILL.md")?.content ?? ""
+    expect(merge).toContain("[--merged --merge-commit <landed>] --outcome")
+    const run =
+      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+    const merged = run.indexOf("its state must be merged")
+    const commit = run.indexOf("### Merge commit")
+    const closeOut = run.indexOf("### Close out")
+    const watch = run.indexOf("### Watch the deployment")
+    expect(commit).toBeGreaterThan(merged)
+    expect(closeOut).toBeGreaterThan(commit)
+    expect(watch).toBeGreaterThan(closeOut)
+    expect(
+      run.match(/the source-control entry's `mergeCommit` op/g),
+    ).toHaveLength(1)
+  })
+
+  it("gives evaluate's scan hooks the scope and the evaluation it follows", () => {
+    const run =
+      files.find((f) => f.path === "skills/evaluate-run/SKILL.md")?.content ??
+      ""
+    expect(run).toContain(
+      "--scope <full or delta, as the scope above says> --since <previous.sha> --pr <the PR's number>`",
+    )
+    expect(run).toContain("one that exits 2 is a `stop`, not a task")
+  })
+
   it("routes configure through confirm before writing", () => {
     expect(devKit.describeFlow(configureFlow)).toMatchInlineSnapshot(`
       "Flow: configure ({{cmd}}configure)

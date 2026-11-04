@@ -298,18 +298,22 @@ Integrations cover what's the same for every repo on a vendor (Neon branches, Li
 ```json
 "hooks": {
   "before": [{ "name": "env", "run": "./scripts/sync-worktree-env.sh" }],
-  "after": [{ "name": "notify", "on": "failure", "run": "./scripts/notify.sh {outcome}" }]
+  "after": [
+    { "name": "notify", "on": "failure", "run": "./scripts/notify.sh {outcome}" },
+    { "name": "new-issue", "flows": ["sync"], "run": "test -z \"$AGENT_FLOWS_ISSUE_FILED\" || ./scripts/announce.sh {issue}" }
+  ]
 },
 "ready": {
   "before": [
     { "name": "version-bump", "run": "./scripts/check-version.sh {base}", "fix": "bun run bump patch" },
     { "name": "migrations", "run": "pnpm db:verify-migrations", "timeout": 300 },
+    { "name": "docs-match", "run": "./scripts/check-docs.sh", "recheck": true },
     { "name": "sdk-docs", "paths": ["sdks/**"], "prompt": "Update the SDK docs for what this branch changed" }
   ],
   "beforePublish": [{ "name": "screenshots", "paths": ["ui/**"], "run": "bun run screenshots" }]
 },
 "merge": {
-  "after": [{ "name": "server-down", "on": "success", "run": "./scripts/dev-server.sh down {branch}" }]
+  "after": [{ "name": "server-down", "on": "merged", "run": "./scripts/dev-server.sh down {branch}" }]
 }
 ```
 
@@ -321,7 +325,8 @@ Integrations cover what's the same for every repo on a vendor (Neon branches, Li
 | `ready.before` | Once ready has scoped the branch, before its cleanup | Only in the checkout | Stops ready |
 | `ready.beforePublish` | After the local checks, before the commit and push; what hooks change is committed | Only in the checkout | Stops ready |
 | `ready.beforePush` | After sync's local pass commits the branch, before the push: a check that reads the commits about to publish; ready commits what hooks change | Only in the checkout | Stops ready |
-| `evaluate.scan` | Once evaluate has its scope, before it judges: the repo's own scan of the diff. What a passing command prints goes to the reviewer as findings to verify | None: read only | Stops evaluate |
+| `ready.beforeFixPush` | In ready's CI step, after each batch of CI fixes is committed, before it's pushed: the same kind of check, for the fix pushes `beforePush` doesn't see; ready commits what hooks change | Only in the checkout | Stops ready (nothing is pushed) |
+| `evaluate.scan` | Once evaluate has its scope, before it judges: the repo's own scan of the diff. What a passing command prints goes to the reviewer as findings to verify | None: read only (an exit 2 stops too: a scan has no task to hand over) | Stops evaluate |
 | `merge.before` | After merge's gates, before it syncs, waits, or merges; hooks here check, they don't change | Only in the checkout | Stops merge |
 | `merge.beforeCi` | After merge syncs and marks the PR ready, before it waits for CI on the commit that lands: for a commit that must land with the merge (a changelog entry) | May commit and push the branch; nothing else shared | Stops merge |
 | `close.before` | After close's survey and gates, before it closes or deletes anything | Only in the checkout | Stops close |
@@ -332,12 +337,36 @@ Integrations cover what's the same for every repo on a vendor (Neon branches, Li
 
 **A hook** has a `name` (unique at its point; lowercase letters, digits, `.`, `_`, `-`) and either:
 
-- `run`: a command, from the repo root. Exit 0 passes. **Exit 2** hands its stderr to the agent as a task, for a check that finds something only judgment can fix ("these docs no longer match"). Any other exit, or running past `timeout` (seconds, default 60), fails; with a `fix` command, the flow runs it once and the check again (a timeout doesn't try the fix).
+- `run`: a command, from the repo root. Exit 0 passes. **Exit 2** hands its stderr to the agent as a task, for a check that finds something only judgment can fix ("these docs no longer match"). With `"recheck": true`, the flow runs the command once more after the agent does that task, and a command that still exits non-zero fails (a stop, at a point that stops). Any other exit, or running past `timeout` (seconds, default 60), fails; with a `fix` command, the flow runs it once and the check again (a timeout doesn't try the fix). A timeout kills everything the command started.
 - `prompt`: a task for the agent at that point, for a rule about a moment ("after the merge, post in #releases") rather than about the code. Rules about the code belong in the agent instructions (a `CLAUDE.md` or `AGENTS.md` next to it), which every flow already reads.
 
-Three filters narrow when it applies: `paths` (globs, repo-relative: `*` within a directory, `**` across them; only when the branch changed a match), `modes` (the flow's modes, at its own points: `["default", "loop"]`), and `on` (`success` or `failure`, at an `after` point).
+Filters narrow when it applies:
 
-Commands get `{base}` (the merge base), `{branch}`, `{outcome}`, and, in merge and close, `{pr}` (the pull request's number) and `{prs}` (every one it lands, bottom first, space-separated) filled in, and the same in their environment, which is safer to read than a pasted string: `AGENT_FLOWS_BASE`, `AGENT_FLOWS_BRANCH`, `AGENT_FLOWS_OUTCOME`, `AGENT_FLOWS_PR`, `AGENT_FLOWS_PRS`, plus `AGENT_FLOWS_FLOW`, `AGENT_FLOWS_MODE`, `AGENT_FLOWS_POINT`, `AGENT_FLOWS_HOOK`, and `AGENT_FLOWS_CHANGED_FILES` (a file listing the branch's changed files, one per line).
+- `paths`: globs, repo-relative (`*` within a directory, `**` across them); only when the branch changed a match.
+- `flows`: at a general point, only around these flows (`["sync", "ready", "merge"]`).
+- `modes`: the flow's modes, at its own points (`["default", "loop"]`). At a general point, only with `flows`, and they're those flows' modes (`"flows": ["sync"], "modes": ["local"]`).
+- `on`: `success` or `failure`, at an `after` point. `merged`, at `merge.after` and `hooks.after`: whenever the pull request merged, even when what came after it (the close-out, the deploy watch) failed and the outcome is `failure`. Teardown and release hooks for a merged branch want `merged`, not `success`.
+
+At `evaluate.scan`, `findings` is a regex (`"^(FINDING|  CHECK|UNTESTED):"`): only the lines of a passing command's output it matches go to the reviewer, and the 400-line budget counts those.
+
+Commands get these filled in as `{name}`, and the same in their environment, which is safer to read than a pasted string. A flow passes the ones it knows; the rest stay as written in the command, and empty in the environment.
+
+| Placeholder | Environment | Value | Passed by |
+|---|---|---|---|
+| `{base}` | `AGENT_FLOWS_BASE` | The merge base | Every flow |
+| `{branch}` | `AGENT_FLOWS_BRANCH` | The branch | Every flow |
+| `{outcome}` | `AGENT_FLOWS_OUTCOME` | `success` or `failure` | `after` points |
+| `{pr}` | `AGENT_FLOWS_PR` | The pull request's number | ready (each point, once there's one), sync's `after`, evaluate (`scan` and `after`), merge, close |
+| `{prs}` | `AGENT_FLOWS_PRS` | Every pull request merge lands, bottom first, space-separated | merge |
+| `{issue}` | `AGENT_FLOWS_ISSUE` | The branch's issue id | sync's `after` |
+| | `AGENT_FLOWS_ISSUE_FILED` | `1` when this run filed that issue | sync's `after` |
+| `{result}` | `AGENT_FLOWS_RESULT` | Which of sync's phases ran: `noop` (neither), `local`, `remote`, or `full` (both) | sync's `after` |
+| | `AGENT_FLOWS_MERGED` | `1` when the pull request merged | merge's `after` points |
+| `{merge}` | `AGENT_FLOWS_MERGE_COMMIT` | The commit the merge landed | merge's `after` points, once merged |
+| `{since}` | `AGENT_FLOWS_SINCE` | The commit the previous recorded evaluation was on | `evaluate.scan`, when there is one |
+| `{scope}` | `AGENT_FLOWS_SCOPE` | What evaluate reviews: `full` or `delta` | `evaluate.scan` |
+
+Every command also gets `AGENT_FLOWS_FLOW`, `AGENT_FLOWS_MODE`, `AGENT_FLOWS_POINT`, `AGENT_FLOWS_HOOK`, and `AGENT_FLOWS_CHANGED_FILES` (a file listing the branch's changed files, one per line).
 
 Whatever a hook hands the agent, the command's own rules hold: the same high-confidence bar as a CI fix, and in ready, never a migration or a dependency version. A task the agent can't do with confidence stops the command and asks.
 
@@ -345,7 +374,9 @@ Whatever a hook hands the agent, the command's own rules hold: the same high-con
 
 You can also edit the file and check it with `configure.ts show`. A hook that breaks the file stops every flow until it's fixed, but `configure.ts write` patches an invalid file as it stands, so a write that fixes the hook goes through.
 
-**How flows run them.** `src/commands/hooks.ts run <point>... --flow <flow> [--mode] [--base] [--branch] [--outcome] [--pr] [--prs]` runs the lists in order and prints `status`: `done` (with `ran`, each hook's result, and `failures` at reporting points), `agent` (a task, and where to resume: the flow does it, then calls again with `--after <point>/<name>`, so the work lands between the hooks around it), or `stop`. Each hook's full output goes to a log in the worktree's git dir; the JSON carries only the end of a failure's. At `evaluate.scan`, `findings` also carries what each passing command printed (its first 400 lines).
+**How flows run them.** `src/commands/hooks.ts run <point>... --flow <flow> [--mode] [--base] [--branch] [--outcome] [--pr] [--prs] [--issue] [--issue-filed] [--result] [--merged] [--merge-commit] [--since] [--scope] [--max-wait <seconds>]` runs the lists in order and prints `status`: `done` (with `ran`, each hook's result, and `failures` at reporting points), `agent` (a task, and where to resume: the flow does it, then calls again with `--after <point>/<name>`, so the work lands between the hooks around it; a `recheck` hook's command runs again first), `stop`, or `running`. Each hook's full output goes to a log in the worktree's git dir; the JSON carries only the end of a failure's. At `evaluate.scan`, `findings` also carries what each passing command printed (its first 400 lines, after its `findings` filter).
+
+Commands run detached, each in its own process group with a watchdog for its timeout, so a slow one (a 30-minute test suite) doesn't need the agent's shell to stay open that long. With `--max-wait <seconds>`, a call stops waiting after that long and prints `running` (the hook's `name`, `seconds` so far, `pid`, and its `resume`), with the hook still running; the call `--wait <point>/<name>` picks it up where it is and goes on with the rest. The skills pass a `--max-wait` a bit under the host's limit on one command (Claude Code's is 10 minutes) and call again until the status is something else. The timeout holds across calls, whether or not anyone is waiting.
 
 ### Sections
 
