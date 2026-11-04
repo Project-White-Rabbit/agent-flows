@@ -14,6 +14,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { getAt, INSTANCE_KEY, instancesOf } from "../config/config.ts"
 import { integrationId } from "../config/integrations.ts"
+import { plainDocumentLinks } from "../config/links.ts"
 import { type Routed, routeProject, routesOf } from "../config/projects.ts"
 import { INTEGRATIONS } from "../config/sections/index.ts"
 import { BITFAB_DEV_FORMAT } from "../config/sections/sync.ts"
@@ -218,7 +219,11 @@ export function workState(pr: PrState | undefined, ahead: number): WorkState {
   return pr?.state === "open" && !pr.draft ? "in review" : "in progress"
 }
 
-const LAST_SYNCED = /^_Last synced: .*_$/
+/**
+ * The last-synced line, as sync writes it (`_…_`) or as Linear stores it
+ * (`*…*`), so a description read back from Linear still has its marker found.
+ */
+export const LAST_SYNCED = /^([_*])Last synced: .*\1$/
 
 /** Sections an earlier sync tool regenerated, which the block now holds. */
 const LEGACY_SECTIONS = new Set(["Summary", "Test plan"])
@@ -350,6 +355,31 @@ export function spliceBlock(
   }
   const rest = withoutLegacySync(body, undefined, adopt).trim()
   return rest ? `${wrapped}\n\n${rest}\n` : `${wrapped}\n`
+}
+
+/**
+ * An issue description ready to write back: its document links plain (see
+ * plainDocumentLinks), and, when it has `current` (this sync's last-synced
+ * line), without any other last-synced line, so an older marker (Linear's
+ * `*…*` included) isn't left beside the new one.
+ */
+export function issueDescription(text: string, current?: string): string {
+  const plain = plainDocumentLinks(text)
+  const lines = plain.split("\n")
+  if (!current || !lines.some((line) => line.trim() === current)) {
+    return plain
+  }
+  let kept = false
+  return lines
+    .filter((line) => {
+      const trimmed = line.trim()
+      if (trimmed === current && !kept) {
+        kept = true
+        return true
+      }
+      return !LAST_SYNCED.test(trimmed)
+    })
+    .join("\n")
 }
 
 export function lastSyncedLine(
@@ -1052,6 +1082,14 @@ function splice(args: Args): void {
   process.stdout.write(spliceBlock(body, block, { markers, adoptHeader }))
 }
 
+function description(args: Args): void {
+  const file = required(args, "file")
+  const before = fs.readFileSync(file, "utf8")
+  const after = issueDescription(before, flag(args, "last-synced"))
+  fs.writeFileSync(file, after)
+  console.log(before === after ? "UNCHANGED" : `CHANGED ${file}`)
+}
+
 function finish(args: Args): void {
   const base = required(args, "base")
   const pr = parsePr(required(args, "pr"))
@@ -1111,6 +1149,14 @@ const USAGE = `Usage: sync.ts <command>
                   last-synced line. --adopt-header (sync.adoptHeader): a body
                   whose first line matches it was written by another tool,
                   whose header lines and same-named sections it replaces.
+  description --file <file> [--last-synced <line>]
+                  Ready an issue description for writing, in place: each
+                  document tag the tracker's MCP shows (<document … />) back
+                  to the [title](url) link it stores, repairing a link an
+                  earlier write nested, and, with --last-synced (facts'
+                  lastSyncedLine, when the file has it), any older
+                  last-synced line dropped. Prints CHANGED <file> or
+                  UNCHANGED.
   issue           The issue a sync recorded for the current branch (or an
                   earlier sync tool left for it), as {"branch", "issue"}, with
                   issue null when there's none. Reads only.
@@ -1147,6 +1193,7 @@ const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   survey,
   facts,
   splice,
+  description,
   finish,
   issue,
 }

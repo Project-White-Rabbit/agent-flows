@@ -71,7 +71,7 @@ export const syncFlow: Flow = devKit.defineFlow({
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
     sync: {
       description:
-        "`survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `finish` records the sync. State lives in the repo's git common dir, per branch",
+        "`survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `description` readies an issue description for writing; `finish` records the sync. State lives in the repo's git common dir, per branch",
       args: "<subcommand>",
     },
     tickets: {
@@ -319,7 +319,7 @@ With a session-sharing entry: run its \`shareSession\` op and note the URL, for 
 
 ### 3b. Issue
 
-With an issue tracker and a new issue planned in 1a: file it with that entry's \`createIssue\` op, using the description template in 3d, the title (with \`<blockerMark>\` at its start when 3d says it belongs there), \`<parent>\` when 1a planned it as a sub-issue, and \`<fields>\` from the issue fields below. Note its id: \`finish\` caches it for the next sync. Then, for that new issue only, the team's rules \`{{cmd}}create-tickets\` files by (an issue sync found was filed elsewhere, and already went through them):
+With an issue tracker and a new issue planned in 1a: file it with that entry's \`createIssue\` op, using the description template in 3d, readied with the same \`description\` command, the title (with \`<blockerMark>\` at its start when 3d says it belongs there), \`<parent>\` when 1a planned it as a sub-issue, and \`<fields>\` from the issue fields below. Note its id: \`finish\` caches it for the next sync. Then, for that new issue only, the team's rules \`{{cmd}}create-tickets\` files by (an issue sync found was filed elsewhere, and already went through them):
 
 - **The parent follows its sub-issues,** with \`<parentFollows>\` true and a \`<parent>\`: load the parent with \`getIssue\`, and write it to \`<dir>/parent.json\` as \`{"id", "priority", "cycle", "subIssues"}\` (its open sub-issues, each with \`id\`, \`priority\`, \`cycle\`, \`cycleStart\`, \`cycleEnd\`), and the new issue as filed to \`<dir>/sub.json\` as \`{"id", "priority", "cycle", "cycleStart", "cycleEnd"}\`. \`{{command:tickets}} follow --parent <dir>/parent.json --sub <dir>/sub.json\` prints the \`fields\` the parent takes (a more urgent priority; a cycle, when it has none). When there are any, the entry's \`updateIssue\` op on the parent with only those \`<fields>\`: no title, description, or state. A parent never moves down or out of a cycle.
 - **The planning document,** with \`<planningDoc>\` true: in \`<dir>/planning/\` (create it), write \`plan.json\` as \`{"source": {"title": "<branch> (sync)"}, "items": [{"key": "branch", "match": "<ID>", "filed": true, "title": "<title>", "url": "<URL>"}], "options": {"<entry>": <the entry's fieldOptions op's JSON>}}\` (leave \`options\` out when that op is \`unsupported\` or fails: the document is then named for today's week rather than the cycle's), and \`notes.md\` as \`Filed by sync for branch <branch>.\` then the issue's Description. \`{{command:tickets}} notes --plan <dir>/planning/plan.json --notes <dir>/planning/notes.md --out <dir>/planning/section.md\` prints the document's \`title\` and the section's \`key\`: run the entry's \`recordNotes\` op with \`<title>\`, \`<section-file>\` \`<dir>/planning/section.md\`, and \`<key>\`, and keep the document's title and URL it prints. Then write the new issue's description to \`<dir>/planning/description.md\` and run \`{{command:tickets}} planning-line --plan <dir>/planning/plan.json --notes <dir>/planning/notes.md --description <dir>/planning/description.md --title <doc title> --url <doc URL>\`: its \`> Planning:\` line goes in the description 3d writes. When \`recordNotes\` is \`unsupported\` or fails, carry on without the document, and say so in the report.
@@ -384,6 +384,14 @@ ${ISSUE_DESCRIPTION}
 - **Description:** keep the existing one. Write it only when the issue has none (a new issue, or one filed without it).
 - **Status:** regenerated every sync, 3-8 plain bullets (no checkboxes) across Done and Remaining, about the implementation only, never review, merge, or deploy. When the implementation is complete, Remaining is \`None. Implementation complete; the rest is tracked on the PR.\`
 - Keep any other section a person wrote.
+
+Write the description to \`<dir>/issue-new.md\` and run
+
+\`\`\`bash
+{{command:sync}} description --file <dir>/issue-new.md --last-synced '<lastSyncedLine>'
+\`\`\`
+
+(\`--last-synced\` left out when this write has no last-synced line). It puts back, in place, each document link the tracker's MCP showed as a tag (\`<document … />\`) as the \`[title](url)\` link the tracker stores, and drops any older last-synced line (\`*Last synced: …*\`, the way a tracker may store it, included). Pass the file's text as the description, whichever variant of the op writes it: through an API, a tag written back as text garbles the link.
 
 Then the entry's \`updateIssue\` op with the title (keep the existing one unless a new one fits strictly better, and keep any mark at its start, such as the team's \`tickets.blockerMark\` (an emoji like 🛑): it flags the issue for the team; with \`<blockerMark>\` set, add it at the start, \`<blockerMark> <title>\`, when the user or this session says the work stops a customer from making progress, never for work that only holds up a teammate), the description, \`<state>\` \`workState\`, and \`<fields>\` from the issue fields in 3b.
 

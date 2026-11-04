@@ -413,6 +413,19 @@ describe("work.ts", () => {
     ).toBe("UNCHANGED")
   })
 
+  it("writes a document link the MCP showed as a tag back as the link", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-"))
+    const file = path.join(dir, "description.md")
+    fs.writeFileSync(
+      file,
+      '> Planning: <document id="d1" label="Plan" href="https://l/d/1" />\n\nThe work.',
+    )
+    capture(["branch-line", "--description", file, "--branch", "b"])
+    expect(fs.readFileSync(file, "utf8")).toBe(
+      "> Branch: `b`\n> Planning: [Plan](https://l/d/1)\n\nThe work.\n",
+    )
+  })
+
   it("names sections and TICKET lines after the config's tickets.ranks", () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-"))
     execFileSync("git", ["-C", dir, "init", "-q", "-b", "main"])

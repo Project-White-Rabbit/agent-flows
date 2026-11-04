@@ -10,6 +10,8 @@ import {
   branchFile,
   capText,
   gate,
+  issueDescription,
+  LAST_SYNCED,
   lastSyncedLine,
   migrateState,
   parsePr,
@@ -1033,5 +1035,93 @@ describe("sync.ts (as a script)", () => {
     expect(fs.existsSync(path.join(gitDir, "agent-flows", "sync.json"))).toBe(
       false,
     )
+  })
+})
+
+describe("issue description", () => {
+  const doc =
+    "https://linear.app/acme/document/planning-week-of-2026-11-02-1a2b3c"
+  const lore = "https://lore.test/t/abc"
+  const now = "_Last synced: 2026-11-04 10:00 UTC (HEAD: abc1234)_"
+  // What Linear stores, and what its MCP's get_issue shows for it.
+  const stored = [
+    "> Branch: `eng-1-fix-login`",
+    `> Lore: [Session](${lore})`,
+    `> Planning: [Planning, week of 2026-11-02](${doc}), from [Sync](https://n/p)`,
+    "",
+    "## Description",
+    "",
+    "Fix the login redirect.",
+    "",
+    "## Status",
+    "",
+    "**Done:**",
+    "",
+    "- The redirect",
+    "",
+  ]
+  const mcpRead = [
+    ...stored.slice(0, 2),
+    `> Planning: <document id="d1" label="Planning, week of 2026-11-02" href="${doc}" />, from [Sync](https://n/p)`,
+    ...stored.slice(3),
+    "*Last synced: 2026-11-01 09:00 UTC (HEAD: 0000000)*",
+  ].join("\n")
+
+  it("finds the last-synced line in sync's emphasis and Linear's", () => {
+    expect(LAST_SYNCED.test(now)).toBe(true)
+    expect(LAST_SYNCED.test(now.replaceAll("_", "*"))).toBe(true)
+    expect(LAST_SYNCED.test(`_${now.slice(1, -1)}*`)).toBe(false)
+  })
+
+  it("replaces a PR body's old marker when it's stored with asterisks", () => {
+    const body = [
+      "> Issue: [ENG-1](https://t/1)",
+      "",
+      "## Summary",
+      "",
+      "- Old",
+      "",
+      "*Last synced: 2026-11-01 09:00 UTC (HEAD: 0000000)*",
+    ].join("\n")
+    const block = `> Issue: [ENG-1](https://t/1)\n\n## Summary\n\n- New\n\n${now}`
+    const out = spliceBlock(body, block, { markers: false })
+    expect(out.match(/Last synced/g)).toHaveLength(1)
+    expect(out).not.toContain("- Old")
+  })
+
+  it("gives back the lines Linear stores, byte for byte, with one marker", () => {
+    // Sync's compose: the MCP's read, with this sync's marker ending Status.
+    const composed = `${mcpRead}\n${now}\n`
+    const out = issueDescription(composed, now)
+    expect(out).toBe(`${stored.join("\n")}\n${now}\n`)
+    expect(out.split("\n").slice(0, 3)).toEqual(stored.slice(0, 3))
+    expect(issueDescription(out, now)).toBe(out)
+  })
+
+  it("keeps the old marker when this sync's isn't in the file", () => {
+    expect(issueDescription(mcpRead, now)).toContain("*Last synced: 2026-11-01")
+    expect(issueDescription(mcpRead)).toContain("*Last synced: 2026-11-01")
+  })
+
+  it("readies the file in place from the command line", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sync-description-"))
+    try {
+      const file = path.join(dir, "issue-new.md")
+      fs.writeFileSync(file, `${mcpRead}\n${now}\n`)
+      const script = path.join(import.meta.dirname, "sync.ts")
+      const run = () =>
+        spawnSync(
+          "node",
+          [script, "description", "--file", file, "--last-synced", now],
+          { encoding: "utf8" },
+        )
+      expect(run().stdout.trim()).toBe(`CHANGED ${file}`)
+      expect(fs.readFileSync(file, "utf8")).toBe(
+        `${stored.join("\n")}\n${now}\n`,
+      )
+      expect(run().stdout.trim()).toBe("UNCHANGED")
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

@@ -13,7 +13,7 @@ Keeps the branch, its draft pull request, and its issue in step with the work. S
 |---------|-------------|
 | `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), a failure that stops the command (`stop`), or a hook still running (`running`) |
 | `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
-| `sync.ts <subcommand>` | `survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `finish` records the sync. State lives in the repo's git common dir, per branch |
+| `sync.ts <subcommand>` | `survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `description` readies an issue description for writing; `finish` records the sync. State lives in the repo's git common dir, per branch |
 | `tickets.ts <subcommand>` | `follow` says what a parent takes from a sub-issue sync filed under it; `notes` and `planning-line` shape the planning document's section and the issue's link to it, as create-tickets files them |
 
 ## Invariants
