@@ -25,7 +25,7 @@ Reads only, apart from one `git fetch` and the repo's `close.before` hooks. A ga
 4. **Pull request:** the source-control entry's `branchPr` op for `<branch>`: `<N>`, its URL, title, and state, or none.
 5. **Remote branch:** `git ls-remote --heads origin <branch>`. Empty output means there's none; a failure stops the command.
 6. **What's left behind:** `git status --porcelain` (changes left in the working tree), and, when the remote branch exists, `git fetch origin <branch>` then `git rev-list --count <branch>..origin/<branch>`: `<remoteAhead>`, commits on the remote that the local branch doesn't have, which deleting it throws away.
-7. **Stacked branches:** with a stacking entry, its `downstack` op: `above` is how many branches sit on this one.
+7. **Stacked branches:** with a stacking entry, its `downstack` op: `above` is how many branches sit on this one. And when the remote branch exists, the source-control entry's `childPrs` op for `<branch>`: `<children>`, the open pull requests based on it, however they were stacked (by a stacking tool or by hand). When it fails, stop: `Couldn't list the pull requests based on <branch>, so it isn't safe to close: <the error>.` A list that wasn't read isn't an empty one.
 8. **The issue**, stopping at the first that loads with its entry's `getIssue` op (a ref is a string an issue-tracker entry's `issueRef` op matches):
    1. The issue a sync recorded for this branch: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/sync.ts" issue` prints `{"branch", "issue"}`.
    2. A ref in the branch name: the leftmost one only. When it doesn't load, don't try the others: cancelling the wrong issue is far worse than missing the right one.
@@ -44,7 +44,7 @@ Reads only, apart from one `git fetch` and the repo's `close.before` hooks. A ga
 In order. 1 to 3 refuse; 4 and 5 drop one action and carry on; 6 ends a close with nothing to do.
 
 1. **The base branch:** `<branch>` is `<base>`, or HEAD is detached: stop, `Refusing to close <base or a detached HEAD>.`
-2. **Stacked branches:** `above` is more than 0: stop, `Refusing to close <branch>: <above> branch(es) are stacked on it. Closing it would leave their pull requests pointing at a deleted branch. Close or restack those first.`
+2. **Stacked branches:** `above` is more than 0, or `<children>` isn't empty: stop, `Refusing to close <branch>: <the larger of the two counts> branch(es) are stacked on it (<the children's URLs>). Closing it would leave their pull requests pointing at a deleted branch. Close or restack those first.`
 3. **A merged pull request:** stop, `Pull request <N> merged. close is for abandoning work, not finishing it; /dev-flows:sync remote closes out its issue.`
 4. **Already closed:** a closed pull request isn't closed again; an issue already done or canceled isn't changed. Note each for the report.
 5. **Other work on the issue:** `<otherPrs>` isn't empty (a merged one counts: the issue may hold work that shipped): leave `<issue>` open, and say so.

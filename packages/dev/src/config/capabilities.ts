@@ -38,6 +38,8 @@ export const CAPABILITIES: CapabilitySpec[] = [
       currentPr: `The open pull request for the checked-out branch: ${PR_FIELDS}. No pull request, or the CLI missing or signed out, means there is none`,
       prMetadata: `Pull request <N>: ${PR_FIELDS}`,
       branchPr: `The most recent pull request whose head is branch <branch>, open, merged, or closed: ${PR_FIELDS}. None means there is none`,
+      childPrs:
+        'The open pull requests whose base is branch <branch>, all pages: `{"prs": [{"number", "url", "head"}]}`, `head` each one\'s head branch. An empty list means none; a list that can\'t be read is a failure, never an empty one',
       prDiff: "Pull request <N>'s full unified diff",
       prFiles: "Pull request <N>'s changed file paths, one per line",
       prCommits: "Pull request <N>'s commit subjects, one per line",
@@ -94,12 +96,13 @@ export const CAPABILITIES: CapabilitySpec[] = [
     id: "stacking",
     name: "Stacked PRs",
     purpose: "Stacked branches and pull requests on top of source control",
+    exclusive: true,
     ops: {
       parent:
         "The checked-out branch's parent in its stack. Fails when the branch isn't tracked",
       track: "Start tracking the checked-out branch, stacked on <parent>",
       restack:
-        "Rebase the checked-out branch onto the latest commit of its parent (the fetched remote trunk, when the parent is trunk), stopping on conflicts",
+        "Bring the checked-out branch up to the latest commit of its parent (the fetched remote trunk, when the parent is trunk), by a rebase or a merge as the tool does it, stopping on conflicts",
       continue:
         "Carry on with an interrupted restack once its conflicts are resolved and staged",
       reparent:
