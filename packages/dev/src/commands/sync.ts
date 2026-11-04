@@ -54,6 +54,8 @@ export type SyncFormat = {
   footer: boolean
   /** A regex source for another tool's link lines on top of a body it wrote, so sync replaces that body. */
   adoptHeader: string | null
+  /** The PR body's issue line: \`link\` (\`[<ID>](<URL>) <title>\`) or \`url\` (the bare URL). */
+  linkStyle: "link" | "url"
 }
 
 export function syncFormat(
@@ -89,6 +91,7 @@ export function syncFormat(
       typeof values.adoptHeader === "string" && compiles(values.adoptHeader)
         ? values.adoptHeader
         : null,
+    linkStyle: values.linkStyle === "url" ? "url" : "link",
   }
 }
 
@@ -177,6 +180,8 @@ export function gate(input: {
   head: string
   pr: PrState | undefined
   stored: BranchState | undefined
+  /** False with `--no-catch-up`: a base that moved is no reason for local work. */
+  catchUp?: boolean
 }): Gate {
   const { mode, stored } = input
   const linked = new Set(stored?.remote?.linkedRefs ?? [])
@@ -185,9 +190,10 @@ export function gate(input: {
     mode === "default" &&
     input.ahead > 0 &&
     (input.unpushed === undefined || input.unpushed > 0)
+  const needsCatchUp = input.catchUp !== false && input.behind > 0
   const runLocal =
     mode !== "remote" &&
-    (input.onBase || input.dirty || input.behind > 0 || needsPush)
+    (input.onBase || input.dirty || needsCatchUp || needsPush)
   // Local work in default mode moves HEAD, so the remote writes follow it.
   const runRemote =
     mode !== "local" &&
@@ -376,9 +382,48 @@ export function issueDescription(text: string, current?: string): string {
     .join("\n")
 }
 
-export function lastSyncedLine(head: string, now = new Date()): string {
-  const stamp = now.toISOString().slice(0, 16).replace("T", " ")
-  return `_Last synced: ${stamp} UTC (HEAD: ${head.slice(0, 7)})_`
+export function lastSyncedLine(
+  head: string,
+  now = new Date(),
+  timeZone?: string | null,
+): string {
+  return `_Last synced: ${syncStamp(now, timeZone)} (HEAD: ${head.slice(0, 7)})_`
+}
+
+/**
+ * `YYYY-MM-DD HH:MM <zone>` in `timeZone` (`sync.timezone`), UTC by default or
+ * when the zone is unknown. The zone goes by its short generic name (`PT`),
+ * else its short one (`GMT+1`), so the line stays one short token wide.
+ */
+export function syncStamp(now: Date, timeZone?: string | null): string {
+  const utc = `${now.toISOString().slice(0, 16).replace("T", " ")} UTC`
+  if (!timeZone || timeZone === "UTC") {
+    return utc
+  }
+  try {
+    const part = (style: "shortGeneric" | "short") =>
+      Object.fromEntries(
+        new Intl.DateTimeFormat("en-US", {
+          timeZone,
+          timeZoneName: style,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        })
+          .formatToParts(now)
+          .map((p) => [p.type, p.value]),
+      ) as Record<string, string>
+    const parts = part("shortGeneric")
+    const name = /^[A-Z]{1,5}$/.test(parts.timeZoneName)
+      ? parts.timeZoneName
+      : part("short").timeZoneName
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${name}`
+  } catch {
+    return utc
+  }
 }
 
 // --- git ---------------------------------------------------------------------
@@ -602,14 +647,21 @@ export function readLegacyState(
   adopt: AdoptFiles = { files: [] },
 ): LegacyState | undefined {
   // bitfab-dev's files, newest first: the first one there decides.
+  let found = false
   for (const file of LEGACY_STATE_FILES) {
     const state = readStateFile(path.join(root, file))
     if (state) {
       if (state.branch === branch) {
         return fromLegacy(state)
       }
+      found = true
       break
     }
+  }
+  // Its oldest form, read only when neither JSON file is there.
+  const id = found ? undefined : readLinearIdFile(root, branch)
+  if (id) {
+    return { issue: id, errorRefs: [] }
   }
   // Each adopted tool's file on its own, since each writes only its own.
   for (const file of adopt.files) {
@@ -620,6 +672,31 @@ export function readLegacyState(
     }
   }
   return undefined
+}
+
+/** bitfab-dev's oldest state file: the issue id, then (optionally) the branch it's for. */
+export const LEGACY_ID_FILE = ".bitfab-sync/linear-id"
+
+/**
+ * The issue id in LEGACY_ID_FILE, upper-cased: its first line, unless its
+ * second names another branch. A one-line file names no branch, so it counts,
+ * as bitfab-dev's own reader takes it.
+ */
+export function readLinearIdFile(
+  root: string,
+  branch: string,
+): string | undefined {
+  let text: string
+  try {
+    text = fs.readFileSync(path.join(root, LEGACY_ID_FILE), "utf8")
+  } catch {
+    return undefined
+  }
+  const [id, forBranch] = text.split(/\r?\n/).map((line) => line.trim())
+  if (!id || (forBranch && forBranch !== branch)) {
+    return undefined
+  }
+  return id.toUpperCase()
 }
 
 /** What an earlier sync tool left for a branch. `adopted`: from `sync.adoptState`. */
@@ -714,7 +791,7 @@ export function readState(file: string): SyncState {
 type Args = { positional: string[]; flags: Map<string, string[]> }
 
 /** Flags that take no value; every other flag takes the next argument. */
-const SWITCHES = new Set(["remote", "no-markers"])
+const SWITCHES = new Set(["remote", "no-markers", "no-catch-up"])
 
 function parseArgs(args: string[]): Args {
   const positional: string[] = []
@@ -760,6 +837,33 @@ function currentBranch(): string {
   return branch
 }
 
+/** The config's `repo.protectedBranches`, minus the base, which sync branches off. */
+export function protectedBranchesOf(
+  config: Record<string, unknown> | undefined,
+  base: string,
+): string[] {
+  const listed = config ? getAt(config, "repo.protectedBranches") : undefined
+  return Array.isArray(listed)
+    ? listed.filter((b): b is string => typeof b === "string" && b !== base)
+    : []
+}
+
+/**
+ * Why sync won't run on `branch`, or undefined. A protected branch (a
+ * production branch the base is promoted to) isn't the base, so treating it as
+ * a feature branch would commit to it, merge the base into it, and push it.
+ */
+export function protectedRefusal(
+  branch: string,
+  base: string,
+  config: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!protectedBranchesOf(config, base).includes(branch)) {
+    return undefined
+  }
+  return `Refusing to sync on ${branch}: it's protected (repo.protectedBranches), and sync would commit to it, merge ${base} into it, and push it. Check out a feature branch, or ${base} to start one, then re-run.`
+}
+
 // --- subcommands -------------------------------------------------------------
 
 function survey(args: Args): void {
@@ -770,6 +874,16 @@ function survey(args: Args): void {
   const base = required(args, "base")
   const pr = parsePr(required(args, "pr"))
   const branch = currentBranch()
+  const root = git(["rev-parse", "--show-toplevel"])
+  const refusal = protectedRefusal(
+    branch,
+    base,
+    root ? loadConfig(root).config : undefined,
+  )
+  if (refusal) {
+    throw new Error(refusal)
+  }
+  const catchUp = !args.flags.has("no-catch-up")
   // Remote mode never catches up, so it doesn't need a fresh base.
   let baseRef: string | undefined
   if (mode !== "remote") {
@@ -836,6 +950,7 @@ function survey(args: Args): void {
     head,
     pr,
     stored: current,
+    catchUp,
   })
   printJson({
     mode,
@@ -843,6 +958,7 @@ function survey(args: Args): void {
     base,
     baseRef: baseRef ?? null,
     onBase,
+    catchUp,
     dirty,
     ahead,
     behind,
@@ -871,14 +987,19 @@ function facts(args: Args): void {
   const ahead = count(`${baseRef}..HEAD`)
   const stored = readBranchState(stateDir(), branch)
   const full = stored?.remote?.head !== head
+  const section = syncSection()
   printJson({
     workState: workState(pr, ahead),
-    lastSyncedLine: lastSyncedLine(head),
+    lastSyncedLine: lastSyncedLine(
+      head,
+      new Date(),
+      typeof section.timezone === "string" ? section.timezone : null,
+    ),
     // Only the pull request's state moved: refresh state and links, not prose.
     updateKind: full ? "full" : "metadata-only",
     ...(full
       ? {
-          commits: commitsOf(baseRef, syncSection().commitBodies === true),
+          commits: commitsOf(baseRef, section.commitBodies === true),
           diffStat: git(["diff", "--stat", `${baseRef}...HEAD`]) ?? "",
         }
       : {}),
@@ -1006,15 +1127,18 @@ function finish(args: Args): void {
 
 const USAGE = `Usage: sync.ts <command>
 
-  survey <default|local|remote> --base <branch> --pr <pr> [--error-ref <ref>]...
+  survey <default|local|remote> --base <branch> --pr <pr> [--error-ref <ref>]... [--no-catch-up]
                   Fetch the base (not in remote mode), read git state, and
                   print it with the gate: runLocal, runRemote, noop, and the
                   branch's sync format (the config's sync section, then the
                   format it was last written in). Error refs are remembered
                   for the branch until a remote sync links them.
+                  --no-catch-up: a base that moved is no reason for local
+                  work. Refuses on a branch in repo.protectedBranches.
   facts --base <branch> --pr <pr>
                   For the remote writes: the issue's workState, the
-                  lastSyncedLine, updateKind (full or metadata-only), and, for
+                  lastSyncedLine (in sync.timezone, else UTC), updateKind
+                  (full or metadata-only), and, for
                   a full update, commits and diffStat against the base
                   (commits with their bodies when sync.commitBodies is set).
   splice --body <file> --block <file> [--no-markers] [--adopt-header <regex>]
@@ -1045,7 +1169,8 @@ const USAGE = `Usage: sync.ts <command>
 <pr> is \`none\` or \`<number>:<open|merged|closed>:<true|false>\` (draft).
 State is kept per branch in the repo's git common dir, shared by its
 worktrees. A branch with no state yet starts from the issue and error refs
-bitfab-dev's sync left in .bitfab-dev/state.json, when they're for that
+bitfab-dev's sync left in .bitfab-dev/state.json (or its older
+.bitfab-sync/state.json, or .bitfab-sync/linear-id), when they're for that
 branch, and from that tool's format; or, failing that, from another tool's
 state file the config's sync.adoptState names ({gitDir} and {gitCommonDir}
 are this worktree's git dirs), in the format the config sets.

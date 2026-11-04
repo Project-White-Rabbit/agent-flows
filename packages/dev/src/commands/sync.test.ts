@@ -15,11 +15,15 @@ import {
   lastSyncedLine,
   migrateState,
   parsePr,
+  protectedBranchesOf,
+  protectedRefusal,
   readBranchState,
   readLegacyState,
+  readLinearIdFile,
   resolveAdopted,
   spliceBlock,
   syncFormat,
+  syncStamp,
   withoutAdopted,
   withoutLegacySync,
   workState,
@@ -61,6 +65,13 @@ describe("gate", () => {
     ]) {
       expect(gate({ ...clean, ...change, stored: synced }).runLocal).toBe(true)
     }
+  })
+
+  it("doesn't count a moved base as local work with --no-catch-up", () => {
+    const behind = { ...clean, behind: 3, stored: synced }
+    expect(gate({ ...behind, catchUp: false }).runLocal).toBe(false)
+    expect(gate({ ...behind, catchUp: false, dirty: true }).runLocal).toBe(true)
+    expect(gate(behind).runLocal).toBe(true)
   })
 
   it("follows local work with remote writes in default mode only", () => {
@@ -259,6 +270,7 @@ describe("syncFormat", () => {
       noIssueLine: null,
       footer: true,
       adoptHeader: null,
+      linkStyle: "link",
     }
     expect(syncFormat(undefined)).toEqual(own)
     expect(syncFormat({ version: 2 })).toEqual(own)
@@ -276,6 +288,7 @@ describe("syncFormat", () => {
       noIssueLine: "none",
       footer: true,
       adoptHeader: "^Linear\\s*:",
+      linkStyle: "url",
     }
     expect(syncFormat({ sync })).toEqual(sync)
   })
@@ -303,6 +316,7 @@ describe("syncFormat", () => {
       noIssueLine: null,
       footer: true,
       adoptHeader: null,
+      linkStyle: "link" as const,
     }
     expect(syncFormat(undefined, recorded)).toEqual(recorded)
     expect(
@@ -321,7 +335,7 @@ describe("syncFormat", () => {
         prTitle: null,
         blockMarkers: false,
       }),
-    ).toMatchObject({ quoteLinks: true, prSections: null })
+    ).toMatchObject({ quoteLinks: true, prSections: null, linkStyle: "link" })
   })
 })
 
@@ -537,6 +551,34 @@ describe("readLegacyState", () => {
       errorRefs: [],
     })
   })
+
+  function writeText(file: string, text: string): string {
+    root ??= fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-legacy-"))
+    fs.mkdirSync(path.join(root, path.dirname(file)), { recursive: true })
+    fs.writeFileSync(path.join(root, file), text)
+    return root
+  }
+
+  it("reads the oldest linear-id file: the id, then the branch it's for", () => {
+    const dir = writeText(".bitfab-sync/linear-id", "eng-12\nfeature\n")
+    expect(readLinearIdFile(dir, "feature")).toBe("ENG-12")
+    expect(readLegacyState(dir, "feature")).toEqual({
+      issue: "ENG-12",
+      errorRefs: [],
+    })
+    expect(readLegacyState(dir, "other")).toBeUndefined()
+    // One line names no branch, so it counts for any.
+    writeText(".bitfab-sync/linear-id", "ENG-13\n")
+    expect(readLinearIdFile(dir, "other")).toBe("ENG-13")
+    writeText(".bitfab-sync/linear-id", "\n")
+    expect(readLinearIdFile(dir, "other")).toBeUndefined()
+  })
+
+  it("reads the linear-id file only when no state file is there", () => {
+    const dir = writeText(".bitfab-sync/linear-id", "ENG-12\n")
+    write(".bitfab-dev/state.json", { linearId: "ENG-9", branch: "other" })
+    expect(readLegacyState(dir, "feature")).toBeUndefined()
+  })
 })
 
 describe("readLegacyState with adopted files", () => {
@@ -605,6 +647,42 @@ describe("lastSyncedLine", () => {
     expect(
       lastSyncedLine("0123456789abcdef", new Date("2026-10-23T20:41:09Z")),
     ).toBe("_Last synced: 2026-10-23 20:41 UTC (HEAD: 0123456)_")
+  })
+
+  it("stamps it in sync.timezone, by the zone's short name", () => {
+    const at = new Date("2026-10-23T20:41:09Z")
+    expect(lastSyncedLine("0123456789", at, "America/Los_Angeles")).toBe(
+      "_Last synced: 2026-10-23 13:41 PT (HEAD: 0123456)_",
+    )
+    expect(syncStamp(at, "Europe/Berlin")).toBe("2026-10-23 22:41 GMT+2")
+    expect(syncStamp(new Date("2026-10-23T23:30:00Z"), "Asia/Tokyo")).toBe(
+      "2026-10-24 08:30 GMT+9",
+    )
+    expect(syncStamp(at, "UTC")).toBe("2026-10-23 20:41 UTC")
+    expect(syncStamp(at, "Not/AZone")).toBe("2026-10-23 20:41 UTC")
+  })
+})
+
+describe("protected branches", () => {
+  const config = {
+    repo: { baseBranch: "dev", protectedBranches: ["main", "dev"] },
+  }
+
+  it("refuses on a protected branch, never on the base", () => {
+    expect(protectedBranchesOf(config, "dev")).toEqual(["main"])
+    expect(protectedRefusal("main", "dev", config)).toMatch(
+      /^Refusing to sync on main: it's protected \(repo\.protectedBranches\)/,
+    )
+    expect(protectedRefusal("dev", "dev", config)).toBeUndefined()
+    expect(protectedRefusal("feature", "dev", config)).toBeUndefined()
+  })
+
+  it("protects nothing the config doesn't list", () => {
+    expect(protectedBranchesOf(undefined, "main")).toEqual([])
+    expect(
+      protectedBranchesOf({ repo: { baseBranch: "main" } }, "main"),
+    ).toEqual([])
+    expect(protectedRefusal("main", "dev", { repo: {} })).toBeUndefined()
   })
 })
 
@@ -773,6 +851,45 @@ describe("sync.ts (as a script)", () => {
     })
   })
 
+  it("refuses on a protected branch, and leaves a moved base alone with --no-catch-up", () => {
+    init()
+    fs.mkdirSync(path.join(work(), ".agent-flows"))
+    fs.writeFileSync(
+      path.join(work(), ".agent-flows", "config.json"),
+      JSON.stringify({
+        version: 3,
+        repo: { baseBranch: "main", protectedBranches: ["prod"] },
+      }),
+    )
+    git("switch", "-q", "-c", "prod")
+    const refused = sync([
+      "survey",
+      "default",
+      "--base",
+      "main",
+      "--pr",
+      "none",
+    ])
+    expect(refused.status).toBe(1)
+    expect(refused.stderr).toMatch(/Refusing to sync on prod/)
+
+    git("switch", "-q", "feature")
+    git("switch", "-q", "main")
+    git("commit", "-q", "--allow-empty", "-m", "Base moved")
+    git("push", "-q", "origin", "HEAD:main")
+    git("switch", "-q", "feature")
+    git("add", "-A")
+    git("commit", "-q", "-m", "Config")
+    git("push", "-q", "-u", "origin", "HEAD")
+    const survey = ["survey", "default", "--base", "main", "--pr", "none"]
+    expect(json(survey)).toMatchObject({ behind: 1, runLocal: true })
+    expect(json([...survey, "--no-catch-up"])).toMatchObject({
+      behind: 1,
+      catchUp: false,
+      runLocal: false,
+    })
+  })
+
   it("stops when origin has no base branch to compare against", () => {
     init()
     const result = sync(["survey", "default", "--base", "dev", "--pr", "none"])
@@ -860,6 +977,7 @@ describe("sync.ts (as a script)", () => {
       noIssueLine: "none",
       footer: true,
       adoptHeader: "^Linear\\s*:",
+      linkStyle: "url",
     }
     fs.mkdirSync(path.join(work(), ".agent-flows"))
     fs.writeFileSync(

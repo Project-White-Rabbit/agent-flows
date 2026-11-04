@@ -88,20 +88,104 @@ describe("checkHooks", () => {
     expect(
       check([{ name: "a", run: "x", modes: ["loop"] }], "hooks.before").issues,
     ).toEqual([
-      "hooks.before[a].modes is only for a flow's own points: put the hook in that flow's section",
+      "hooks.before[a].modes at a general point needs flows, to say whose modes they are",
     ])
   })
 
-  it("takes an outcome only at an after point", () => {
+  it("takes flows only at a general point, and modes there of those flows", () => {
+    expect(
+      check(
+        [
+          { name: "a", run: "x", flows: ["sync", "ready"] },
+          { name: "b", run: "x", flows: ["sync", "ready"], modes: ["local"] },
+          { name: "c", run: "x", flows: ["ready"], modes: ["draft", "loop"] },
+        ],
+        "hooks.after",
+      ).issues,
+    ).toEqual([])
+    expect(
+      check(
+        [
+          { name: "a", run: "x", flows: ["configure"] },
+          { name: "b", run: "x", flows: [] },
+          { name: "c", run: "x", flows: ["merge"], modes: ["loop"] },
+          { name: "d", run: "x", flows: ["nope"], modes: ["loop"] },
+        ],
+        "hooks.before",
+      ).issues,
+    ).toEqual([
+      "hooks.before[a].flows must list flows of close, create-tickets, evaluate, merge, ready, start-work, sync, tickets-to-work",
+      "hooks.before[b].flows must list flows of close, create-tickets, evaluate, merge, ready, start-work, sync, tickets-to-work",
+      "hooks.before[c].modes must list modes of merge: default",
+      "hooks.before[d].flows must list flows of close, create-tickets, evaluate, merge, ready, start-work, sync, tickets-to-work",
+    ])
+    expect(check([{ name: "a", run: "x", flows: ["ready"] }]).issues).toEqual([
+      "ready.before[a].flows is only for a general point: this one runs only in ready",
+    ])
+  })
+
+  it("takes an outcome only at an after point, and merged only where merging is known", () => {
     expect(check([{ name: "a", run: "x", on: "success" }]).issues).toEqual([
       "ready.before[a].on is only for an after point, which knows the outcome",
     ])
     expect(
       check([{ name: "a", run: "x", on: "maybe" }], "merge.after").issues,
-    ).toEqual(["merge.after[a].on must be success or failure"])
+    ).toEqual(["merge.after[a].on must be success, failure, merged"])
     expect(
       check([{ name: "a", run: "x", on: "failure" }], "hooks.after").issues,
     ).toEqual([])
+    for (const where of ["merge.after", "hooks.after"]) {
+      expect(
+        check([{ name: "a", run: "x", on: "merged" }], where).issues,
+      ).toEqual([])
+    }
+    expect(
+      check([{ name: "a", run: "x", on: "merged" }], "close.after").issues,
+    ).toEqual([
+      "close.after[a].on: merged is only for merge.after and hooks.after, which know whether the pull request merged",
+    ])
+  })
+
+  it("takes recheck only on a command that can hand over a task", () => {
+    expect(check([{ name: "a", run: "x", recheck: true }]).issues).toEqual([])
+    expect(
+      check([
+        { name: "a", prompt: "x", recheck: true },
+        { name: "b", run: "x", recheck: "yes" },
+      ]).issues,
+    ).toEqual([
+      "ready.before[a].recheck is only for a run command",
+      "ready.before[b].recheck must be true or false",
+    ])
+    expect(
+      check([{ name: "a", run: "x", recheck: true }], "evaluate.scan").issues,
+    ).toEqual([
+      "evaluate.scan[a].recheck isn't for evaluate.scan: its commands only read, so an exit 2 there stops rather than hands over a task",
+    ])
+  })
+
+  it("takes a findings regex only on a scan command", () => {
+    expect(
+      check(
+        [{ name: "a", run: "x", findings: "^(FINDING|  CHECK|UNTESTED):" }],
+        "evaluate.scan",
+      ).issues,
+    ).toEqual([])
+    expect(
+      check(
+        [
+          { name: "a", run: "x", findings: "(" },
+          { name: "b", prompt: "x", findings: "^F" },
+        ],
+        "evaluate.scan",
+      ).issues,
+    ).toEqual([
+      "evaluate.scan[a].findings must be a regular expression",
+      "evaluate.scan[b].findings is only for a run command",
+    ])
+    expect(check([{ name: "a", run: "x", findings: "^F" }]).issues).toEqual([
+      "ready.before[a].findings is only for a point whose output is findings (evaluate.scan)",
+    ])
   })
 
   it("rejects what isn't a list of objects", () => {
@@ -157,6 +241,7 @@ describe("hook points", () => {
       (id) => id !== "configure",
     )
     expect([...HOOK_FLOWS].sort()).toEqual(ids.sort())
+    expect(Object.keys(FLOW_MODES).sort()).toEqual([...HOOK_FLOWS].sort())
     for (const [id, modes] of Object.entries(FLOW_MODES)) {
       const flow = DEV_FLOWS.find((f) => f.id === id)
       expect(modes, id).toEqual(
@@ -186,5 +271,14 @@ describe("fillVars", () => {
       }),
     ).toBe("abc x {other} {outcome}")
     expect(fillVars("{pr} {prs}", { pr: "12", prs: "11 12" })).toBe("12 11 12")
+    expect(
+      fillVars("{issue} {result} {merge} {since} {scope}", {
+        issue: "ENG-1",
+        result: "full",
+        merge: "abc",
+        since: "def",
+        scope: "delta",
+      }),
+    ).toBe("ENG-1 full abc def delta")
   })
 })

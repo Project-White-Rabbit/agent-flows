@@ -308,6 +308,84 @@ describe("sync format", () => {
       "sync.adoptHeader must be a valid regular expression",
     ])
   })
+
+  it("takes a bare-URL issue line and a time zone for the last-synced line", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({
+        ...base,
+        sync: { linkStyle: "url", timezone: "America/Los_Angeles" },
+      }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        sync: { linkStyle: "bare", timezone: "Pacific" },
+      }).issues,
+    ).toEqual([
+      "sync.linkStyle must be `link` or `url`",
+      "sync.timezone must be an IANA time zone (`UTC`, `America/Los_Angeles`)",
+    ])
+  })
+})
+
+describe("repo section", () => {
+  it("takes the branches no flow works on directly", () => {
+    const repo = {
+      baseBranch: "dev",
+      protectedBranches: ["main", "release/prod"],
+    }
+    expect(checkConfig({ version: 3, repo }).issues).toEqual([])
+    expect(
+      checkConfig({
+        version: 3,
+        repo: { baseBranch: "dev", protectedBranches: ["main branch"] },
+      }).issues,
+    ).toEqual([
+      "repo.protectedBranches must list only branch names (`main`, `release/prod`) (not `main branch`)",
+    ])
+  })
+})
+
+describe("ticket rules for sync and dates", () => {
+  it("takes assignOnSync and a time zone for today", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({
+        ...base,
+        tickets: { assignOnSync: true, timezone: "Europe/Berlin" },
+      }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        tickets: { assignOnSync: "yes", timezone: "Berlin" },
+      }).issues,
+    ).toEqual([
+      "tickets.assignOnSync must be true or false",
+      "tickets.timezone must be an IANA time zone (`UTC`, `America/Los_Angeles`)",
+    ])
+  })
+})
+
+describe("issue tracker states", () => {
+  it("moves an issue to the state named for its stage before one of the same type", () => {
+    const linearOps = INTEGRATIONS.find((s) => s.path === "integrations.linear")
+      ?.provides.issueTracker?.updateIssue as Record<string, string>
+    for (const variant of Object.values(linearOps)) {
+      expect(variant).toContain(
+        "named for <state>, any case: `todo` → Todo, `in progress` → In Progress",
+      )
+      expect(variant).toContain("`canceled` → `canceled` (not Duplicate)")
+    }
+    const jiraOps = INTEGRATIONS.find((s) => s.path === "integrations.jira")
+      ?.provides.issueTracker?.updateIssue as Record<string, string>
+    for (const variant of Object.values(jiraOps)) {
+      expect(variant).toContain(
+        "`canceled` → Canceled (or Cancelled, Won't Do); when there's no status of that name",
+      )
+    }
+  })
 })
 
 describe("merge section", () => {
@@ -376,6 +454,113 @@ describe("merge section", () => {
       "merge.deployTimeout must be a number greater than 0",
       "merge.deployLogLines must be a number greater than 0",
     ])
+  })
+
+  it("takes the blocking reviewers, the clean-tree gate, and the CI wait", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({
+        ...base,
+        merge: {
+          blockingReviewers: ["github-advanced-security", "claude[bot]"],
+          requireClean: true,
+          ciTimeout: 45,
+        },
+      }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        merge: {
+          blockingReviewers: ["github advanced security"],
+          requireClean: "yes",
+          ciTimeout: 0,
+        },
+      }).issues,
+    ).toEqual([
+      "merge.blockingReviewers must list logins (`github-advanced-security`, `claude[bot]`)",
+      "merge.requireClean must be true or false",
+      "merge.ciTimeout must be a number greater than 0",
+    ])
+    expect(
+      checkConfig({ ...base, merge: { blockingReviewers: "codeql" } }).issues,
+    ).toEqual([expect.stringContaining("merge.blockingReviewers")])
+  })
+})
+
+describe("ready section's CI settle rules", () => {
+  it("takes the settle grace, requireChecks, and rollup checks", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({
+        ...base,
+        ready: {
+          settleGrace: 20,
+          requireChecks: true,
+          rollupChecks: ["tests-passed"],
+        },
+      }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        ready: { settleGrace: -1, requireChecks: 1, rollupChecks: "ci" },
+      }).issues,
+    ).toEqual([
+      "ready.settleGrace must be a number greater than 0",
+      "ready.requireChecks must be true or false",
+      expect.stringContaining("ready.rollupChecks"),
+    ])
+  })
+})
+
+describe("evaluate section", () => {
+  const base = { version: 3, repo: { baseBranch: "main" } }
+
+  it("takes what stops, the rubric, the tests, and the fetch evaluate acts on", () => {
+    for (const stopOn of ["rethink", "high"]) {
+      expect(
+        checkConfig({
+          ...base,
+          evaluate: {
+            stopOn,
+            instructions: ["docs/review.md", ".agent-flows/rubric.md"],
+            tests: "bun run test {tests}",
+            fetch: true,
+          },
+        }).issues,
+      ).toEqual([])
+    }
+    expect(
+      checkConfig({
+        ...base,
+        evaluate: {
+          stopOn: "medium",
+          instructions: "docs/review.md",
+          tests: "bun run test",
+          fetch: "yes",
+        },
+      }).issues,
+    ).toEqual([
+      "evaluate.stopOn must be `rethink` or `high`",
+      expect.stringContaining("evaluate.instructions"),
+      "evaluate.tests must name `{tests}`, the test files evaluate picks",
+      "evaluate.fetch must be true or false",
+    ])
+  })
+
+  it("takes only repo-relative rubric files", () => {
+    for (const file of ["/etc/review.md", "../review.md", "docs/../../x.md"]) {
+      expect(
+        checkConfig({ ...base, evaluate: { instructions: [file] } }).issues,
+      ).toEqual([
+        `evaluate.instructions must list only repo-relative paths (not \`${file}\`)`,
+      ])
+    }
+    expect(
+      checkConfig({ ...base, evaluate: { instructions: ["..rc/review.md"] } })
+        .issues,
+    ).toEqual([])
   })
 })
 

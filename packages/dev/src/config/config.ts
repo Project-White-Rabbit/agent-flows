@@ -9,6 +9,7 @@
 // - Known fields are strict: wrong types and missing required fields are
 //   errors, and a write can never introduce an unknown section.
 
+import { CAPABILITIES } from "./capabilities.ts"
 import { checkHooks } from "./hooks.ts"
 import { freeInstanceName, INSTANCE_KEY, INSTANCE_NAME } from "./instances.ts"
 import { checkProjects } from "./projects.ts"
@@ -22,7 +23,7 @@ import type {
   SectionSpec,
   SectionValues,
 } from "./types.ts"
-import { checkUse, USE_KEY } from "./use.ts"
+import { checkUse, USE_KEY, usesOf } from "./use.ts"
 
 export const CONFIG_PATH = ".agent-flows/config.json"
 
@@ -370,6 +371,8 @@ export function checkConfig(
     }
   }
 
+  issues.push(...checkExclusive(config, registry))
+
   for (const path of skippedList) {
     const spec = known.get(path)
     if (!spec) {
@@ -381,6 +384,41 @@ export function checkConfig(
     }
   }
   return { issues, warnings }
+}
+
+/**
+ * A capability only one integration may be used for at a time
+ * (`CapabilitySpec.exclusive`) that several entries are: an issue naming them.
+ */
+function checkExclusive(config: RawConfig, registry: SectionSpec[]): string[] {
+  const issues: string[] = []
+  for (const capability of CAPABILITIES.filter((c) => c.exclusive)) {
+    const users: string[] = []
+    for (const spec of registry) {
+      if (
+        !("provides" in spec) ||
+        !(capability.id in (spec.provides as object))
+      ) {
+        continue
+      }
+      const entry = getAt(config, spec.path)
+      for (const values of instancesOf(entry)) {
+        if (usesOf(spec, values)[capability.id] !== undefined) {
+          users.push(
+            Array.isArray(entry)
+              ? `${spec.path}[${values[INSTANCE_KEY]}]`
+              : spec.path,
+          )
+        }
+      }
+    }
+    if (users.length > 1) {
+      issues.push(
+        `${capability.id} can come from only one integration, but ${users.join(", ")} are each used for it: leave it out of the \`use\` of all but one`,
+      )
+    }
+  }
+  return issues
 }
 
 export type ConfigPatch = {

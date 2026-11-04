@@ -26,8 +26,10 @@ const MCP_FIELDS =
 const API_FIELDS =
   "`<fields>` as `priority` (`urgent` 1, `high` 2, `medium` 3, `low` 4, `none` 0), `estimate`, `labelIds` (from `issueLabels(filter: { name: { in: <names> } })`), `cycleId` (the team's `activeCycle { id }` for `current`, else from the team's `cycles { nodes { id startsAt endsAt } }`: the first to start after the active one for `next`, the one holding a date), `projectId` (from `projects(filter: { name: { eq: <project> } })`), `assigneeId` (from `users(filter: { or: [{ name: { eqIgnoreCase: <assignee> } }, { displayName: { eqIgnoreCase: <assignee> } }, { email: { eq: <assignee> } }] })`), and `dueDate`"
 
+// A team can have several states of one type (Canceled and Duplicate are both
+// `canceled`), so the expected name decides, and the type only breaks a miss.
 const STATE_MAP =
-  "whose type matches: `todo` → `unstarted`, `in progress` → `started`, `in review` → a `started` state named for review when the team has one (else `started`), `done` → `completed`, `canceled` → `canceled`"
+  "named for <state>, any case: `todo` → Todo, `in progress` → In Progress, `in review` → In Review, `done` → Done, `canceled` → Canceled (or Cancelled); when the team has no state of that name, the first whose type matches: `todo` → `unstarted`, `in progress` → `started` (not one named for review), `in review` → a `started` state named for review (else `started`), `done` → `completed`, `canceled` → `canceled` (not Duplicate)"
 
 // Key-shaped tokens that aren't ticket prefixes.
 const NOT_TEAM_KEYS = new Set(["UTF", "ISO", "ES", "SHA", "RFC", "CVE", "HTTP"])

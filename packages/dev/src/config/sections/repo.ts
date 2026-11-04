@@ -12,8 +12,20 @@ export const repo: SectionSpec = {
       example: "main",
       required: true,
     },
+    {
+      key: "protectedBranches",
+      type: "string[]",
+      description:
+        "Branches besides the base that no flow works on directly, such as a production branch the base is promoted to: sync, ready, merge, and close refuse on them",
+      example: ["main"],
+      pattern: {
+        regex: /^[^\s~^:?*[\\]+$/,
+        hint: "branch names (`main`, `release/prod`)",
+      },
+    },
   ],
-  lookup: "`git symbolic-ref --short refs/remotes/origin/HEAD`, or ask",
+  lookup:
+    "`git symbolic-ref --short refs/remotes/origin/HEAD`, or ask. Set `protectedBranches` only when the agent instructions name a branch work must never land on directly (a production branch the base is promoted to)",
   detect(ctx) {
     const head = ctx.git([
       "symbolic-ref",

@@ -375,12 +375,34 @@ export const ready: SectionSpec = {
         "The most CI passes one `loop` run makes: on the last one it waits and reports, and pushes no more fixes (default: no cap; loop stops when a fix doesn't work or CI is green)",
       example: 5,
     },
+    {
+      key: "settleGrace",
+      type: "number",
+      description:
+        "Seconds the set of CI checks and their states must hold still, once none is pending, before ready and merge take the run as settled, so a check that registers a moment after the others finish isn't missed (default 0: settled as soon as none is pending)",
+      example: 20,
+    },
+    {
+      key: "requireChecks",
+      type: "boolean",
+      description:
+        "Never take a commit with no CI checks (or only ignored or optional ones) as having no CI: ready and merge wait until one reports, and a pass with none times out instead of passing (default false: none within 3 minutes reads as no CI)",
+      example: true,
+    },
+    {
+      key: "rollupChecks",
+      type: "string[]",
+      description:
+        "CI checks that only gather the others' results (`tests-passed`, `ci-required`): ready never fixes one itself, but works the failing checks it rolls up, and a rollup failing with nothing else failed stops for the user. `*` matches any run of characters, case aside",
+      example: ["tests-passed"],
+    },
     hookField("ready.before"),
     hookField("ready.beforePublish"),
     hookField("ready.beforePush"),
+    hookField("ready.beforeFixPush"),
     hookField("ready.after"),
   ],
   detect: (ctx) => detectReady(ctx)?.detection ?? detectPythonReady(ctx),
   lookup:
-    "Leave it out to run each touched package's own scripts and every step, and to wait on every CI check. Set `fix` and `checks` when the repo has one command for the whole check (`bun run validate`), or its own script that picks the checks a branch needs; detection proposes them from a root `validate`, `check`, `verify`, or `ci` script that chains others and runs nothing unsafe, its fix scripts, and, when that script runs no tests, the changed-tests command of the runner the root depends on, its test script runs, or a tracked runner config (`vitest.config.ts`) sets up, since `checks` replaces ready's own related-tests step; for a Python repo with no such script, detection proposes Ruff (else Black and Flake8) on `{files:*.py}`, and `pytest {tests}` as `tests`, through `uv run` or `poetry run` when that lockfile is tracked; `tests` when the repo's runner takes test files and the checks shouldn't pick them; `skip` and `ignoreChecks` when the team never wants a step, or a check is slow or optional (a preview deploy); `requiredChecks` for a check merging needs that may report late (one that gathers the others, like `tests-passed`); `ciTimeout` when CI takes longer than 15 minutes; `maxPasses` to bound a `loop` run; `before` for a check CI runs that ready would otherwise find only after pushing (a version bump), or a rule that applies only when certain paths change; `beforePublish` and `after` for the repo's own steps at those points; `beforePush` for a check of the commits about to publish",
+    "Leave it out to run each touched package's own scripts and every step, and to wait on every CI check. Set `fix` and `checks` when the repo has one command for the whole check (`bun run validate`), or its own script that picks the checks a branch needs; detection proposes them from a root `validate`, `check`, `verify`, or `ci` script that chains others and runs nothing unsafe, its fix scripts, and, when that script runs no tests, the changed-tests command of the runner the root depends on, its test script runs, or a tracked runner config (`vitest.config.ts`) sets up, since `checks` replaces ready's own related-tests step; for a Python repo with no such script, detection proposes Ruff (else Black and Flake8) on `{files:*.py}`, and `pytest {tests}` as `tests`, through `uv run` or `poetry run` when that lockfile is tracked; `tests` when the repo's runner takes test files and the checks shouldn't pick them; `skip` and `ignoreChecks` when the team never wants a step, or a check is slow or optional (a preview deploy); `requiredChecks` for a check merging needs that may report late (one that gathers the others, like `tests-passed`); `ciTimeout` when CI takes longer than 15 minutes; `maxPasses` to bound a `loop` run; `settleGrace` when a check registers only after the others finish; `requireChecks` when every commit runs CI, so no checks means something's wrong; `rollupChecks` for a check that only gathers the others; `before` for a check CI runs that ready would otherwise find only after pushing (a version bump), or a rule that applies only when certain paths change; `beforePublish` and `after` for the repo's own steps at those points; `beforePush` for a check of the commits about to publish, and `beforeFixPush` for the same check on CI fix pushes",
 }

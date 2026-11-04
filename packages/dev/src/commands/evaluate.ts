@@ -22,6 +22,7 @@ import {
   runSubcommand,
   UsageError,
 } from "./lib.ts"
+import { fillCommand, shellQuote } from "./ready.ts"
 import { readBranchState, writeBranchState } from "./sync.ts"
 
 export const VERDICTS = ["pass", "flag", "stop"] as const
@@ -35,7 +36,11 @@ export type EvaluationRecord = {
   /** The commit the verdict is on. */
   sha: string
   verdict: Verdict
-  /** One line per finding, the verdict's reason first. */
+  /**
+   * The verdict's line first, then one line per finding, each ending in its
+   * anchor: ` @ <path>[:<line>]`, several paths comma-separated (see
+   * `findingAnchors`).
+   */
   summary: string[]
   /** Each file the branch changes, by its change's patch-id. */
   files: Record<string, string>
@@ -50,6 +55,14 @@ export type Settings = {
   record: boolean
   scope: "full" | "delta"
   reviewer: "session" | "subagent"
+  /** `rethink`: only a Rethink records stop. `high`: so does a confirmed HIGH risk or STOP scan finding. */
+  stopOn: "rethink" | "high"
+  /** Fetch origin/<base> before diffing against it. */
+  fetch: boolean
+  /** Repo-relative files pasted into the judging prompt as an extra lens. */
+  instructions: string[]
+  /** The command that runs the relevant tests, `{tests}` for the files. */
+  tests: string | null
   requireEvaluation: "pass" | "flag" | null
 }
 
@@ -72,6 +85,17 @@ export function settings(config: Record<string, unknown>): Settings {
     record: at("evaluate.record") === true,
     scope: at("evaluate.scope") === "delta" ? "delta" : "full",
     reviewer: at("evaluate.reviewer") === "subagent" ? "subagent" : "session",
+    stopOn: at("evaluate.stopOn") === "high" ? "high" : "rethink",
+    fetch: at("evaluate.fetch") === true,
+    instructions: Array.isArray(at("evaluate.instructions"))
+      ? (at("evaluate.instructions") as unknown[]).filter(
+          (file): file is string => typeof file === "string",
+        )
+      : [],
+    tests:
+      typeof at("evaluate.tests") === "string"
+        ? (at("evaluate.tests") as string)
+        : null,
     requireEvaluation:
       at("merge.requireEvaluation") === "pass" ||
       at("merge.requireEvaluation") === "flag"
@@ -170,6 +194,63 @@ export function worse(a: Verdict, b: Verdict): Verdict {
   return VERDICTS.indexOf(a) >= VERDICTS.indexOf(b) ? a : b
 }
 
+/** Where a finding's anchor starts: the last ` @ ` in its line. */
+const ANCHOR = /\s@\s+([^@]+)$/
+
+/**
+ * The files a summary line's finding is anchored in: what follows its last
+ * ` @ `, comma-separated, each a repo-relative path with an optional
+ * `:<line>` or `:<line>-<line>`. Empty for a line with no anchor (the
+ * verdict's line, or a finding nothing in the tree locates).
+ *
+ *     [HIGH] Migration: drops a column old code reads. @ db/schema.ts:12, api/x.ts
+ *     -> ["db/schema.ts", "api/x.ts"]
+ */
+export function findingAnchors(line: string): string[] {
+  const match = ANCHOR.exec(line.trimEnd())
+  if (!match?.[1]) {
+    return []
+  }
+  return match[1]
+    .split(",")
+    .map((part) => part.trim().replace(/:\d+(-\d+)?$/, ""))
+    .filter(Boolean)
+}
+
+/**
+ * A delta's record: its own lines, then the previous findings it didn't
+ * re-check. A previous finding is dropped when every file it's anchored in
+ * was re-reviewed (or the branch no longer changes it), since the reviewer
+ * judged those files again; one anchored in any file left alone, or with no
+ * anchor at all, still stands. The previous verdict's line (its first) is
+ * replaced by the new one. The verdict is the new one, made worse only by
+ * what still stands: the previous verdict when any of its findings do.
+ */
+export function combineDelta(
+  previous: Pick<EvaluationRecord, "verdict" | "summary">,
+  next: { verdict: Verdict; summary: string[] },
+  rechecked: string[],
+): { verdict: Verdict; summary: string[]; kept: string[] } {
+  const covered = new Set(rechecked)
+  const kept = previous.summary.slice(1).filter((line) => {
+    const anchors = findingAnchors(line)
+    return (
+      !next.summary.includes(line) &&
+      (anchors.length === 0 || anchors.some((file) => !covered.has(file)))
+    )
+  })
+  return {
+    verdict: worse(next.verdict, kept.length > 0 ? previous.verdict : "pass"),
+    summary: [...next.summary, ...kept],
+    kept,
+  }
+}
+
+/** A finding line that records stop at `evaluate.stopOn: high`. */
+export function stopsAtHigh(line: string): boolean {
+  return /^\[(HIGH|STOP)\]/i.test(line.trim())
+}
+
 export function readRecord(
   root: string,
   branch: string,
@@ -209,13 +290,24 @@ export type ScopeReport = {
   review: string[]
   dropped: string[]
   previous: EvaluationRecord | null
+  /**
+   * The commit a `delta` or `carry` starts from (the recorded verdict's), for
+   * a scan of only what moved since; null for a `full` review.
+   */
+  since: string | null
   why: string
+}
+
+export type ScopeOptions = {
+  /** A full review whatever the record says (`evaluate full`). */
+  full?: boolean
 }
 
 export function scope(
   root: string,
   config: Record<string, unknown>,
   base: string,
+  options: ScopeOptions = {},
 ): ScopeReport {
   const branch = currentBranch(root)
   const s = settings(config)
@@ -231,23 +323,29 @@ export function scope(
     files: all,
     previous,
   }
+  const full = (why: string): ScopeReport => ({
+    ...report,
+    scope: "full",
+    review: all,
+    dropped: [],
+    since: null,
+    why,
+  })
+  if (options.full) {
+    return full("a full review was asked for")
+  }
   if (s.scope !== "delta") {
-    return {
-      ...report,
-      scope: "full",
-      review: all,
-      dropped: [],
-      why: "evaluate.scope is full",
-    }
+    return full("evaluate.scope is full")
   }
   if (!previous) {
-    return {
-      ...report,
-      scope: "full",
-      review: all,
-      dropped: [],
-      why: `no evaluation recorded for ${branch}`,
-    }
+    return full(`no evaluation recorded for ${branch}`)
+  }
+  if (previous.verdict === "stop") {
+    // A delta keeps the findings it doesn't re-check, so only a full review
+    // can clear a stop.
+    return full(
+      `the evaluation of ${previous.sha.slice(0, 7)} is stop, which only a full review replaces`,
+    )
   }
   const { review, dropped } = moved(now, previous.files)
   if (review.length === 0 && dropped.length === 0) {
@@ -256,7 +354,11 @@ export function scope(
       scope: "carry",
       review: [],
       dropped: [],
-      why: `no file's change moved since the evaluation of ${previous.sha.slice(0, 7)}`,
+      since: previous.sha,
+      why:
+        previous.sha === report.head
+          ? `the evaluation is of HEAD ${previous.sha.slice(0, 7)} already`
+          : `no file's change moved since the evaluation of ${previous.sha.slice(0, 7)}`,
     }
   }
   return {
@@ -264,6 +366,7 @@ export function scope(
     scope: "delta",
     review,
     dropped,
+    since: previous.sha,
     why: `${review.length + dropped.length} file(s) moved since the evaluation of ${previous.sha.slice(0, 7)}`,
   }
 }
@@ -298,13 +401,34 @@ export type RecordRequest = {
   verdict?: Verdict
   summary?: string[]
   remote?: string
+  /**
+   * The recorded verdict's sha scope saw (`null`: none). When given, a
+   * record that changed since (another evaluation recorded meanwhile) refuses.
+   */
+  previous?: string | null
 }
 
 export type RecordResult =
-  | { recorded: true; record: EvaluationRecord }
+  | {
+      recorded: true
+      record: EvaluationRecord
+      /** A carry onto the commit the record already names: nothing written. */
+      unchanged?: true
+      /** Previous findings a delta kept, since it didn't re-check their files. */
+      kept?: string[]
+      /** `evaluate.stopOn: high` made the verdict stop. */
+      escalated?: true
+    }
   | { recorded: false; reason: string }
 
-export function record(root: string, request: RecordRequest): RecordResult {
+const short = (sha: string | null | undefined): string =>
+  sha ? sha.slice(0, 7) : "none"
+
+export function record(
+  root: string,
+  request: RecordRequest,
+  config: Record<string, unknown> = {},
+): RecordResult {
   const branch = currentBranch(root)
   const sha = head(root)
   const refused =
@@ -314,9 +438,23 @@ export function record(root: string, request: RecordRequest): RecordResult {
     return { recorded: false, reason: refused }
   }
   const previous = readRecord(root, branch)
+  if (
+    request.previous !== undefined &&
+    (previous?.sha ?? null) !== request.previous
+  ) {
+    return {
+      recorded: false,
+      reason: `the recorded evaluation changed since scope read it (${short(request.previous)} then, ${short(previous?.sha)} now): another evaluation recorded meanwhile`,
+    }
+  }
+  if (request.scope === "carry" && previous?.sha === sha) {
+    return { recorded: true, record: previous, unchanged: true }
+  }
   const files = fileChanges(root, mergeBase(root, request.base))
   const at = new Date().toISOString()
   let next: EvaluationRecord
+  let kept: string[] = []
+  let escalated = false
   if (request.scope === "carry") {
     if (!previous) {
       throw new UsageError("--scope carry needs a recorded evaluation")
@@ -343,16 +481,33 @@ export function record(root: string, request: RecordRequest): RecordResult {
       recordedAt: at,
     }
     if (request.scope === "delta" && previous) {
-      next.verdict = worse(request.verdict, previous.verdict)
-      next.summary = [
-        ...request.summary,
-        ...previous.summary.filter((line) => !request.summary?.includes(line)),
-      ]
+      const change = moved(files, previous.files)
+      const combined = combineDelta(
+        previous,
+        { verdict: request.verdict, summary: request.summary },
+        [...change.review, ...change.dropped],
+      )
+      next.verdict = combined.verdict
+      next.summary = combined.summary
       next.carriedFrom = previous.sha
+      kept = combined.kept
+    }
+    if (
+      settings(config).stopOn === "high" &&
+      next.verdict !== "stop" &&
+      next.summary.slice(1).some(stopsAtHigh)
+    ) {
+      next.verdict = "stop"
+      escalated = true
     }
   }
   writeRecord(root, next)
-  return { recorded: true, record: next }
+  return {
+    recorded: true,
+    record: next,
+    ...(kept.length > 0 ? { kept } : {}),
+    ...(escalated ? { escalated: true as const } : {}),
+  }
 }
 
 export type GateResult = {
@@ -362,6 +517,11 @@ export type GateResult = {
   record?: EvaluationRecord
   /** The verdict was carried to HEAD here, since no file's change moved. */
   carried?: boolean
+  /**
+   * A `stop` a fresh evaluation can settle: no verdict is recorded, or it's
+   * on another commit. A `stop` verdict has none: only the work can.
+   */
+  rerun?: true
 }
 
 /**
@@ -385,6 +545,7 @@ export function gate(
     return {
       gate: "stop",
       reason: `no evaluation is recorded for ${branch}, and merge.requireEvaluation is ${s.requireEvaluation}`,
+      rerun: true,
     }
   }
   let carried = false
@@ -400,6 +561,7 @@ export function gate(
         gate: "stop",
         record: found,
         reason: `the evaluation is of ${found.sha.slice(0, 7)}, but HEAD is ${sha.slice(0, 7)}${files.length > 0 ? `; changed since: ${files.join(", ")}` : ""}`,
+        rerun: true,
       }
     }
     found = {
@@ -434,15 +596,109 @@ export function gate(
   return { gate: "pass", record: found, ...extra }
 }
 
+/** Seconds `tests` gives the command before it counts as failed. */
+export const TESTS_TIMEOUT = 900
+
+/** Lines of the test log's end `tests` prints. */
+const TESTS_TAIL = 40
+
+export type TestsRequest = {
+  /** The merge base, for `{base}`. */
+  base: string
+  /** The test files to run, repo-relative. */
+  tests: string[]
+  timeout?: number
+}
+
+export type TestsResult =
+  | { ran: false; reason: string }
+  | {
+      ran: true
+      command: string
+      passed: boolean
+      exitCode: number | null
+      timedOut: boolean
+      seconds: number
+      log: string
+      tail: string
+    }
+
+/**
+ * Run `evaluate.tests` on the tests the agent picked, from the repo root,
+ * with its whole output in a log in the worktree's git dir. A failure is a
+ * finding for the review, so this reports it and never throws on it.
+ */
+export function runTests(
+  root: string,
+  config: Record<string, unknown>,
+  request: TestsRequest,
+): TestsResult {
+  const template = settings(config).tests
+  if (!template) {
+    return { ran: false, reason: "evaluate.tests is unset" }
+  }
+  if (request.tests.length === 0) {
+    return { ran: false, reason: "no test is relevant to the change" }
+  }
+  const command = fillCommand(
+    template,
+    request.base,
+    Object.keys(fileChanges(root, request.base)),
+  )?.replaceAll("{tests}", request.tests.map(shellQuote).join(" "))
+  if (command === undefined) {
+    return {
+      ran: false,
+      reason:
+        "evaluate.tests names {files}, and none of the changed files match",
+    }
+  }
+  const gitDir = git(root, ["rev-parse", "--absolute-git-dir"])?.trim()
+  if (!gitDir) {
+    throw new UsageError("not inside a git repository")
+  }
+  const dir = path.join(gitDir, "agent-flows", "evaluate")
+  fs.mkdirSync(dir, { recursive: true })
+  const log = path.join(dir, "tests.log")
+  const started = Date.now()
+  const result = spawnSync("sh", ["-c", command], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: (request.timeout ?? TESTS_TIMEOUT) * 1000,
+    killSignal: "SIGKILL",
+    maxBuffer: 64 * 1024 * 1024,
+  })
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
+  fs.writeFileSync(log, `$ ${command}\n${output}`)
+  const timedOut =
+    (result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT"
+  const exitCode = result.error ? null : result.status
+  return {
+    ran: true,
+    command,
+    passed: exitCode === 0,
+    exitCode,
+    timedOut,
+    seconds: Math.round((Date.now() - started) / 100) / 10,
+    log,
+    tail: output.trimEnd().split("\n").slice(-TESTS_TAIL).join("\n"),
+  }
+}
+
 const USAGE = `Usage: evaluate.ts <subcommand>
 
-  scope --base <ref>           Which files this evaluation reviews: full, a
+  scope --base <ref> [--full]  Which files this evaluation reviews: full, a
                                delta of the files that moved since the
-                               recorded verdict, or carry (none moved)
+                               recorded verdict, or carry (none moved).
+                               --full, or a recorded stop, reviews them all
   record --base <ref> --scope <full|delta|carry> [--verdict <pass|flag|stop>]
-         [--summary-file <file>] [--remote <name>]
+         [--summary-file <file>] [--previous <sha|none>] [--remote <name>]
                                Record the verdict on HEAD (refused on a dirty
-                               tree, or a HEAD that isn't pushed)
+                               tree, a HEAD that isn't pushed, or a record
+                               that isn't the --previous scope saw)
+  tests --base <ref> --tests-file <file> [--timeout <seconds>]
+                               Run evaluate.tests on the test files listed in
+                               <file> (one per line), its output in a log in
+                               the git dir, and print whether it passed
   get [--branch <branch>]      The branch's recorded evaluation
   gate [--base <ref>]          What merge.requireEvaluation says about it`
 
@@ -482,24 +738,57 @@ export function main(argv: string[]): void {
     {
       scope: ({ flags }) => {
         const root = rootOf()
-        printJson(scope(root, configOf(root), requiredFlag(flags, "base")))
+        printJson(
+          scope(root, configOf(root), requiredFlag(flags, "base"), {
+            full: flags.has("full"),
+          }),
+        )
       },
       record: ({ flags }) => {
         const root = rootOf()
         const file = flags.get("summary-file")
-        const result = record(root, {
-          base: requiredFlag(flags, "base"),
-          scope: oneOf(requiredFlag(flags, "scope"), SCOPES, "scope") as Scope,
-          verdict: oneOf(flags.get("verdict"), VERDICTS, "verdict"),
-          summary: file
-            ? lines(fs.readFileSync(file, "utf8")).map((l) => l.trim())
-            : undefined,
-          remote: flags.get("remote"),
-        })
+        const previous = flags.get("previous")
+        const result = record(
+          root,
+          {
+            base: requiredFlag(flags, "base"),
+            scope: oneOf(
+              requiredFlag(flags, "scope"),
+              SCOPES,
+              "scope",
+            ) as Scope,
+            verdict: oneOf(flags.get("verdict"), VERDICTS, "verdict"),
+            summary: file
+              ? lines(fs.readFileSync(file, "utf8")).map((l) => l.trim())
+              : undefined,
+            remote: flags.get("remote"),
+            ...(previous === undefined
+              ? {}
+              : { previous: previous === "none" ? null : previous }),
+          },
+          configOf(root),
+        )
         printJson(result)
         if (!result.recorded) {
           process.exitCode = 1
         }
+      },
+      tests: ({ flags }) => {
+        const root = rootOf()
+        const timeout = flags.get("timeout")
+        const seconds = timeout === undefined ? undefined : Number(timeout)
+        if (seconds !== undefined && !(seconds > 0)) {
+          throw new UsageError("--timeout must be a number of seconds above 0")
+        }
+        printJson(
+          runTests(root, configOf(root), {
+            base: requiredFlag(flags, "base"),
+            tests: lines(
+              fs.readFileSync(requiredFlag(flags, "tests-file"), "utf8"),
+            ).map((l) => l.trim()),
+            timeout: seconds,
+          }),
+        )
       },
       get: ({ flags }) => {
         const root = rootOf()
@@ -518,7 +807,7 @@ export function main(argv: string[]): void {
         printJson(gate(root, configOf(root), flags.get("base")))
       },
     },
-    (rest) => ({ flags: parseFlags(rest) }),
+    (rest) => ({ flags: parseFlags(rest, new Set(["full"])) }),
   )
 }
 

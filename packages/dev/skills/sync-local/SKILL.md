@@ -26,9 +26,11 @@ Find `<parent>` (and `<landed>`, when the parent already merged): With a stackin
 
 ### 2c. Commit
 
-When `git status --porcelain` isn't empty: `git add -A`, then `git commit -m "<message>"`. Write the message in the repo's convention: its agent instructions first, then the shape of recent subjects (`git log -20 --format=%s`). If the commit fails (a hook rejected it), read the error, fix the cause, and commit again; don't skip hooks.
+When `git status --porcelain` isn't empty: `git add -A`, then `git commit -m "<message>"`. Write the message in the repo's convention: its agent instructions first, then the shape of recent subjects (`git log -20 --format=%s`), with no attribution beyond what those instructions require. If the commit fails (a hook rejected it), read the error, fix the cause, and commit again; don't skip hooks.
 
 ### 2d. Catch up
+
+**Skip with `--no-catch-up`:** the branch stays where it is against the base, and the report says so (`<behind>` commits behind <base>).
 
 - **With a stacking integration:** when 2b found `<landed>`, its `reparent` op with `<old>` `<landed>` and `<onto>` `<parent>`, so the branch keeps only its own commits and its pull request retargets on the next push; otherwise its `restack` op.
 - **Without one:** when `git rev-list --count HEAD..<baseRef>` isn't 0, `git merge --no-edit <baseRef>`.
@@ -39,7 +41,7 @@ On conflicts, run `git status`, read each conflicted file, and write a resolutio
 
 **Default mode only**, and only when `git rev-list --count <baseRef>..HEAD` isn't 0.
 
-- **With a stacking integration:** its `submit` op. Keep the stacking tool's URL for the pull request when it prints one, for the report. When it fails for a reason other than a conflict (the tool's own API or sign-in), push the branch anyway: `git push --force-with-lease -u origin HEAD` (the stacking tool rewrote the branch, so a plain push would be refused, and the lease refuses to overwrite work pushed since the last fetch). The pull request is then opened in 3c with `prCreate` when there's none; say in the report that `submit` failed, and why.
+- **With a stacking integration:** its `submit` op. Keep the stacking tool's URL for the pull request when it prints one, for the report. When it fails for a reason other than a conflict (the tool's own API or sign-in), push the branch anyway: `git push --force-with-lease -u origin HEAD` (the stacking tool rewrote the branch, so a plain push would be refused, and the lease refuses to overwrite work pushed since the last fetch). The pull request is then opened in 3c with `prCreate` when there's none; say in the report that `submit` failed, and why. When it failed because the remote branch has commits this one doesn't (its push was refused), never force: do what it says (fetch and merge `origin/<branch>`), then run `submit` again.
 - **Without one:** `git push -u origin HEAD`. If it's rejected because the remote branch moved, `git fetch origin <branch>`, `git merge --no-edit origin/<branch>`, resolve as above, and push again. Never force.
 
 `local` mode never pushes.
@@ -49,8 +51,9 @@ On conflicts, run `git status`, read each conflicted file, and write a resolutio
 **Default mode only, when a PR exists** (re-run `currentPr`: the push may have opened one). Run the source-control entry's `prMergeability` op:
 
 - `clean`: continue.
-- `pending`: the host is still computing it. `sleep 3` and ask again, up to 3 times; then treat it as `clean`.
-- `conflicting` or `behind`: take one more pass: fetch, run 2d and 2e again, and ask again. Still `conflicting` or `behind`: stop and show the user what the op returned. With a stack, a parent that hasn't merged or restacked is the usual cause. Don't loop.
+- `pending`: the host is still computing it. `sleep 3` and ask again, up to 3 times; then continue, and report it as not yet known, never as clean.
+- `conflicting` or `behind`: take one more pass: fetch, run 2d and 2e again, and ask again. Still `conflicting` or `behind`: stop and show the user what the op returned. With a stack, a parent that hasn't merged or restacked is the usual cause. Don't loop. With `--no-catch-up`, take no pass: continue, and lead the report with `<branch> doesn't merge cleanly into <base> (<state>); --no-catch-up left it.`
+- **The op fails** (an error, not one of the answers above): stop, `Couldn't read <branch>'s mergeability: <error>.` A read that failed is never clean.
 
 **Next:**
 

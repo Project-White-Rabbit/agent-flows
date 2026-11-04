@@ -185,6 +185,8 @@ export type Rules = {
   blockerMark?: string
   /** The team's names for the priorities, in PRIORITIES order. */
   ranks?: string[]
+  /** The IANA time zone "today" is in, for due dates and planning sections. */
+  timezone?: string
 }
 
 export type Action = "file" | "update" | "unchanged"
@@ -1099,14 +1101,74 @@ export function matchPlan(
   return lines
 }
 
+/** A parent issue as `getIssue` read it, for `follow`. */
+export type FollowedParent = {
+  id: string
+  priority?: string | null
+  cycle?: string | null
+  subIssues?: SubIssue[]
+}
+
+/**
+ * What a parent takes from its sub-issues under `tickets.parentFollowsSubIssues`
+ * once `sub` is filed or raised under it, the way `check` moves a plan's
+ * parents: the most urgent open sub-issue's priority when that outranks the
+ * parent's, and, when the parent has no cycle, the earliest cycle of a
+ * sub-issue whose cycle hasn't ended. Only the fields that change; a parent
+ * never moves down or out of a cycle.
+ */
+export function followParent(
+  parent: FollowedParent,
+  sub: SubIssue,
+  day: string,
+): { priority?: Priority; cycle?: string } {
+  const subs = [sub, ...(parent.subIssues ?? []).filter((s) => s.id !== sub.id)]
+  const fields: { priority?: Priority; cycle?: string } = {}
+  const top = Math.min(...subs.map((s) => urgency(s.priority)))
+  if (top < urgency(parent.priority)) {
+    fields.priority = PRIORITIES[top]
+  }
+  if (!parent.cycle) {
+    const dated = subs.filter(
+      (s) =>
+        s.cycle &&
+        s.cycleStart &&
+        (!s.cycleEnd || s.cycleEnd.slice(0, 10) > day),
+    )
+    if (dated.length > 0) {
+      const earliest = dated.reduce((a, b) =>
+        (a.cycleStart as string) <= (b.cycleStart as string) ? a : b,
+      )
+      fields.cycle = earliest.cycle as string
+    }
+  }
+  return fields
+}
+
 /** The current cycle's start, from the first tracker entry's options. */
 function currentCycleStart(plan: Plan): string | undefined {
   const first = Object.values(plan.options ?? {})[0]
   return first?.cycles?.find((cycle) => cycle.current)?.startsAt
 }
 
-function today(): string {
-  const now = new Date()
+/**
+ * Today's date, `YYYY-MM-DD`: in `timeZone` (`tickets.timezone`) when it's
+ * set and known, else on this machine's clock.
+ */
+export function today(timeZone?: string, now = new Date()): string {
+  if (timeZone) {
+    try {
+      // en-CA writes dates as YYYY-MM-DD.
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(now)
+    } catch {
+      // An unknown zone: the machine's day, as without one.
+    }
+  }
   const pad = (n: number) => String(n).padStart(2, "0")
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
@@ -1135,6 +1197,7 @@ export function readRules(root: string): Rules {
     ...(Array.isArray(s.ranks) && !ranksProblem(s.ranks as string[])
       ? { ranks: s.ranks as string[] }
       : {}),
+    ...(typeof s.timezone === "string" ? { timezone: s.timezone } : {}),
   }
 }
 
@@ -1158,7 +1221,7 @@ function check(args: Args): void {
   const rules = readRules(repoRoot())
   const checked = checkPlan(
     readPlan(requiredFlag(args, "plan")),
-    args.get("today") ?? today(),
+    args.get("today") ?? today(rules.timezone),
     rules,
   )
   if (checked.problems.length > 0) {
@@ -1197,7 +1260,7 @@ function ids(args: Args): void {
 function notes(args: Args): void {
   const plan = readPlan(requiredFlag(args, "plan"))
   const text = readText(requiredFlag(args, "notes"))
-  const day = args.get("today") ?? today()
+  const day = args.get("today") ?? today(readRules(repoRoot()).timezone)
   const source = plan.source ?? {}
   const key = sourceKey(source, text)
   const section = renderSection(day, source, key, text, filedIssues(plan))
@@ -1237,6 +1300,16 @@ function match(args: Args): void {
   })
   fs.writeFileSync(file, `${JSON.stringify(plan, null, 2)}\n`)
   console.log(lines.join("\n"))
+}
+
+function follow(args: Args): void {
+  const parent = readJson<FollowedParent>(requiredFlag(args, "parent"))
+  const sub = readJson<SubIssue>(requiredFlag(args, "sub"))
+  if (!parent?.id || !sub?.id) {
+    throw new UsageError("--parent and --sub each need an `id`")
+  }
+  const day = args.get("today") ?? today(readRules(repoRoot()).timezone)
+  printJson({ parent: parent.id, fields: followParent(parent, sub, day) })
 }
 
 function planning(args: Args): void {
@@ -1290,7 +1363,15 @@ const USAGE = `Usage: tickets.ts <command>
                   Put the \`> Planning:\` line linking the document into the
                   description file, replacing one it has. Prints CHANGED or
                   UNCHANGED.
+  follow --parent <file> --sub <file> [--today YYYY-MM-DD]
+                  What a parent takes from its sub-issues
+                  (tickets.parentFollowsSubIssues) once --sub is filed or
+                  raised under it: --parent is {"id", "priority", "cycle",
+                  "subIssues"}, --sub {"id", "priority", "cycle",
+                  "cycleStart", "cycleEnd"}. Prints {"parent", "fields"},
+                  only the priority and cycle that change; {} for none.
 
+"Today" is in the config's tickets.timezone, else this machine's.
 Exits 2 on bad arguments or a plan it can't read.`
 
 const SUBCOMMANDS: Record<string, (args: Args) => void> = {
@@ -1300,6 +1381,7 @@ const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   ids,
   notes,
   "planning-line": planning,
+  follow,
 }
 
 export function main(argv: string[]): void {

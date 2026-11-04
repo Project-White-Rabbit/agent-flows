@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   actionOf,
   checkPlan,
+  followParent,
   matchPlan,
   type Plan,
   parentsFirst,
@@ -13,6 +14,7 @@ import {
   recordFiled,
   renderTable,
   summaryLine,
+  today,
 } from "./tickets.ts"
 
 const TODAY = "2026-10-24"
@@ -882,6 +884,110 @@ describe("tickets.ts", () => {
     const result = cli(["check", "--plan", file])
     expect(result.status).toBe(1)
     expect(result.stdout.trim()).toBe("PROBLEM the plan has no items")
+  })
+
+  it("prints what a parent takes from a sub-issue sync filed", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tickets-"))
+    dirs.push(dir)
+    const parent = path.join(dir, "parent.json")
+    const sub = path.join(dir, "sub.json")
+    fs.writeFileSync(
+      parent,
+      JSON.stringify({ id: "ENG-1", priority: "low", cycle: null }),
+    )
+    fs.writeFileSync(
+      sub,
+      JSON.stringify({
+        id: "ENG-2",
+        priority: "high",
+        cycle: "41",
+        cycleStart: "2026-10-26",
+        cycleEnd: "2026-11-02",
+      }),
+    )
+    const args = ["follow", "--parent", parent, "--sub", sub, "--today", TODAY]
+    const result = cli(args)
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual({
+      parent: "ENG-1",
+      fields: { priority: "high", cycle: "41" },
+    })
+    fs.writeFileSync(sub, JSON.stringify({ priority: "high" }))
+    expect(cli(args).status).toBe(2)
+  })
+})
+
+describe("followParent", () => {
+  const sub = {
+    id: "ENG-2",
+    priority: "high",
+    cycle: "41",
+    cycleStart: "2026-10-26",
+    cycleEnd: "2026-11-02",
+  }
+
+  it("raises the parent to its most urgent open sub-issue, never lowers it", () => {
+    expect(
+      followParent(
+        { id: "ENG-1", priority: "medium", cycle: "40" },
+        sub,
+        TODAY,
+      ),
+    ).toEqual({ priority: "high" })
+    expect(
+      followParent(
+        {
+          id: "ENG-1",
+          priority: "medium",
+          cycle: "40",
+          subIssues: [{ id: "ENG-3", priority: "urgent" }],
+        },
+        sub,
+        TODAY,
+      ),
+    ).toEqual({ priority: "urgent" })
+    expect(
+      followParent(
+        { id: "ENG-1", priority: "urgent", cycle: "40" },
+        sub,
+        TODAY,
+      ),
+    ).toEqual({})
+  })
+
+  it("gives a parent with no cycle the earliest cycle that hasn't ended", () => {
+    const parent = {
+      id: "ENG-1",
+      priority: "urgent",
+      subIssues: [
+        {
+          id: "ENG-3",
+          cycle: "39",
+          cycleStart: "2026-10-12",
+          cycleEnd: "2026-10-19",
+        },
+        {
+          id: "ENG-4",
+          cycle: "40",
+          cycleStart: "2026-10-19",
+          cycleEnd: "2026-10-26",
+        },
+        // The sub-issue itself, as the parent lists it once filed, counts once.
+        { id: "ENG-2", priority: "none" },
+      ],
+    }
+    expect(followParent(parent, sub, TODAY)).toEqual({ cycle: "40" })
+    expect(followParent({ ...parent, cycle: "38" }, sub, TODAY)).toEqual({})
+  })
+})
+
+describe("today", () => {
+  it("reads the date in tickets.timezone, else on this machine's clock", () => {
+    const late = new Date("2026-10-24T05:30:00Z")
+    expect(today("America/Los_Angeles", late)).toBe("2026-10-23")
+    expect(today("Asia/Tokyo", late)).toBe("2026-10-24")
+    expect(today("Not/AZone", late)).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(today(undefined, late)).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 })
 
