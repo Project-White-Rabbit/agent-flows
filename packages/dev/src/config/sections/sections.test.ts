@@ -377,6 +377,63 @@ describe("merge section", () => {
       "merge.deployLogLines must be a number greater than 0",
     ])
   })
+
+  it("takes the blocking reviewers, the clean-tree gate, and the CI wait", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({
+        ...base,
+        merge: {
+          blockingReviewers: ["github-advanced-security", "claude[bot]"],
+          requireClean: true,
+          ciTimeout: 45,
+        },
+      }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        merge: {
+          blockingReviewers: ["github advanced security"],
+          requireClean: "yes",
+          ciTimeout: 0,
+        },
+      }).issues,
+    ).toEqual([
+      "merge.blockingReviewers must list logins (`github-advanced-security`, `claude[bot]`)",
+      "merge.requireClean must be true or false",
+      "merge.ciTimeout must be a number greater than 0",
+    ])
+    expect(
+      checkConfig({ ...base, merge: { blockingReviewers: "codeql" } }).issues,
+    ).toEqual([expect.stringContaining("merge.blockingReviewers")])
+  })
+})
+
+describe("ready section's CI settle rules", () => {
+  it("takes the settle grace, requireChecks, and rollup checks", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({
+        ...base,
+        ready: {
+          settleGrace: 20,
+          requireChecks: true,
+          rollupChecks: ["tests-passed"],
+        },
+      }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        ready: { settleGrace: -1, requireChecks: 1, rollupChecks: "ci" },
+      }).issues,
+    ).toEqual([
+      "ready.settleGrace must be a number greater than 0",
+      "ready.requireChecks must be true or false",
+      expect.stringContaining("ready.rollupChecks"),
+    ])
+  })
 })
 
 describe("parseGithubRemote", () => {

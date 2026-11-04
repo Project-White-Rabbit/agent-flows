@@ -23,6 +23,9 @@ export type GithubCheckRun = {
   app?: string | null
 }
 
+/** The app code scanning (CodeQL) reports its check runs as. They have no Actions log. */
+export const CODE_SCANNING_APP = "github-advanced-security"
+
 export type GithubStatus = {
   context: string
   state: string
@@ -78,6 +81,7 @@ export function githubChecks(
         state: checkRunState(run),
         ...(link ? { link } : {}),
         ...(run.app === "github-actions" ? { log: String(run.id) } : {}),
+        ...(run.app === CODE_SCANNING_APP ? { codeScanning: true } : {}),
         ...need(run.name),
       }
     }),
@@ -160,6 +164,72 @@ export const checks: Adapter = {
       ? requiredChecks(`${values.owner}/${values.repo}`, args.base)
       : undefined
     return { checks: githubChecks(runs, statuses, required) }
+  },
+}
+
+/** One code-scanning alert, as the REST API's list gives it (the fields read). */
+export type GithubAlert = {
+  number: number
+  html_url: string
+  rule?: {
+    id?: string | null
+    name?: string | null
+    severity?: string | null
+    security_severity_level?: string | null
+    description?: string | null
+  } | null
+  tool?: { name?: string | null } | null
+  most_recent_instance?: {
+    message?: { text?: string | null } | null
+    location?: { path?: string | null; start_line?: number | null } | null
+  } | null
+}
+
+export type CodeScanningAlert = {
+  rule: string
+  /** The security severity when the rule has one (`high`), else the rule's own (`warning`). */
+  severity: string | null
+  tool: string | null
+  path: string | null
+  line: number | null
+  message: string
+  url: string
+}
+
+/** An alert as the op prints it: where it is, what rule, and what it says. */
+export function codeScanningAlert(alert: GithubAlert): CodeScanningAlert {
+  const instance = alert.most_recent_instance
+  return {
+    rule: alert.rule?.id ?? alert.rule?.name ?? "",
+    severity:
+      alert.rule?.security_severity_level ?? alert.rule?.severity ?? null,
+    tool: alert.tool?.name ?? null,
+    path: instance?.location?.path ?? null,
+    line: instance?.location?.start_line ?? null,
+    message: instance?.message?.text ?? alert.rule?.description ?? "",
+    url: alert.html_url,
+  }
+}
+
+export const codeScanningAlerts: Adapter = {
+  needs: "cli",
+  args: ["pr"],
+  async run({ values, args }) {
+    if (!/^\d+$/.test(args.pr ?? "")) {
+      throw new Error(`--pr must be a pull request number, got \`${args.pr}\``)
+    }
+    // A pull request's analysis is of its merge ref, so its alerts are too.
+    const ref = encodeURIComponent(`refs/pull/${args.pr}/merge`)
+    const alerts = jsonLines<GithubAlert>(
+      cli("gh", [
+        "api",
+        "--paginate",
+        `repos/${values.owner}/${values.repo}/code-scanning/alerts?ref=${ref}&state=open&per_page=100`,
+        "--jq",
+        ".[] | {number, html_url, rule, tool, most_recent_instance}",
+      ]),
+    )
+    return { alerts: alerts.map(codeScanningAlert) }
   },
 }
 

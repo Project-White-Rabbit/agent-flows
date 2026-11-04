@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -16,6 +17,7 @@ import {
   readyCommands,
   readySkips,
   recordChecks,
+  resolveBase,
   runPass,
   startPass,
   touchedPackages,
@@ -200,22 +202,31 @@ describe("ciSettings", () => {
     expect(ciSettings(undefined)).toEqual({
       timeoutSeconds: DEFAULT_TIMEOUT,
       requiredChecks: [],
+      settleGraceSeconds: 0,
+      requireChecks: false,
+      rollupChecks: [],
     })
   })
 
-  it("reads ciTimeout in minutes, maxPasses, and requiredChecks", () => {
+  it("reads ciTimeout in minutes, maxPasses, requiredChecks, and the settle rules", () => {
     expect(
       ciSettings({
         ready: {
           ciTimeout: 25,
           maxPasses: 5,
           requiredChecks: ["tests-passed"],
+          settleGrace: 20,
+          requireChecks: true,
+          rollupChecks: ["tests-passed", "ci-required"],
         },
       }),
     ).toEqual({
       timeoutSeconds: 1500,
       maxPasses: 5,
       requiredChecks: ["tests-passed"],
+      settleGraceSeconds: 20,
+      requireChecks: true,
+      rollupChecks: ["tests-passed", "ci-required"],
     })
   })
 })
@@ -531,6 +542,191 @@ describe("recordChecks", () => {
     })
   })
 
+  it("settles only once the set has held still for the settle grace", () => {
+    const grace = { settleGrace: 20 }
+    const first = recordChecks(
+      started,
+      "sha1",
+      [check("lint", "pass")],
+      at(60),
+      DEFAULT_TIMEOUT,
+      [],
+      false,
+      [],
+      grace,
+    )
+    expect(first.report).toMatchObject({ settled: false, settling: true })
+    expect(progressLine(first.report)).toContain("waiting for the set to hold")
+    // A check registering late resets the clock.
+    const late = recordChecks(
+      first.state,
+      "sha1",
+      [check("lint", "pass"), check("ci-required", "fail")],
+      at(75),
+      DEFAULT_TIMEOUT,
+      [],
+      false,
+      [],
+      grace,
+    )
+    expect(late.report).toMatchObject({ settled: false, settling: true })
+    const still = recordChecks(
+      late.state,
+      "sha1",
+      [check("lint", "pass"), check("ci-required", "fail")],
+      at(90),
+      DEFAULT_TIMEOUT,
+      [],
+      false,
+      [],
+      grace,
+    )
+    expect(still.report.settled).toBe(false)
+    const held = recordChecks(
+      still.state,
+      "sha1",
+      [check("ci-required", "fail"), check("lint", "pass")],
+      at(95),
+      DEFAULT_TIMEOUT,
+      [],
+      false,
+      [],
+      grace,
+    )
+    expect(held.report).toMatchObject({
+      settled: true,
+      settling: false,
+      green: false,
+      failures: [check("ci-required", "fail")],
+    })
+    // A pending check in between starts the clock over.
+    const pendingAgain = recordChecks(
+      first.state,
+      "sha1",
+      [check("lint", "pass"), check("e2e", "pending")],
+      at(85),
+      DEFAULT_TIMEOUT,
+      [],
+      false,
+      [],
+      grace,
+    )
+    expect(pendingAgain.state.passes[0].stableSince).toBeUndefined()
+    // No grace: settled at once, as before.
+    expect(
+      recordChecks(started, "sha1", [check("lint", "pass")], at(60)).report,
+    ).toMatchObject({ settled: true, settling: false })
+  })
+
+  it("never reads an empty set as no CI with requireChecks", () => {
+    const options = { requireChecks: true }
+    const empty = recordChecks(
+      started,
+      "sha1",
+      [],
+      at(NO_CHECKS_GRACE + 60),
+      DEFAULT_TIMEOUT,
+      [],
+      false,
+      [],
+      options,
+    )
+    expect(empty.report).toMatchObject({
+      settled: false,
+      noChecks: false,
+      awaitingChecks: true,
+      timedOut: false,
+    })
+    expect(progressLine(empty.report)).toContain("ready.requireChecks")
+    // Every check ignored is empty too.
+    const ignored = recordChecks(
+      started,
+      "sha1",
+      [check("Vercel", "pass")],
+      at(10),
+      DEFAULT_TIMEOUT,
+      ["Vercel"],
+      false,
+      [],
+      options,
+    )
+    expect(ignored.report).toMatchObject({ settled: false, noChecks: false })
+    const out = recordChecks(
+      started,
+      "sha1",
+      [],
+      at(DEFAULT_TIMEOUT),
+      DEFAULT_TIMEOUT,
+      [],
+      false,
+      [],
+      options,
+    )
+    expect(out.report).toMatchObject({
+      settled: false,
+      timedOut: true,
+      green: false,
+    })
+  })
+
+  it("names failing rollup checks apart, so they aren't fixed themselves", () => {
+    const { report } = recordChecks(
+      started,
+      "sha1",
+      [
+        check("tests-passed", "fail"),
+        check("unit (3)", "fail"),
+        check("lint", "pass"),
+      ],
+      at(60),
+      DEFAULT_TIMEOUT,
+      [],
+      false,
+      [],
+      { rollups: ["Tests-*"] },
+    )
+    expect(report.rollupFailures).toEqual(["tests-passed"])
+    expect(report.failures.map((c) => c.name)).toEqual([
+      "tests-passed",
+      "unit (3)",
+    ])
+  })
+
+  it("sees no progress when a run's next pass fails every check the last one did", () => {
+    const run = startPass({ passes: [] }, "a", [], start, true)
+    const firstPass = recordChecks(
+      run,
+      "a",
+      [check("lint", "fail"), check("test", "fail")],
+      at(60),
+    )
+    expect(firstPass.report.noProgress).toBe(false)
+    // The push fixed review threads only; both checks fail again.
+    const again = recordChecks(
+      startPass(firstPass.state, "b", [], at(120)),
+      "b",
+      [check("lint", "fail"), check("test", "fail")],
+      at(180),
+    )
+    expect(again.report).toMatchObject({ noProgress: true, stalled: [] })
+    // One went green: progress.
+    const better = recordChecks(
+      startPass(firstPass.state, "b", [], at(120)),
+      "b",
+      [check("lint", "pass"), check("test", "fail")],
+      at(180),
+    )
+    expect(better.report.noProgress).toBe(false)
+    // A new run's first pass isn't compared with the last run's.
+    const fresh = recordChecks(
+      startPass(firstPass.state, "c", [], at(120), true),
+      "c",
+      [check("lint", "fail"), check("test", "fail")],
+      at(180),
+    )
+    expect(fresh.report.noProgress).toBe(false)
+  })
+
   it("starts a pass for a commit it hasn't seen", () => {
     const { state, report } = recordChecks(started, "other", [], at(10))
     expect(report.pass).toBe(2)
@@ -576,6 +772,105 @@ describe("parseChecks", () => {
     expect(() =>
       parseChecks(JSON.stringify([{ name: "lint", state: "failure" }])),
     ).toThrow(/needs a `name` and a `state`/)
+  })
+
+  it("keeps a code-scanning check's mark, so ready reads its alerts", () => {
+    expect(
+      parseChecks(
+        JSON.stringify([
+          { name: "CodeQL", state: "fail", codeScanning: true },
+          { name: "lint", state: "fail", codeScanning: "yes" },
+        ]),
+      ),
+    ).toEqual([
+      { name: "CodeQL", state: "fail", codeScanning: true },
+      { name: "lint", state: "fail" },
+    ])
+  })
+})
+
+describe("resolveBase", () => {
+  const sh = (cwd: string, ...args: string[]) => {
+    const result = spawnSync("git", args, { cwd, encoding: "utf8" })
+    if (result.status !== 0) {
+      throw new Error(result.stderr)
+    }
+    return result.stdout.trim()
+  }
+  const commit = (cwd: string, file: string) => {
+    fs.writeFileSync(path.join(cwd, file), file)
+    sh(cwd, "add", file)
+    sh(cwd, "commit", "-qm", file)
+    return sh(cwd, "rev-parse", "HEAD")
+  }
+
+  /** A clone of a repo with main and a parent branch, checked out on a child of the parent. */
+  function stack(): { origin: string; clone: string } {
+    const origin = repo({})
+    sh(origin, "init", "-q", "-b", "main")
+    sh(origin, "config", "user.email", "t@example.com")
+    sh(origin, "config", "user.name", "t")
+    commit(origin, "a")
+    sh(origin, "checkout", "-qb", "parent")
+    commit(origin, "b")
+    sh(origin, "checkout", "-q", "main")
+    const clone = repo({})
+    sh(clone, "clone", "-q", origin, ".")
+    sh(clone, "config", "user.email", "t@example.com")
+    sh(clone, "config", "user.name", "t")
+    return { origin, clone }
+  }
+
+  it("reads the trunk only from origin, even with a newer local copy", () => {
+    const { clone } = stack()
+    const remote = sh(clone, "rev-parse", "origin/main")
+    sh(clone, "checkout", "-qb", "work")
+    commit(clone, "w")
+    sh(clone, "checkout", "-q", "main")
+    commit(clone, "local-main")
+    sh(clone, "checkout", "-q", "work")
+    expect(resolveBase("main", true, clone)).toEqual({
+      baseRef: "origin/main",
+      mergeBase: remote,
+    })
+  })
+
+  it("takes the closer of origin's and the local stacked parent", () => {
+    const { clone } = stack()
+    sh(clone, "checkout", "-qb", "parent", "origin/parent")
+    // Unpushed parent work the child sits on: the local parent is closer.
+    const local = commit(clone, "c")
+    sh(clone, "checkout", "-qb", "child")
+    commit(clone, "d")
+    expect(resolveBase("parent", false, clone)).toEqual({
+      baseRef: "parent",
+      mergeBase: local,
+    })
+  })
+
+  it("takes origin's parent when it's the closer one", () => {
+    const { origin, clone } = stack()
+    // The parent moved on origin, and the child was rebuilt on it.
+    sh(origin, "checkout", "-q", "parent")
+    commit(origin, "e")
+    sh(clone, "checkout", "-qb", "parent", "origin/parent")
+    sh(clone, "fetch", "-q", "origin")
+    sh(clone, "checkout", "-qb", "child", "origin/parent")
+    commit(clone, "f")
+    expect(resolveBase("parent", false, clone)).toEqual({
+      baseRef: "origin/parent",
+      mergeBase: sh(clone, "rev-parse", "origin/parent"),
+    })
+  })
+
+  it("names a base it can't find", () => {
+    const { clone } = stack()
+    expect(() => resolveBase("nope", false, clone)).toThrow(
+      /no branch or ref `nope`/,
+    )
+    expect(() => resolveBase("nope", true, clone)).toThrow(
+      /no merge base with origin\/nope/,
+    )
   })
 })
 

@@ -16,7 +16,7 @@ const PR_FIELDS =
 
 // What the `checks` op prints, so `ready.ts ci` can read any host's checks.
 const CHECKS_SHAPE =
-  '`{"checks": [{"name", "state", "link", "log", "required"}]}`, with `state` one of `pass`, `fail`, `pending` (queued or running), `skipping` (skipped, or allowed to fail), or `cancelled`, `link` the check\'s page, `log` the id `checkLog` reads its log by, left out when the host keeps no log for it (an outside service\'s status), and `required` whether <base>\'s rules require it to pass before a merge, set only when <base> is given'
+  '`{"checks": [{"name", "state", "link", "log", "required", "codeScanning"}]}`, with `state` one of `pass`, `fail`, `pending` (queued or running), `skipping` (skipped, or allowed to fail), or `cancelled`, `link` the check\'s page, `log` the id `checkLog` reads its log by, left out when the host keeps no log for it (an outside service\'s status), `required` whether <base>\'s rules require it to pass before a merge, set only when <base> is given, and `codeScanning` true for a code-scanning check (CodeQL), whose findings are the `codeScanningAlerts` op\'s rather than a log, left out otherwise'
 
 export const CAPABILITIES: CapabilitySpec[] = [
   {
@@ -63,6 +63,8 @@ export const CAPABILITIES: CapabilitySpec[] = [
       reviewThreads:
         "Pull request <N>'s unresolved review threads, all pages: each with its id, file path and line, and its comments oldest first, each with its author, whether the author is a bot, and its text",
       resolveThread: "Mark review thread <id> on pull request <N> resolved",
+      codeScanningAlerts:
+        'Pull request <N>\'s open code-scanning alerts (CodeQL and other static analysis), all pages, as JSON: `{"alerts": [{"rule", "severity", "tool", "path", "line", "message", "url"}]}`. They stand in for the log of a check with `codeScanning` set',
     },
   },
   {
@@ -87,7 +89,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
       requestReview:
         'Ask the reviewer to review pull request <pr>, whose head is commit <sha>, and print `{"requested": <when the host recorded the request, ISO 8601>, "url": <the request\'s link>}`. Every call is a new request, and may cost a paid run',
       reviewResult:
-        'How the review requested at <requested> on pull request <pr> is going, as JSON: `{"state", "run", "findings": [{"author", "kind", "body", "url"}], "inline"}`. `state` is `pending` (not started or still running), `done`, `failed` (its run failed or was cancelled), or `missing` (no run picked the request up within 3 minutes); `run` is its run\'s link, or null. `findings` are the reviewer\'s comments and review summaries posted since <requested> (`kind` `comment` or `review`); its inline comments are review threads, read through the source-control `reviewThreads` op, and `inline` counts them',
+        'How the review requested at <requested> on pull request <pr> is going, as JSON: `{"state", "run", "findings": [{"author", "kind", "body", "url"}], "inline"}`. `state` is `pending` (not started or still running), `done`, `failed` (its run failed or was cancelled), `missing` (no run picked the request up within 3 minutes), or `skipped` (no run picked it up within 3 minutes, but one on the pull request since the request skipped: the workflow woke and its condition turned the request away); `run` is its run\'s link, or null. `findings` are the reviewer\'s comments and review summaries posted since <requested> (`kind` `comment` or `review`); its inline comments are review threads, read through the source-control `reviewThreads` op, and `inline` counts them',
     },
   },
   {
