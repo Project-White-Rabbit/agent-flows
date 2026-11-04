@@ -74,6 +74,25 @@ describe("checkConfig", () => {
     ])
   })
 
+  it("checks the real ready section's number fields and tests template", () => {
+    expect(
+      checkConfig({
+        ...base,
+        ready: { ciTimeout: 25, maxPasses: 5, tests: "pytest {tests}" },
+      }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        ready: { ciTimeout: "25", maxPasses: 0, tests: "pytest" },
+      }).issues,
+    ).toEqual([
+      "ready.ciTimeout must be a number greater than 0",
+      "ready.maxPasses must be a number greater than 0",
+      "ready.tests must name `{tests}`, the test files ready picks",
+    ])
+  })
+
   it("requires required sections", () => {
     expect(checkConfig({ version: 1 }, REGISTRY).issues).toEqual([
       "repo is required",

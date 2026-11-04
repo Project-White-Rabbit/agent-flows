@@ -137,9 +137,9 @@ one is configured (codeReview: at \`every\` it reviews every run, at
 section can name the fix and check commands; otherwise it runs the
 scripts of each package the branch touches, as the repo's agent
 instructions say. Its \`skip\` and \`ignoreChecks\` lists apply to every
-run; the flags add to them. Its \`before\`, \`beforePublish\`, and
-\`after\` hooks, and the general ones in the \`hooks\` section, run
-whatever is skipped.
+run; the flags add to them. Its \`before\`, \`beforePublish\`,
+\`beforePush\`, and \`after\` hooks, and the general ones in the
+\`hooks\` section, run whatever is skipped.
 \`\`\``,
           next: null,
         },
@@ -164,7 +164,7 @@ Stop the whole flow and tell the user if any part of this step leaves something 
    - **Code review:** the entries that review this run, \`<reviewers>\`: every one with \`--review\`, else the ones at \`level\` \`every\`, none with \`--no-review\`. With \`--review\` and no entry, stop: \`No code reviewer is configured. Run {{cmd}}configure codeReview, then re-run.\` A requested review costs a run and posts on the pull request, so never request one the level and flags don't call for.
 3. **Pull request:** the source-control entry's \`currentPr\` op: \`<pr>\` is its number, or none.
 4. **Parent:** ${STACK_PARENT}
-5. **Scope:** \`{{command:ready}} plan --base <landed, else parent>\`, plus each \`--skip\` and \`--ignore-check\` from the flags as given (quote each pattern for the shell), fetches the parent and prints JSON: \`mergeBase\` (keep it as \`<mergeBase>\` for the whole flow, so a base that moves meanwhile doesn't change the scope), \`ahead\`, \`dirty\`, \`changed\` (every file the pull request will hold: committed since the merge base, uncommitted, and untracked), \`packages\` (each touched package's directory, manifest, how to run its scripts, and its fix and check scripts), \`instructions\` (the agent instruction files at the root and above each changed file, then the path-scoped rule files, \`.claude/rules/\` and \`.cursor/rules/\`, whose globs match a changed file), \`commands\` (the config's \`ready\` section, with \`{base}\` filled in), \`skip\` (the steps this run skips: the config's \`ready.skip\` and the flags'), \`ignoreChecks\` (the CI check patterns this run ignores: the config's \`ready.ignoreChecks\` and the flags'), and \`logDir\`. Keep \`skip\` and \`ignoreChecks\` for the whole flow: every step below names the \`skip\` entry that turns it off. When \`skip\` has \`reviews\`, \`<reviewers>\` is empty: nobody would read the findings (say so in the report when \`--review\` asked for one). If it fails because HEAD is detached, stop and tell the user to check out a branch; because it can't skip a step, relay its message and the usage block from \`help\`, and stop.
+5. **Scope:** \`{{command:ready}} plan --base <landed, else parent>\`, plus each \`--skip\` and \`--ignore-check\` from the flags as given (quote each pattern for the shell), fetches the parent and prints JSON: \`mergeBase\` (keep it as \`<mergeBase>\` for the whole flow, so a base that moves meanwhile doesn't change the scope), \`ahead\`, \`dirty\`, \`changed\` (every file the pull request will hold: committed since the merge base, uncommitted, and untracked), \`packages\` (each touched package's directory, manifest, how to run its scripts, and its fix and check scripts), \`instructions\` (the agent instruction files at the root and above each changed file, then the path-scoped rule files, \`.claude/rules/\` and \`.cursor/rules/\`, whose globs match a changed file), \`commands\` (the config's \`ready\` section, with \`{base}\` and \`{files}\` filled in: \`fix\`, \`checks\`, the \`tests\` template with \`{tests}\` still in it, and \`dropped\`, the commands left out because their \`{files}\` matched no changed file), \`skip\` (the steps this run skips: the config's \`ready.skip\` and the flags'), \`ignoreChecks\` (the CI check patterns this run ignores: the config's \`ready.ignoreChecks\` and the flags'), \`ci\` (\`timeoutMinutes\`, how long a CI pass waits, as \`<ciTimeout>\`; \`maxPasses\`, the most passes a \`loop\` run makes, when the config sets one; \`requiredChecks\`, the checks every wait holds out for until they report, which \`ci wait\` and \`ci record\` read from the config themselves), and \`logDir\`. Keep \`skip\` and \`ignoreChecks\` for the whole flow: every step below names the \`skip\` entry that turns it off. When \`skip\` has \`reviews\`, \`<reviewers>\` is empty: nobody would read the findings (say so in the report when \`--review\` asked for one). If it fails because HEAD is detached, stop and tell the user to check out a branch; because it can't skip a step, relay its message and the usage block from \`help\`, and stop.
 6. **Anything to publish?** With no pull request, \`ahead\` 0, and \`dirty\` false, stop: \`Nothing to publish: no pull request, and no work ahead of <parent>.\`
 7. **The repo's \`before\` hooks:** \`{{command:hooks}} run ready.before --flow ready --mode <mode> --base <mergeBase>\`. ${HOOK_RESULTS} They run whatever \`skip\` says: they're the repo's own requirements, not ready's steps. When they changed files, run the scope (5) again, with the same flags, so the steps below see them.
 
@@ -190,7 +190,7 @@ Fix what's missing when it's straightforward; flag it when it needs judgment. On
 
 **Skip the fix commands when \`skip\` has \`fix\`, and the check commands when it has \`checks\`;** with both, skip this step. Skipping \`checks\` doesn't skip CI: that's \`ci\`.
 
-**Which commands:** the config's \`commands\` when \`commands.configured\` is true: \`fix\` then \`checks\`, from the repo root, as given. Otherwise, per touched package, what its agent instructions say to run before committing, else its own scripts from \`packages\`: fix scripts first (\`lint:fix\`, \`format\`, \`fix\`), then checks in this order: lint and type checks (\`lint\`, \`check\`, \`validate\`, \`typecheck\`, \`tsc\`), the **relevant tests**, then \`build\` when the package builds something the checks read. For a package with no scripts (\`manifest\` not \`package.json\`), use its toolchain's usual lint and test commands as its instructions name them. A root package (\`dir\` \`.\`) runs only when its own files changed, unless the instructions say its scripts cover the others.
+**Which commands:** the config's \`commands\` when \`commands.configured\` is true: \`fix\` then \`checks\`, from the repo root, as given, then \`tests\` when it's there, with \`{tests}\` replaced by the relevant test files below (each shell-quoted, space-separated; with none, skip it and say so). Name the commands in \`dropped\` in the report as not needed for this branch. Otherwise, per touched package, what its agent instructions say to run before committing, else its own scripts from \`packages\`: fix scripts first (\`lint:fix\`, \`format\`, \`fix\`), then checks in this order: lint and type checks (\`lint\`, \`check\`, \`validate\`, \`typecheck\`, \`tsc\`), the **relevant tests**, then \`build\` when the package builds something the checks read. For a package with no scripts (\`manifest\` not \`package.json\`), use its toolchain's usual lint and test commands as its instructions name them. A root package (\`dir\` \`.\`) runs only when its own files changed, unless the instructions say its scripts cover the others.
 
 **Relevant tests, not the suite:** the test files that changed, the tests next to each changed file, and the tests that import one directly, through the test runner's own selection when it has one (\`--changed <mergeBase>\`, \`related\`). After a failure, rerun only the failing files until they pass. Run a package's whole suite only when the user asks, or to reproduce a CI-only failure that can't be isolated: CI runs the full suite after publishing.
 
@@ -246,8 +246,12 @@ When sync stops (a conflict it needs you for, a hook it couldn't satisfy), stop 
           kind: "action",
           title: "Publish",
           refName: "publish",
-          commandCalls: ["ready"],
-          body: `The source-control and stacking entries, \`<base>\`, and \`<parent>\` are from 1a of {{skill-ref:main}}. Re-run \`currentPr\`: sync may have changed things.
+          commandCalls: ["hooks", "ready"],
+          body: `The source-control and stacking entries, \`<base>\`, \`<parent>\`, \`<mergeBase>\`, and \`<ciTimeout>\` are from 1a of {{skill-ref:main}}. Re-run \`currentPr\`: sync may have changed things.
+
+### Before pushing
+
+\`{{command:hooks}} run ready.beforePush --flow ready --mode <mode> --base <mergeBase>\`, whatever \`skip\` says. ${HOOK_RESULTS} They see the commits sync just made. When they changed files, commit them (\`git add -A\`, then a message in the repo's convention) before the push, so the commit they checked is the one published.
 
 ### Push
 
@@ -270,15 +274,15 @@ Then the \`prMergeability\` op: \`pending\` → wait 3 seconds and ask again, up
 
 **Skip when \`skip\` has \`ci\`:** no pass, no waiter.
 
-\`<sha>\` is \`git rev-parse HEAD\`, the commit just published. Run \`{{command:ready}} ci start --sha <sha>\`: it starts this commit's pass (its 15-minute clock, and the record later snapshots are compared against). Print \`Ready CI pass <pass>: waiting up to 15 minutes for <short sha>.\`
+\`<sha>\` is \`git rev-parse HEAD\`, the commit just published. Run \`{{command:ready}} ci start --sha <sha> --first\`: it starts this run's first pass (its \`<ciTimeout>\`-minute clock, and the record later snapshots are compared against). Print \`Ready CI pass <pass>: waiting up to <ciTimeout> minutes for <short sha>.\`
 
 When the \`checks\` op has a \`script\` variant that runs here, start the waiter now, in the background if this host can run a command in the background, so the remote sync overlaps the wait:
 
 \`\`\`bash
-{{command:ready}} ci wait --sha <sha> --command '<the checks op's script variant, with <sha> filled in>' [--ignore-check '<pattern>']...
+{{command:ready}} ci wait --sha <sha> --command '<the checks op's script variant, with <sha> filled in and <parent> as <base>>' [--ignore-check '<pattern>']...
 \`\`\`
 
-with an \`--ignore-check\` for each entry of \`ignoreChecks\` from 1a of {{skill-ref:main}}. It polls every 30 seconds until every check settles or the pass times out, prints \`[ready-ci]\` progress and each new failure to stderr, and the final report to stdout. Read its progress at least once a minute and relay it in one line. Keep its handle: the CI step joins it, and never starts a second waiter for the same commit. Pinning it to the local \`<sha>\` keeps a lagging pull request head from making it watch the previous commit. When the host limits how long one command runs, add \`--max-wait <a bit under that limit>\` and run it again until it settles: the pass's clock started at \`ci start\`, so a rerun keeps the same deadline.
+with an \`--ignore-check\` for each entry of \`ignoreChecks\` from 1a of {{skill-ref:main}}. Giving the \`checks\` op the pull request's base (\`<parent>\`) has it mark the checks merging there requires and list a required one that hasn't reported yet as pending, so a quick check settling first can't read as the whole run; ready still waits on every check. It polls every 30 seconds until every check settles or the pass times out, prints \`[ready-ci]\` progress and each new failure to stderr, and the final report to stdout. Read its progress at least once a minute and relay it in one line. Keep its handle: the CI step joins it, and never starts a second waiter for the same commit. Pinning it to the local \`<sha>\` keeps a lagging pull request head from making it watch the previous commit. When the host limits how long one command runs, add \`--max-wait <a bit under that limit>\` and run it again until it settles: the pass's clock started at \`ci start\`, so a rerun keeps the same deadline.
 
 ### Request the code review
 
@@ -309,13 +313,13 @@ Run it even when the local sync and the publish changed nothing: an already-publ
 - \`reviews\`: don't read, fix, or resolve review threads, and a green pass doesn't wait on them (no review was requested either).
 - \`ignoreChecks\`: pass an \`--ignore-check\` for each to every \`ci wait\` and \`ci record\`. Those checks aren't waited on, counted, or failed; the report lists them as \`ignored\`. Never fix an ignored check, even when its failure is plain.
 
-**Settled** means every check has reached \`pass\`, \`skipping\`, \`fail\`, or \`cancelled\`; a \`pending\` check isn't settled, and CI is green only once every check settled with none failed. In \`loop\` mode, prepare fixes for visible failures while other checks still run, but **never commit or push until the commit's checks have all settled**: that keeps the rest of the run's signal and puts every fix from it in one push. A pass waits at most 15 minutes; past that, list what's still pending (\`Timed out waiting for checks to settle (15m). Still pending: <names>. These may need manual inspection.\`) and exit without pushing partial fixes.
+**Settled** means every check has reached \`pass\`, \`skipping\`, \`fail\`, or \`cancelled\`; a \`pending\` check isn't settled, and CI is green only once every check settled with none failed. In \`loop\` mode, prepare fixes for visible failures while other checks still run, but **never commit or push until the commit's checks have all settled**: that keeps the rest of the run's signal and puts every fix from it in one push. A pass waits at most \`<ciTimeout>\` minutes (1a of {{skill-ref:main}}); past that, list what's still pending (\`Timed out waiting for checks to settle (<ciTimeout>m). Still pending: <names>. These may need manual inspection.\`) and exit without pushing partial fixes. A report's \`missing\` lists required checks that haven't reported at all: they're pending too.
 
 ### Wait for the checks
 
-Join the waiter the publish step started. When there's none (the op has no \`script\` variant that runs here, or its handle was lost), wait in the foreground: with a \`script\` variant, \`ci wait\` as in the publish step; without one, every 30 seconds run the \`checks\` op for \`<sha>\`, write its JSON (in the shape the op describes) to a file, and run \`{{command:ready}} ci record --sha <sha> --file <file>\` (with the \`--ignore-check\` flags), until it says \`settled\` or \`timedOut\`. Never poll with a second waiter for the same commit.
+Join the waiter the publish step started. When there's none (the op has no \`script\` variant that runs here, or its handle was lost), wait in the foreground: with a \`script\` variant, \`ci wait\` as in the publish step; without one, every 30 seconds run the \`checks\` op for \`<sha>\` and \`<parent>\` as \`<base>\`, write its JSON (in the shape the op describes) to a file, and run \`{{command:ready}} ci record --sha <sha> --file <file>\` (with the \`--ignore-check\` flags), until it says \`settled\` or \`timedOut\`. Never poll with a second waiter for the same commit.
 
-Each report has \`settled\`, \`timedOut\`, \`green\`, \`noChecks\`, \`counts\`, \`pending\`, \`failures\` (each with its \`name\`, \`state\`, \`link\`, and \`log\`), \`newFailures\` (not reported before in this pass), \`stalled\`, and \`ignored\` (checks left out by \`ignoreChecks\`). Use them as given: the last report once settled is the authority for this pass.
+Each report has \`settled\`, \`timedOut\`, \`green\`, \`noChecks\`, \`counts\`, \`pending\`, \`failures\` (each with its \`name\`, \`state\`, \`link\`, and \`log\`), \`newFailures\` (not reported before in this pass), \`stalled\`, \`ignored\` (checks left out by \`ignoreChecks\`), and \`missing\` (required checks not reported yet, counted as pending). Use them as given: the last report once settled is the authority for this pass.
 
 - \`noChecks\`: nothing reported on the commit within 3 minutes, so the repo runs no CI on it, or every check reported is ignored. Say which in the report and skip to the review threads.
 - \`timedOut\`: list \`pending\` and stop as above.
@@ -329,7 +333,7 @@ For each failure with a \`log\`, the \`checkLog\` op with \`<log>\`; read logs f
 
 Then, unless \`skip\` has \`reviews\`, the \`reviewThreads\` op for the pull request. A thread is an **automated reviewer's** when its first comment's author is a bot, or is a reviewer the repo's agent instructions name as automated. Read only those threads' comments; leave people's threads to the people (count them for the report). Do this once per settled pass, not on every poll.
 
-**Requested reviews**, for each review the publish step requested that no pass has read yet (in \`loop\` mode, one still running carries over to the next pass): its \`reviewResult\` op with \`<pr>\` and \`<requested>\`. While it's \`pending\`, ask again every 30 seconds alongside the checks, until it's \`done\`, \`failed\`, or \`missing\`, or the pass's 15 minutes run out; then it's still running: give its \`run\` in the report, and don't hold the pass for it. \`failed\` and \`missing\` go in the report with the run (\`missing\`: no run picked the request up, so check the workflow's trigger and the mention); neither is a stop. A \`note\` (the run matched only loosely) goes in the report too. On \`done\`, read its \`findings\`: each is a comment or review summary that may hold several points, so take them one point at a time. Its inline comments are threads by a bot, already read with the threads above.
+**Requested reviews**, for each review the publish step requested that no pass has read yet (in \`loop\` mode, one still running carries over to the next pass): its \`reviewResult\` op with \`<pr>\` and \`<requested>\`. While it's \`pending\`, ask again every 30 seconds alongside the checks, until it's \`done\`, \`failed\`, or \`missing\`, or the pass's \`<ciTimeout>\` minutes run out; then it's still running: give its \`run\` in the report, and don't hold the pass for it. \`failed\` and \`missing\` go in the report with the run (\`missing\`: no run picked the request up, so check the workflow's trigger and the mention); neither is a stop. A \`note\` (the run matched only loosely) goes in the report too. On \`done\`, read its \`findings\`: each is a comment or review summary that may hold several points, so take them one point at a time. Its inline comments are threads by a bot, already read with the threads above.
 
 ### Categorize
 
@@ -356,14 +360,14 @@ Once the commit's checks have all settled, with no stop bucket and at least one 
 {{command:ready}} ci start --sha <the new HEAD> --fixed <check name>...
 \`\`\`
 
-with a \`--fixed\` for each failed check the batch meant to fix, so the next pass can tell a fix that didn't work.
+with a \`--fixed\` for each failed check the batch meant to fix, so the next pass can tell a fix that didn't work. When the config sets \`maxPasses\`, its output has \`capped\`: true means this is the run's last pass.
 
 **Resolve review threads** only after that push succeeds: for each automated reviewer's thread whose fix is now on the remote, the \`resolveThread\` op. A thread whose fix stayed local (a stop, a failed commit or push) stays unresolved, so the host never claims an unshipped fix. Never resolve a person's thread. A resolve that fails gets a one-line warning, not a stop.
 
 ### Loop or exit
 
 - **\`default\` and \`draft\` mode:** one pass. Go to the report; don't wait for the run the fix push started.
-- **\`loop\` mode:** a stop bucket or a stalled fix ends it: report the blockers and exit without pushing. A fix push starts the next pass: print \`Ready CI pass <pass>: waiting up to 15 minutes for <short sha>.\`, start one waiter for the new commit as the publish step does, and come back to *Wait for the checks*. A pass that settled green, with no automated reviewer's thread left unresolved and every requested review read (unless \`skip\` has \`reviews\`), ends it successfully. Report success only for a commit you saw go green; never because a number of passes or minutes went by.
+- **\`loop\` mode:** a stop bucket or a stalled fix ends it: report the blockers and exit without pushing. A fix push starts the next pass: print \`Ready CI pass <pass>: waiting up to <ciTimeout> minutes for <short sha>.\`, start one waiter for the new commit as the publish step does, and come back to *Wait for the checks*. A pass that settled green, with no automated reviewer's thread left unresolved and every requested review read (unless \`skip\` has \`reviews\`), ends it successfully. On a pass \`ci start\` said was \`capped\`, wait for it to settle and read it, but don't fix or push again: when it isn't green, report \`Stopped at the pass cap (<maxPasses>)\` with what's still failing. Report success only for a commit you saw go green; never because a number of passes or minutes went by.
 
 \`loop\` mode is a long-running foreground task by design: the user asked you to sit on it. Run the waiter in the background only so you can keep fixing while it waits, never to end your turn and come back later.`,
           next: "run/report",

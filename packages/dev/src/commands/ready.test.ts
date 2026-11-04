@@ -4,6 +4,9 @@ import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import type { Check } from "../config/adapters/checks.ts"
 import {
+  ciSettings,
+  DEFAULT_TIMEOUT,
+  fillCommand,
   instructionFiles,
   matchesCheck,
   NO_CHECKS_GRACE,
@@ -13,6 +16,7 @@ import {
   readyCommands,
   readySkips,
   recordChecks,
+  runPass,
   startPass,
   touchedPackages,
 } from "./ready.ts"
@@ -137,6 +141,100 @@ describe("readyCommands", () => {
   })
 })
 
+describe("ready commands' {files} and tests", () => {
+  const files = [
+    "app/views.py",
+    "app/tests/test_views.py",
+    "it's.py",
+    "README.md",
+  ]
+
+  it("fills {files} shell-quoted, and {files:<glob>} with the matching ones", () => {
+    expect(fillCommand("black {files:*.py}", "abc", files)).toBe(
+      "black app/views.py app/tests/test_views.py 'it'\\''s.py'",
+    )
+    expect(fillCommand("lint {files:app/**}", "abc", files)).toBe(
+      "lint app/views.py app/tests/test_views.py",
+    )
+    expect(fillCommand("check {files} {base}", "abc", ["a.ts"])).toBe(
+      "check a.ts abc",
+    )
+  })
+
+  it("leaves out a command whose {files} matches nothing, and keeps the tests template", () => {
+    expect(
+      readyCommands(
+        {
+          ready: {
+            fix: ["black {files:*.py}"],
+            checks: ["flake8 {files:*.py}", "./check.sh {base}"],
+            tests: "uv run pytest {tests}",
+          },
+        },
+        "abc",
+        ["README.md"],
+      ),
+    ).toEqual({
+      configured: true,
+      fix: [],
+      checks: ["./check.sh abc"],
+      tests: "uv run pytest {tests}",
+      dropped: ["black {files:*.py}", "flake8 {files:*.py}"],
+    })
+  })
+
+  it("is configured by a tests command alone", () => {
+    expect(
+      readyCommands({ ready: { tests: "pytest {tests}" } }, "abc"),
+    ).toEqual({
+      configured: true,
+      fix: [],
+      checks: [],
+      tests: "pytest {tests}",
+    })
+  })
+})
+
+describe("ciSettings", () => {
+  it("defaults to the 15-minute pass, no cap, and no required checks", () => {
+    expect(ciSettings(undefined)).toEqual({
+      timeoutSeconds: DEFAULT_TIMEOUT,
+      requiredChecks: [],
+    })
+  })
+
+  it("reads ciTimeout in minutes, maxPasses, and requiredChecks", () => {
+    expect(
+      ciSettings({
+        ready: {
+          ciTimeout: 25,
+          maxPasses: 5,
+          requiredChecks: ["tests-passed"],
+        },
+      }),
+    ).toEqual({
+      timeoutSeconds: 1500,
+      maxPasses: 5,
+      requiredChecks: ["tests-passed"],
+    })
+  })
+})
+
+describe("runPass", () => {
+  it("counts a run's passes from its first, across earlier runs on the branch", () => {
+    const t = new Date("2026-10-26T12:00:00Z")
+    let state = startPass({ passes: [] }, "a", [], t, true)
+    state = startPass(state, "b", ["lint"], t)
+    expect(runPass(state)).toBe(2)
+    state = startPass(state, "c", [], t, true)
+    expect(runPass(state)).toBe(1)
+    state = startPass(state, "c", ["lint"], t)
+    expect(state.passes.at(-1)?.first).toBe(true)
+    expect(runPass(state)).toBe(1)
+    expect(runPass(startPass({ passes: [] }, "x", [], t))).toBe(1)
+  })
+})
+
 describe("readySkips", () => {
   it("adds the run's skips and ignores to the config's, in step order", () => {
     expect(
@@ -201,6 +299,57 @@ const check = (name: string, state: Check["state"]): Check => ({ name, state })
 
 describe("recordChecks", () => {
   const started = startPass({ passes: [] }, "sha1", [], start)
+
+  it("holds out for a required check that hasn't reported, then settles once it does", () => {
+    const early = recordChecks(
+      started,
+      "sha1",
+      [check("lint", "pass")],
+      at(200),
+      DEFAULT_TIMEOUT,
+      [],
+      false,
+      ["tests-*"],
+    )
+    expect(early.report).toMatchObject({
+      settled: false,
+      green: false,
+      noChecks: false,
+      pending: ["tests-*"],
+      missing: ["tests-*"],
+    })
+    const none = recordChecks(
+      started,
+      "sha1",
+      [],
+      at(400),
+      DEFAULT_TIMEOUT,
+      [],
+      false,
+      ["tests-passed"],
+    )
+    expect(none.report).toMatchObject({ settled: false, noChecks: false })
+    const late = recordChecks(
+      early.state,
+      "sha1",
+      [
+        check("lint", "pass"),
+        { name: "tests-passed", state: "pass", required: false },
+      ],
+      at(400),
+      DEFAULT_TIMEOUT,
+      [],
+      true,
+      ["tests-passed"],
+    )
+    expect(late.report).toMatchObject({
+      settled: true,
+      green: true,
+      missing: [],
+      // Named as required, so kept even where the host says it's optional.
+      optional: ["lint"],
+    })
+  })
 
   it("isn't settled while a check is pending, and reports each failure new once", () => {
     const first = recordChecks(

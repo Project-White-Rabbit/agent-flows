@@ -223,24 +223,111 @@ export function detectReady(
   }
 }
 
+/** Lockfiles that name the command Python tools run through. */
+const PYTHON_RUNNERS: [string, string][] = [
+  ["uv.lock", "uv run "],
+  ["poetry.lock", "poetry run "],
+  ["pdm.lock", "pdm run "],
+]
+
+/** Root files that list a Python repo's (dev) dependencies. */
+const PYTHON_DEPENDENCY_FILE = /^(pyproject\.toml|requirements[^/]*\.txt) /
+
+/** Tool config files that show a repo uses the tool. */
+const PYTHON_TOOL_CONFIGS: [string, string][] = [
+  ["ruff.toml", "ruff"],
+  [".ruff.toml", "ruff"],
+  [".flake8", "flake8"],
+  ["pytest.ini", "pytest"],
+]
+
+/**
+ * The fix, check, and test commands a Python repo's own tools give, for a
+ * root with no package.json check to run: Ruff, else Black and Flake8, for
+ * the changed `.py` files, and pytest for the tests the branch touches.
+ * Tools run through the lockfile's runner (`uv run`).
+ */
+export function detectPythonReady(ctx: DetectContext): Detection | undefined {
+  const pyproject = ctx.read("pyproject.toml") ?? ""
+  const found = new Map<string, string>()
+  for (const line of ctx.dependsOn(/^(ruff|black|flake8|pytest)$/)) {
+    const name = line.split(" ").at(-1) as string
+    if (PYTHON_DEPENDENCY_FILE.test(line) && !found.has(name)) {
+      found.set(name, line)
+    }
+  }
+  for (const tool of ["ruff", "black", "pytest"]) {
+    const table = new RegExp(`^\\s*\\[tool\\.${tool}[.\\]]`, "m")
+    if (!found.has(tool) && table.test(pyproject)) {
+      found.set(tool, `pyproject.toml has a [tool.${tool}] table`)
+    }
+  }
+  for (const [config, tool] of PYTHON_TOOL_CONFIGS) {
+    if (!found.has(tool) && ctx.tracked.includes(config)) {
+      found.set(tool, `${config} is tracked`)
+    }
+  }
+  const lock = PYTHON_RUNNERS.find(([file]) => ctx.tracked.includes(file))
+  const prefix = lock?.[1] ?? ""
+  const evidence: string[] = []
+  const use = (tool: string) => {
+    const why = found.get(tool)
+    if (why) {
+      evidence.push(why)
+    }
+    return why !== undefined
+  }
+  const values: Record<string, string | string[]> = {}
+  const py = "{files:*.py}"
+  if (use("ruff")) {
+    values.fix = [
+      `${prefix}ruff format ${py}`,
+      `${prefix}ruff check --fix ${py}`,
+    ]
+    values.checks = [`${prefix}ruff check ${py}`]
+  } else {
+    if (use("black")) {
+      values.fix = [`${prefix}black ${py}`]
+    }
+    if (use("flake8")) {
+      values.checks = [`${prefix}flake8 ${py}`]
+    }
+  }
+  if (use("pytest")) {
+    values.tests = `${prefix}pytest {tests}`
+  }
+  if (Object.keys(values).length === 0) {
+    return undefined
+  }
+  if (lock) {
+    evidence.push(
+      `${lock[0]} is tracked, so the tools run through ${prefix.trim()}`,
+    )
+  }
+  evidence.push(
+    "the commands run on the changed Python files ({files:*.py}) and the tests the branch touches ({tests}); lint rules or directories CI selects (Flake8's --select) belong in them too",
+  )
+  return { values, evidence }
+}
+
 export const ready: SectionSpec = {
   path: "ready",
   name: "Ready checks",
   purpose:
-    "The commands ready runs before it publishes a branch (unset, it runs the scripts of each package the branch touches), the steps it skips, the CI checks it ignores, and the repo's own hooks at its steps",
+    "The commands ready runs before it publishes a branch (unset, it runs the scripts of each package the branch touches), the steps it skips, the CI checks it ignores or waits for, how long and how many times it waits on CI, and the repo's own hooks at its steps",
   fields: [
     {
       key: "fix",
       type: "string[]",
       description:
-        "Commands that fix the tree in place (formatters, lint autofixes, code generators), run in order from the repo root before the checks. `{base}` is the branch's merge base",
+        "Commands that fix the tree in place (formatters, lint autofixes, code generators), run in order from the repo root before the checks. `{base}` is the branch's merge base; `{files}` the changed files that still exist (shell-quoted), and `{files:<glob>}` those matching a glob (one without a `/` matches the file name: `{files:*.py}`); a command whose `{files}` matches none is left out",
       example: ["bun run lint:fix"],
     },
     {
       key: "checks",
       type: "string[]",
       description:
-        "Commands that verify the branch (lint, type checks, the tests it touches, a build), run in order from the repo root; none of them may deploy, publish, migrate, or write to a shared service. `{base}` is the branch's merge base",
+        "Commands that verify the branch (lint, type checks, the tests it touches, a build), run in order from the repo root; none of them may deploy, publish, migrate, or write to a shared service. `{base}` and `{files}` as for `fix`",
       example: ["bun run validate"],
     },
     {
@@ -257,11 +344,43 @@ export const ready: SectionSpec = {
         "CI check names ready neither waits on nor fixes, such as preview deploys or optional coverage. `*` matches any run of characters, case aside. A run's `--ignore-check` adds to these",
       example: ["Vercel*", "codecov/*"],
     },
+    {
+      key: "tests",
+      description:
+        "Command that runs the tests the branch touches, from the repo root, after the checks; `{tests}` is the test files ready picks (shell-quoted), and a run with none skips it. It runs even with `checks` set, which otherwise replace ready's related-tests step. `{base}` and `{files}` as for `fix`",
+      example: "uv run pytest {tests}",
+      check: (value) =>
+        typeof value === "string" && value.includes("{tests}")
+          ? undefined
+          : "must name `{tests}`, the test files ready picks",
+    },
+    {
+      key: "requiredChecks",
+      type: "string[]",
+      description:
+        "CI check names ready and merge wait for until they report: a check named here and not on the commit yet counts as pending, so a quick check settling first can't read as the whole run. For a check that gathers the others and starts late, or one the host's branch rules don't mark required. `*` matches any run of characters, case aside",
+      example: ["tests-passed"],
+    },
+    {
+      key: "ciTimeout",
+      type: "number",
+      description:
+        "Minutes ready waits for a pushed commit's checks to settle (default 15)",
+      example: 25,
+    },
+    {
+      key: "maxPasses",
+      type: "number",
+      description:
+        "The most CI passes one `loop` run makes: on the last one it waits and reports, and pushes no more fixes (default: no cap; loop stops when a fix doesn't work or CI is green)",
+      example: 5,
+    },
     hookField("ready.before"),
     hookField("ready.beforePublish"),
+    hookField("ready.beforePush"),
     hookField("ready.after"),
   ],
-  detect: (ctx) => detectReady(ctx)?.detection,
+  detect: (ctx) => detectReady(ctx)?.detection ?? detectPythonReady(ctx),
   lookup:
-    "Leave it out to run each touched package's own scripts and every step, and to wait on every CI check. Set `fix` and `checks` when the repo has one command for the whole check (`bun run validate`), or its own script that picks the checks a branch needs; detection proposes them from a root `validate`, `check`, `verify`, or `ci` script that chains others and runs nothing unsafe, its fix scripts, and, when that script runs no tests, the changed-tests command of the runner the root depends on, its test script runs, or a tracked runner config (`vitest.config.ts`) sets up, since `checks` replaces ready's own related-tests step; `skip` and `ignoreChecks` when the team never wants a step, or a check is slow or optional (a preview deploy); `before` for a check CI runs that ready would otherwise find only after pushing (a version bump), or a rule that applies only when certain paths change; `beforePublish` and `after` for the repo's own steps at those points",
+    "Leave it out to run each touched package's own scripts and every step, and to wait on every CI check. Set `fix` and `checks` when the repo has one command for the whole check (`bun run validate`), or its own script that picks the checks a branch needs; detection proposes them from a root `validate`, `check`, `verify`, or `ci` script that chains others and runs nothing unsafe, its fix scripts, and, when that script runs no tests, the changed-tests command of the runner the root depends on, its test script runs, or a tracked runner config (`vitest.config.ts`) sets up, since `checks` replaces ready's own related-tests step; for a Python repo with no such script, detection proposes Ruff (else Black and Flake8) on `{files:*.py}`, and `pytest {tests}` as `tests`, through `uv run` or `poetry run` when that lockfile is tracked; `tests` when the repo's runner takes test files and the checks shouldn't pick them; `skip` and `ignoreChecks` when the team never wants a step, or a check is slow or optional (a preview deploy); `requiredChecks` for a check merging needs that may report late (one that gathers the others, like `tests-passed`); `ciTimeout` when CI takes longer than 15 minutes; `maxPasses` to bound a `loop` run; `before` for a check CI runs that ready would otherwise find only after pushing (a version bump), or a rule that applies only when certain paths change; `beforePublish` and `after` for the repo's own steps at those points; `beforePush` for a check of the commits about to publish",
 }

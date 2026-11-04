@@ -174,6 +174,11 @@ function checkField(
       ? undefined
       : `${where} must be true or false`
   }
+  if (type === "number") {
+    return typeof value === "number" && Number.isFinite(value) && value > 0
+      ? undefined
+      : `${where} must be a number greater than 0`
+  }
   if (type === "number[]") {
     if (
       !Array.isArray(value) ||

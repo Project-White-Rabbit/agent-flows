@@ -303,3 +303,34 @@ describe("tryHook", () => {
     ).toThrow("must have either run or prompt")
   })
 })
+
+describe("findings", () => {
+  it("hands a passing command's output to the agent at evaluate.scan, and nowhere else", () => {
+    const root = repo({ "src/a.ts": "" })
+    const hooks = [
+      { name: "scan", run: "echo 'FLAG src/a.ts:1 hardcoded id'" },
+      { name: "quiet", run: "true" },
+    ]
+    const scan = runHooks(
+      root,
+      config({ evaluate: { scan: hooks } }),
+      request(["evaluate.scan"], "evaluate", { mode: "default" }),
+    )
+    expect(scan.status).toBe("done")
+    expect(scan.findings).toEqual([
+      {
+        point: "evaluate.scan",
+        name: "scan",
+        output: "FLAG src/a.ts:1 hardcoded id",
+        log: expect.stringContaining("evaluate.scan-scan.log"),
+      },
+    ])
+
+    const ready = runHooks(
+      root,
+      config({ ready: { before: hooks } }),
+      request(["ready.before"], "ready", { mode: "default" }),
+    )
+    expect(ready.findings).toBeUndefined()
+  })
+})

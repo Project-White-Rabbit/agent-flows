@@ -407,7 +407,7 @@ describe("dev flows", () => {
       "the `prMerge` op with <N>, the method, and `<sha>`",
     )
     const merged = run.indexOf("its state must be merged")
-    const closeOut = run.indexOf("skill with the argument `remote`")
+    const closeOut = run.indexOf("skill with the argument `remote`", merged)
     const remove = run.indexOf("git push origin --delete <branch>")
     expect(ci).toBeGreaterThan(-1)
     expect(state).toBeGreaterThan(ci)
@@ -415,6 +415,34 @@ describe("dev flows", () => {
     expect(merged).toBeGreaterThan(merge)
     expect(closeOut).toBeGreaterThan(merged)
     expect(remove).toBeGreaterThan(closeOut)
+  })
+
+  it("syncs only the pull request and issue with merge.sync remote", () => {
+    const main =
+      files.find((f) => f.path === "skills/merge/SKILL.md")?.content ?? ""
+    const run =
+      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+    expect(main).toMatch(/merge\.deployLogLines merge\.sync --optional/)
+    const remote = run.indexOf("- **`remote`:** nothing in merge pushes")
+    const unpushed = run.indexOf(
+      "and merge.sync is remote, so merge won't push them",
+    )
+    const ci = run.indexOf('ready.ts" ci start --sha <sha>')
+    expect(remote).toBeGreaterThan(-1)
+    expect(unpushed).toBeGreaterThan(remote)
+    expect(ci).toBeGreaterThan(unpushed)
+  })
+
+  it("waits merge.deployTimeout, tails failed steps' logs, and keeps skipped steps apart", () => {
+    const run =
+      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+    expect(run).toContain("or `<deployTimeout>` minutes have gone by")
+    expect(run).not.toContain("or 30 minutes have gone by")
+    expect(run).toContain(
+      "for each failed step with a `log`, the source-control entry's `checkLog` op",
+    )
+    expect(run).toContain("`skipped` ones aren't failures")
+    expect(run).not.toContain("each step that didn't succeed")
   })
 
   it("bookends ready's publish with sync local and sync remote", () => {

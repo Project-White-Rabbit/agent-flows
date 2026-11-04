@@ -3,6 +3,7 @@ import {
   CONFIGURE_GET_AND_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
+  HOOK_RESULTS,
   HOOKS_COMMAND,
   hooksInvariant,
   REQUIRE_CONFIG,
@@ -98,6 +99,11 @@ export const evaluateFlow: Flow = devKit.defineFlow({
         "`instructions --files <file>` lists the agent instruction and path-scoped rule files for the changed paths in the file",
       args: "<subcommand>",
     },
+    evaluate: {
+      description:
+        "`scope --base <ref>` says what this evaluation reviews (`full`, a `delta` of the files that moved since the recorded verdict, or `carry`); `record` records the verdict on the pushed head",
+      args: "<subcommand>",
+    },
   }),
   tools: {},
   compile: {
@@ -121,7 +127,9 @@ export const evaluateFlow: Flow = devKit.defineFlow({
 1. **What it does**, in plain English. Not a file list, not a section-by-section walkthrough, not a copy-paste of the PR body. A distillation: the change, the why, the surface it touches.
 2. **Risks**, prioritized. Things that could break in production, on deploy, for existing users, or for the team's ability to roll back. Not style, not layer rules, not convention violations (those live in the user's head and in CI). This is a shippability lens.
 
-The skill is read-only. It never writes to source control, the issue tracker, error tracking, or the working tree. It is safe to invoke at any point in a branch's life. With no argument it evaluates **everything in the working tree**: commits ahead of the base branch, uncommitted (staged and unstaged) changes, and untracked files. A PR, if one exists for the branch, supplies title/body context but never narrows the diff. With an explicit PR number or URL (including post-merge), it evaluates that PR's diff.`,
+The skill is read-only. It never writes to source control, the issue tracker, error tracking, or the working tree. It is safe to invoke at any point in a branch's life. With no argument it evaluates **everything in the working tree**: commits ahead of the base branch, uncommitted (staged and unstaged) changes, and untracked files. A PR, if one exists for the branch, supplies title/body context but never narrows the diff. With an explicit PR number or URL (including post-merge), it evaluates that PR's diff.
+
+The config's \`evaluate\` section can make it more (all of it unset by default): \`record\` keeps the verdict on the branch's pushed head, the one file evaluate writes, in the repo's git common dir, for \`merge.requireEvaluation\` to gate on; \`scope: delta\` reviews only what moved since that verdict; \`reviewer: subagent\` has a fresh subagent judge, not the session that wrote the code; and the \`scan\` hooks run the repo's own checks over the diff first, as findings for the review to verify.`,
   invariants: [hooksInvariant("evaluate")],
   phases: [
     {
@@ -142,7 +150,7 @@ The skill is read-only. It never writes to source control, the issue tracker, er
 >   - no argument -> everything on the current branch: commits ahead of the base branch + uncommitted changes + untracked files. A PR, if one exists, supplies title/body context only.
 >   - PR number (e.g. \`1234\`) or URL -> that PR's diff, for a PR of this checkout's repository
 >
-> What it never does: write to source control or any other service, modify files, run code, or push. Read-only.
+> What it never does: write to source control or any other service, modify files, run code, or push. Read-only, apart from the verdict \`evaluate.record\` keeps in the repo's git dir.
 >
 > Risk lens: migration safety, blast radius, customer impact, cross-package sync, rollback difficulty, monitoring gaps, edge cases, code duplication/reuse, and necessary refactors. Style and layer-rule audits live in CI and in the reviewer's head; this skill skips them on purpose.`,
           next: null,
@@ -162,7 +170,7 @@ The skill is read-only. It never writes to source control, the issue tracker, er
           commandCalls: ["configure"],
           body: `Pure reads.
 
-1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then pick the ref to diff against: \`<base-ref>\` is \`origin/<base>\` when \`git rev-parse --verify --quiet refs/remotes/origin/<base>\` succeeds, else \`<base>\`. Comparing against the remote-tracking ref keeps a stale local base branch from counting already-merged work as this branch's. Don't fetch; use the refs as they are.
+1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then \`{{command:configure}} get evaluate.record evaluate.scope evaluate.reviewer --optional\`: \`<record>\` (\`true\`: record the verdict; \`null\` reads as false), \`<scope>\` (\`delta\` or \`full\`; \`null\` reads as \`full\`), and \`<reviewer>\` (\`subagent\` or \`session\`; \`null\` reads as \`session\`). Then pick the ref to diff against: \`<base-ref>\` is \`origin/<base>\` when \`git rev-parse --verify --quiet refs/remotes/origin/<base>\` succeeds, else \`<base>\`. Comparing against the remote-tracking ref keeps a stale local base branch from counting already-merged work as this branch's. Don't fetch; use the refs as they are.
 2. **Source control:** \`{{command:configure}} integrations sourceControl stacking --optional\` prints \`{"integrations": {"sourceControl": [...], "stacking": [...]}}\`: every source-control entry the repo configured (often one, possibly several, possibly none), and the stacking entry, if any (the first). ${USE_INTEGRATIONS} An entry's id is its \`integration\`, plus \`:<instance>\` when it has one.
 
    This checkout can only evaluate PRs of its own repository, since the file contents come from it. So keep the **local entries**: those whose repository (from their \`values\`) is one of this checkout's remotes in \`git remote -v\`. Counting every remote, not just \`origin\`, keeps fork workflows working, where the PR lives in \`upstream\`. None configured, or none local, means there's no PR context for the working tree.
@@ -180,6 +188,27 @@ The skill is read-only. It never writes to source control, the issue tracker, er
    - If both are empty and no PR exists, abort: \`Nothing to evaluate: <branch> has no commits ahead of <base>, a clean working tree, and no PR. Make a change, or pass an explicit PR number.\`
 
 You now have one of: \`pr:<entry>:<N>\` (explicit argument or clean-tree fallback) or \`worktree:<branch>\` (with PR metadata attached if a PR exists).`,
+          next: "run/scope",
+        },
+        {
+          id: "scope",
+          kind: "action",
+          title: "Scope and scan",
+          refName: "scope",
+          commandCalls: ["evaluate", "hooks"],
+          body: `**Only for a \`worktree:\` target.** A \`pr:\` target reviews the PR's whole diff, runs no scan, and records nothing: go on to the {{step-ref:run/gather-diff}} step.
+
+### Scope
+
+With \`<scope>\` \`full\` and \`<record>\` false, everything is reviewed: skip to the scan. Otherwise \`{{command:evaluate}} scope --base <base-ref>\` prints \`scope\`, \`files\` (every file the branch changes), \`review\` (the files to review), \`dropped\` (files the recorded verdict covered that the branch no longer changes), \`previous\` (the recorded verdict, its \`sha\`, and its \`summary\`), and \`why\`.
+
+- \`full\`: review everything.
+- \`delta\`: review only \`review\`, and say in the report header that it's a delta since \`previous.sha\`, with \`dropped\`. The gather below still collects the whole diff, for context, but the risks judge only the files in \`review\`, and what the previous verdict found stays found.
+- \`carry\`: no file's change moved since \`previous.sha\` (only the base was merged in). Don't review again: with \`<record>\` true, \`{{command:evaluate}} record --base <base-ref> --scope carry\` carries the verdict to HEAD; then report \`previous\`'s verdict and \`summary\` as this evaluation's, saying it carried from \`previous.sha\` (or why the record refused), and stop.
+
+### Scan
+
+\`{{command:hooks}} run evaluate.scan --flow evaluate --mode default --base <the merge base: git merge-base <base-ref> HEAD>\`. ${HOOK_RESULTS} Its \`findings\`, when there are any, are what each scan printed: keep them, word for word, as \`<scan findings>\` for the judging below. They are leads to verify against the diff, each confirmed (and graded by the risk lens) or set aside with a reason in one line, never the verdict itself.`,
           next: "run/gather-diff",
         },
         {
@@ -212,7 +241,9 @@ For \`worktree:\` targets, \`GIT STATUS\` tells you which changes are uncommitte
           kind: "action",
           title: "What it does (plain English)",
           refName: "what-it-does",
-          body: `Write 2-5 sentences (longer for genuinely large changes, never more than a paragraph or two). The reader should be able to skip the diff and still know what shipped.
+          body: `**Who judges.** With \`<reviewer>\` \`session\`, you do, in this step and the next two. With \`subagent\`, don't: hand the judging to a fresh general-purpose subagent (not a fork of this conversation, and none of it in the prompt: the session that wrote the code doesn't grade it). Give it only the target, \`<base>\` and \`<base-ref>\`, the PR and issue ids when there are any, the scope from the {{step-ref:run/scope}} step (\`full\` or \`delta\` with its \`review\` files and \`previous\` summary), the gather results verbatim, \`<scan findings>\`, and the text of this step, the {{step-ref:run/risks}} step, and the {{step-ref:run/report}} step's output format, verdicts, and notes, pasted verbatim. Ask it for the report's What it does, What changes for a user, Risks, and Verdict sections, and each scan finding confirmed or set aside. Use its sections as given in the report; don't regrade them. When it can't run (no subagents on this host, a failure, an empty result), say so in the report, give no verdict of your own, and record nothing.
+
+Write 2-5 sentences (longer for genuinely large changes, never more than a paragraph or two). The reader should be able to skip the diff and still know what shipped.
 
 Cover, in order:
 
@@ -327,11 +358,17 @@ Verdicts:
 - **Address first**: at least one high risk, or a cluster of mediums that together threaten shippability. List the must-fix items.
 - **Rethink**: the change as designed has a structural issue (wrong layer, wrong primitive, wrong rollout) that no incremental fix resolves. Be specific about what to rethink.
 
-The verdict is the user's call. Phrase it as a recommendation, not a gate: they may know context the diff doesn't show (a coordinated launch, an accepted risk, a planned follow-up).
+The verdict is the user's call. Phrase it as a recommendation, not a gate: they may know context the diff doesn't show (a coordinated launch, an accepted risk, a planned follow-up). The one gate is the repo's: with \`merge.requireEvaluation\`, merge reads the recorded verdict.
+
+When the {{step-ref:run/scope}} step had \`<scan findings>\`, list them under the risks as \`Scan\`: each confirmed one is a risk above, and each set aside gets one line saying why.
+
+### Record
+
+**Only with \`<record>\` true and a \`worktree:\` target,** and not when a subagent was asked to judge and couldn't. Write the summary to a file in \`$(git rev-parse --absolute-git-dir)/agent-flows/evaluate\`, one line per entry: the verdict line first, then each high and medium risk as \`[HIGH] <category>: <sentence> <path>\`. Then \`{{command:evaluate}} record --base <base-ref> --scope <full or delta, from the scope step> --verdict <pass for Ship, flag for Address first, stop for Rethink> --summary-file <file>\`. It prints \`recorded\`; \`false\` comes with a \`reason\` (uncommitted or untracked changes, or a HEAD that isn't the pushed head): give it under the verdict, \`Not recorded: <reason>. Commit and push ({{cmd}}sync), then re-run {{cmd}}evaluate.\` A delta's record keeps the worse of its verdict and the previous one, and both summaries: when that differs from this run's verdict, say so (\`Recorded: flag, carried from <short sha>\`). Recorded: \`Recorded: <verdict> on <short sha>\`.
 
 ### Notes
 
-- This skill is read-only. The source-control ops it uses only read. If you find yourself editing a PR, running \`git push\`, or writing to any service, stop. The output is the report.
+- This skill is read-only, apart from the record the config asks for. The source-control ops it uses only read. If you find yourself editing a PR, running \`git push\`, or writing to any service, stop. The output is the report.
 - "Plain English" is load-bearing. If the summary reads like a dump of section headers, rewrite it as if telling a teammate in chat.
 - **What changes for a user**: **Before** is what a person saw happen (the input, the result, whether anything was raised), not what the code said; **After** is what they see now. Cause belongs in "What it does". Say plainly which paths are unchanged. Omit the section for a diff that only adds something new, and never pad it with rows where nothing moved.
 - The risk list is not a checklist. A 3-item list on a 200-line change is more useful than 14 items padded with "no concerns."

@@ -311,7 +311,7 @@ When detection finds several instances of one integration (\`detected.<path>.ins
 
 Several integrations can provide the same capability (Linear and Jira are both issue trackers). Don't make the user pick just one: when detection finds evidence for more than one, propose each, and when the user named a capability, ask which of its integrations the team uses. They can choose any number; configure those and skip the rest.
 
-**The hooks walk.** For each \`requested\` section with hook fields (\`hooks\`, \`ready\`, \`merge\`; in manual mode, once the user chooses to configure it), go through its points in order: \`hooks\`: \`before\`, \`after\`; \`ready\`: \`before\`, \`beforePublish\`, \`after\`; \`merge\`: \`before\`, \`after\`. For each point:
+**The hooks walk.** For each \`requested\` section with hook fields (\`hooks\`, \`ready\`, \`merge\`; in manual mode, once the user chooses to configure it), go through its points in order: \`hooks\`: \`before\`, \`after\`; \`ready\`: \`before\`, \`beforePublish\`, \`beforePush\`, \`after\`; \`merge\`: \`before\`, \`after\`. For each point:
 
 1. Say in one line when it runs and what it may do (its field's description in the sections table), and list the hooks it has now.
 2. Gather what fits it: the \`hookSuggestions\` for this point, each with its command, its fix, and its evidence; and, for a prompt, rules in the repo's agent instructions about this moment rather than about the code ("after a merge, post in #releases"). Rules about the code stay in the instructions; don't copy them into prompts.

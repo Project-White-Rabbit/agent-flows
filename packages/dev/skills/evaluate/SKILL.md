@@ -12,6 +12,8 @@ Read the diff and tell the user two things, in this order:
 
 The skill is read-only. It never writes to source control, the issue tracker, error tracking, or the working tree. It is safe to invoke at any point in a branch's life. With no argument it evaluates **everything in the working tree**: commits ahead of the base branch, uncommitted (staged and unstaged) changes, and untracked files. A PR, if one exists for the branch, supplies title/body context but never narrows the diff. With an explicit PR number or URL (including post-merge), it evaluates that PR's diff.
 
+The config's `evaluate` section can make it more (all of it unset by default): `record` keeps the verdict on the branch's pushed head, the one file evaluate writes, in the repo's git common dir, for `merge.requireEvaluation` to gate on; `scope: delta` reviews only what moved since that verdict; `reviewer: subagent` has a fresh subagent judge, not the session that wrote the code; and the `scan` hooks run the repo's own checks over the diff first, as findings for the review to verify.
+
 **CLI commands** available via Bash (paths relative to `${CLAUDE_PLUGIN_ROOT}/src/commands/`):
 
 | Command | Description |
@@ -19,6 +21,7 @@ The skill is read-only. It never writes to source control, the issue tracker, er
 | `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), or a failure that stops the command (`stop`) |
 | `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
 | `ready.ts <subcommand>` | `instructions --files <file>` lists the agent instruction and path-scoped rule files for the changed paths in the file |
+| `evaluate.ts <subcommand>` | `scope --base <ref>` says what this evaluation reviews (`full`, a `delta` of the files that moved since the recorded verdict, or `carry`); `record` records the verdict on the pushed head |
 
 ## Invariants
 
@@ -49,6 +52,6 @@ If the argument is `help`, print the block below verbatim and exit. No reads.
 >   - no argument -> everything on the current branch: commits ahead of the base branch + uncommitted changes + untracked files. A PR, if one exists, supplies title/body context only.
 >   - PR number (e.g. `1234`) or URL -> that PR's diff, for a PR of this checkout's repository
 >
-> What it never does: write to source control or any other service, modify files, run code, or push. Read-only.
+> What it never does: write to source control or any other service, modify files, run code, or push. Read-only, apart from the verdict `evaluate.record` keeps in the repo's git dir.
 >
 > Risk lens: migration safety, blast radius, customer impact, cross-package sync, rollback difficulty, monitoring gaps, edge cases, code duplication/reuse, and necessary refactors. Style and layer-rule audits live in CI and in the reviewer's head; this skill skips them on purpose.

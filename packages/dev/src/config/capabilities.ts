@@ -178,7 +178,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
     purpose: "Preview and production deployments, runtime logs",
     ops: {
       deployment:
-        'The deployment of commit <sha>, which just landed on its base: `{"state", "url", "steps": [{"name", "state"}]}`. `state` is `none` (nothing has started deploying it yet), `pending` (queued or running), `success`, or `failed` (failed or cancelled); `url` is its page, or null with `none`; `steps` are the parts it ran, each `pending`, `success`, `failed`, or `skipped`, when the tool reports them (else an empty list)',
+        'The deployment of commit <sha>, which just landed on its base: `{"state", "url", "steps": [{"name", "state", "log"}]}`. `state` is `none` (nothing has started deploying it yet), `pending` (queued or running), `success`, or `failed` (failed or cancelled); `url` is its page, or null with `none`; `steps` are the parts it ran, when the tool reports them (else an empty list): each one\'s `state` is `pending`, `success`, `failed`, or `skipped`, and its `log` is the id the source-control `checkLog` op reads its log by, left out when there\'s none',
     },
   },
   {

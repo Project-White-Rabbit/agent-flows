@@ -172,6 +172,7 @@ export type GithubRun = {
 }
 
 export type GithubJob = {
+  id: number
   name: string
   status: string
   conclusion: string | null
@@ -204,6 +205,15 @@ export function stepState(job: GithubJob): StepState {
     default:
       return "failed"
   }
+}
+
+/** A job as a deployment step, with the id `checkLog` reads its log by. */
+export function deployStep(job: GithubJob): {
+  name: string
+  state: StepState
+  log: string
+} {
+  return { name: job.name, state: stepState(job), log: String(job.id) }
 }
 
 /** The latest run on the commit: a re-run of the deploy is the one that counts. */
@@ -243,13 +253,13 @@ export const deployment: Adapter = {
         "--paginate",
         `${repo}/actions/runs/${run.id}/jobs?per_page=100`,
         "--jq",
-        ".jobs[] | {name, status, conclusion}",
+        ".jobs[] | {id, name, status, conclusion}",
       ]),
     )
     return {
       state: deployState(run),
       url: run.html_url,
-      steps: jobs.map((job) => ({ name: job.name, state: stepState(job) })),
+      steps: jobs.map(deployStep),
     }
   },
 }

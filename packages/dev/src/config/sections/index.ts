@@ -6,6 +6,7 @@ import type { IntegrationSpec, SectionSpec } from "../types.ts"
 import { claude } from "./claude.ts"
 import { close } from "./close.ts"
 import { conductor } from "./conductor.ts"
+import { evaluate } from "./evaluate.ts"
 import { github } from "./github.ts"
 import { gitlab } from "./gitlab.ts"
 import { graphite } from "./graphite.ts"
@@ -49,6 +50,7 @@ export const SECTIONS: SectionSpec[] = [
   sync,
   tickets,
   ready,
+  evaluate,
   merge,
   close,
   hooks,
