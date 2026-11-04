@@ -278,6 +278,97 @@ describe("dev flows", () => {
     expect(run).toContain("open, merged, or closed, are `<otherPrs>`")
   })
 
+  it("refuses on a protected branch in sync, ready, merge, and close", () => {
+    const skill = (id: string) =>
+      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+    expect(skill("sync")).toContain(
+      "because the branch is in the config's `repo.protectedBranches`",
+    )
+    for (const id of ["ready", "merge", "close-run"]) {
+      expect(skill(id), id).toMatch(
+        /configure\.ts" get repo\.protectedBranches --optional/,
+      )
+    }
+    expect(skill("ready")).toContain("Refusing to ready <branch>")
+    expect(skill("merge")).toContain("Refusing to merge from <branch")
+    expect(skill("close-run")).toContain("one of `<protected>`")
+  })
+
+  it("never reads a failed lookup as none, clean, or no issue", () => {
+    const skill = (id: string) =>
+      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+    const main = skill("sync")
+    expect(main).toContain("**A failed read is not an absence.**")
+    expect(main).toContain("On `search skipped`, plan no issue")
+    expect(main).not.toContain("On `search skipped`, plan a new issue")
+    expect(main).toContain("Sync files no issue on a failed lookup.")
+    expect(main).toContain("Sync won't guess there's none")
+    expect(skill("sync-local")).toContain("A read that failed is never clean.")
+    expect(skill("sync-local")).not.toContain("then treat it as `clean`")
+    expect(skill("sync-report")).toContain(
+      "Couldn't read whether <branch> still merges cleanly",
+    )
+  })
+
+  it("adds no attribution of its own to commits or the PR block", () => {
+    const main =
+      files.find((f) => f.path === "skills/sync/SKILL.md")?.content ?? ""
+    expect(main).toContain("**Add no attribution of your own.**")
+    expect(main).toContain(
+      "neither adding what they don't ask for nor stripping what they do",
+    )
+    const local =
+      files.find((f) => f.path === "skills/sync-local/SKILL.md")?.content ?? ""
+    expect(local).toContain(
+      "with no attribution beyond what those instructions require",
+    )
+  })
+
+  it("files a sync sub-issue by the ticket rules, and assigns on sync when asked", () => {
+    const remote =
+      files.find((f) => f.path === "skills/sync-remote/SKILL.md")?.content ?? ""
+    expect(remote).toMatch(
+      /configure\.ts" get tickets\.dueDateRequired tickets\.estimateScale tickets\.blockerMark tickets\.parentFollowsSubIssues tickets\.planningDoc tickets\.assignOnSync --optional/,
+    )
+    expect(remote).toMatch(
+      /tickets\.ts" follow --parent <dir>\/parent\.json --sub <dir>\/sub\.json/,
+    )
+    expect(remote).toMatch(
+      /tickets\.ts" notes --plan <dir>\/planning\/plan\.json --notes <dir>\/planning\/notes\.md --out <dir>\/planning\/section\.md/,
+    )
+    expect(remote).toMatch(/tickets\.ts" planning-line --plan <dir>\/planning/)
+    expect(remote).toContain("run the entry's `recordNotes` op")
+    expect(remote).toContain("**With `<assignOnSync>` true,**")
+    expect(remote).toContain(
+      "but for the assignee, with `tickets.assignOnSync`",
+    )
+    expect(remote).toContain(
+      "add it at the start, `<blockerMark> <title>`, when the user or this session says the work stops a customer",
+    )
+    expect(remote).toContain("**The survey's `format.linkStyle`:** `url`")
+  })
+
+  it("commits and pushes without catching up on --no-catch-up", () => {
+    const skill = (id: string) =>
+      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+    expect(skill("sync")).toContain("[--no-catch-up]")
+    expect(skill("sync")).toMatch(
+      /sync\.ts" survey <mode> --base <base> --pr <pr> \[--error-ref <ref>\]\.\.\. \[--no-catch-up\]/,
+    )
+    expect(skill("sync-local")).toContain("**Skip with `--no-catch-up`:**")
+  })
+
+  it("ranks recent issues with tickets.ts match in close's issue search", () => {
+    const run =
+      files.find((f) => f.path === "skills/close-run/SKILL.md")?.content ?? ""
+    expect(run).toMatch(
+      /tickets\.ts" match --plan <dir>\/match\.json --issues <dir>\/issues\.json/,
+    )
+    expect(run).toContain("<its recentIssues op's issues>")
+    expect(run).toContain("when `recentIssues` is `unsupported` or fails")
+    expect(run).toContain("/agent-flows/close")
+  })
+
   it("reports the stacking tool's link even when submit printed none", () => {
     const report =
       files.find((f) => f.path === "skills/sync-report/SKILL.md")?.content ?? ""

@@ -23,6 +23,21 @@ const TITLE_TEMPLATE: FieldPattern = {
   hint: "text with `{issueId}`, `{title}`, and `{summary}` placeholders (`{issueId}: {title}`, `{summary} ({issueId})`)",
 }
 
+const LINK_STYLE: FieldPattern = {
+  regex: /^(link|url)$/,
+  hint: "`link` or `url`",
+}
+
+/** What's wrong with an IANA time zone name (`America/Los_Angeles`), or undefined. */
+export function timeZoneProblem(value: unknown): string | undefined {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value as string })
+    return undefined
+  } catch {
+    return "must be an IANA time zone (`UTC`, `America/Los_Angeles`)"
+  }
+}
+
 export const sync: SectionSpec = {
   path: "sync",
   name: "Sync format",
@@ -48,6 +63,20 @@ export const sync: SectionSpec = {
         "PR title template: `{issueId}` and `{title}` are the issue's, `{summary}` a summary of the change in the repo's title convention; unset, the repo's convention",
       example: "{issueId}: {title}",
       pattern: TITLE_TEMPLATE,
+    },
+    {
+      key: "linkStyle",
+      description:
+        "How the PR body's issue line links the issue: `link` (the default: `[<ID>](<URL>) <title>`) or `url` (the issue's bare URL, `Issue: https://...`)",
+      example: "url",
+      pattern: LINK_STYLE,
+    },
+    {
+      key: "timezone",
+      description:
+        "IANA time zone for the last-synced line's time (default `UTC`), shown by its short name (`PT` for `America/Los_Angeles`)",
+      example: "America/Los_Angeles",
+      check: timeZoneProblem,
     },
     {
       key: "quoteLinks",

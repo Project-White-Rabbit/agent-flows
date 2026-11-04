@@ -42,7 +42,7 @@ Reads only, apart from the sync that opens a missing pull request and the repo's
    - **Source control:** keep the entry whose repository (from its `values`) is this checkout's `origin` in `git remote -v`. With none, stop: `No configured source-control repository is this checkout's origin. Run /dev-flows:configure sourceControl, then re-run.` At `level` `read`, stop too: `The team uses <entry> read-only, so merge can't land pull requests. Run /dev-flows:configure <integration> to change that.`
    - **Stacking:** the first entry, if any.
    - **Deployments:** every entry, used only when `<watchDeploy>` is true.
-4. **Branch:** `git branch --show-current` is `<branch>`. Detached, or `<branch>` is `<base>`: stop, `Refusing to merge from <base or a detached HEAD>. Check out the feature branch first.`
+4. **Branch:** `git branch --show-current` is `<branch>`. Detached, or `<branch>` is `<base>` or a branch `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" get repo.protectedBranches --optional` lists: stop, `Refusing to merge from <branch, or a detached HEAD>. Check out the feature branch first.`
 5. **Pull request:** the source-control entry's `currentPr` op.
 
 ### 1b. Gates

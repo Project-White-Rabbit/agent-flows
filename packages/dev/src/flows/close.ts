@@ -3,6 +3,7 @@ import {
   CONFIGURE_GET_AND_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
+  flowDir,
   HOOK_RESULTS,
   HOOKS_COMMAND,
   hooksInvariant,
@@ -25,6 +26,11 @@ export const closeFlow: Flow = devKit.defineFlow({
     sync: {
       description:
         "`issue` prints the issue a sync recorded for the current branch, reading only",
+      args: "<subcommand>",
+    },
+    tickets: {
+      description:
+        "`match` ranks the tracker's recent issues against the branch's work, as create-tickets does, writing only its plan file",
       args: "<subcommand>",
     },
   }),
@@ -85,10 +91,10 @@ export const closeFlow: Flow = devKit.defineFlow({
 >   - closes the pull request
 >   - deletes the remote branch
 >   - cancels the issue the branch names (left open when another pull request, open or merged, is attached to it)
->   - when the branch names no issue, looks for one (a \`> Branch:\` line naming the branch, then a search) and asks which, if any, to cancel or mark done; \`force\` changes none of them
+>   - when the branch names no issue, looks for one (a \`> Branch:\` line naming the branch, then a search and create-tickets' ranking of recent issues) and asks which, if any, to cancel or mark done; \`force\` changes none of them
 >   - runs the repo's teardown (\`close.after\` hooks)
 >
-> It never deletes the local branch, switches branches, or touches the working tree. It refuses on the base branch, on a branch other branches are stacked on, and on a pull request that merged.`,
+> It never deletes the local branch, switches branches, or touches the working tree. It refuses on the base branch (and the config's \`repo.protectedBranches\`), on a branch other branches are stacked on, and on a pull request that merged.`,
           next: null,
         },
       ],
@@ -103,12 +109,12 @@ export const closeFlow: Flow = devKit.defineFlow({
           kind: "action",
           title: "Survey and gates",
           refName: "survey",
-          commandCalls: ["configure", "sync", "hooks"],
-          body: `Reads only, apart from one \`git fetch\` and the repo's \`close.before\` hooks. A gate that fails stops the command with nothing written.
+          commandCalls: ["configure", "sync", "tickets", "hooks"],
+          body: `Reads only, apart from one \`git fetch\`, the issue search's files in the worktree's git dir, and the repo's \`close.before\` hooks. A gate that fails stops the command with nothing written.
 
 ### Survey
 
-1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG}
+1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then \`{{command:configure}} get repo.protectedBranches --optional\`: \`<protected>\`, the branches no flow works on directly (\`null\` for none).
 2. **Integrations:** \`{{command:configure}} integrations sourceControl stacking issueTracker --optional\`. ${USE_INTEGRATIONS}
    - **Source control:** the entry whose repository (from its \`values\`) is this checkout's \`origin\` in \`git remote -v\`, if any. At \`level\` \`read\`, its pull request is only read: say it can't be closed here, and leave it.
    - **Stacking:** the first entry, if any.
@@ -128,6 +134,7 @@ export const closeFlow: Flow = devKit.defineFlow({
    **When none of those finds one:** look for it, and keep what turns up as \`<candidates>\`, never \`<issue>\`: nothing the branch names ties it to this work, so it's never changed without the person's answer, in \`force\` mode too.
    1. Each entry's \`findIssue\` op with \`<branch>\`: open issues whose description has a \`> Branch:\` line for this branch. They come first, marked \`anchored\`.
    2. Each entry's \`searchIssues\` op with the pull request's title (else the branch name in words), then with each of up to three commit subjects (\`git log --format=%s <base>..<branch>\`): open issues that plausibly describe this branch's work, best first.
+   3. The ranking create-tickets matches by, over every recent issue rather than the search's few. In \`<dir>\`, ${flowDir("close")} (create it), write \`match.json\` as \`{"items": [{"key": "branch", "title": "<the pull request's title, else the branch name in words>", "description": "<the commit subjects, one per line>"}]}\`, and \`issues.json\` as \`{"<entry>": {"link": <true at level link>, "issues": [<its recentIssues op's issues>], "hits": {"branch": [<the ids 2 found in it, best first>]}}}\`, under each entry's \`instance\` (else its \`integration\`); when \`recentIssues\` is \`unsupported\` or fails, put the issues 2 returned in \`issues\`. Then \`{{command:tickets}} match --plan <dir>/match.json --issues <dir>/issues.json\`: its \`CANDIDATE\` lines (and a \`MATCH\` line) rank issues by the words they share with the work and by the search. Take the open ones (not marked \`closed\`) that plausibly describe this branch's work, after the anchored ones and beside 2's, judged against the pull request and the commits. It writes only the plan file.
 
    Keep up to three in all, each with its id, title, URL, state, assignee, attached pull requests, and a one-sentence summary of its description.
 
@@ -135,7 +142,7 @@ export const closeFlow: Flow = devKit.defineFlow({
 
 In order. 1 to 3 refuse; 4 and 5 drop one action and carry on; 6 ends a close with nothing to do.
 
-1. **The base branch:** \`<branch>\` is \`<base>\`, or HEAD is detached: stop, \`Refusing to close <base or a detached HEAD>.\`
+1. **The base branch:** \`<branch>\` is \`<base>\` or one of \`<protected>\`, or HEAD is detached: stop, \`Refusing to close <branch, or a detached HEAD>.\`
 2. **Stacked branches:** \`above\` is more than 0: stop, \`Refusing to close <branch>: <above> branch(es) are stacked on it. Closing it would leave their pull requests pointing at a deleted branch. Close or restack those first.\`
 3. **A merged pull request:** stop, \`Pull request <N> merged. close is for abandoning work, not finishing it; {{cmd}}sync remote closes out its issue.\`
 4. **Already closed:** a closed pull request isn't closed again; an issue already done or canceled isn't changed. Note each for the report.

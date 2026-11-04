@@ -160,7 +160,7 @@ Stop the whole flow and tell the user if any part of this step leaves something 
 
 ### 1a. Survey
 
-1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG}
+1. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} When \`git branch --show-current\` is a branch \`{{command:configure}} get repo.protectedBranches --optional\` lists, stop: \`Refusing to ready <branch>: it's protected (repo.protectedBranches). Check out a feature branch first.\`
 2. **Integrations:** \`{{command:configure}} integrations sourceControl stacking codeReview --optional\`. ${USE_INTEGRATIONS}
    - **Source control:** keep the entry whose repository (from its \`values\`) is this checkout's \`origin\` in \`git remote -v\`. With none, stop: \`No configured source-control repository is this checkout's origin. Run {{cmd}}configure sourceControl, then re-run.\` With one at \`level\` \`read\`, stop too: \`The team uses <entry> read-only, so ready can't push, mark pull requests ready, or resolve review threads. Run {{cmd}}configure <integration> to change that.\`
    - **Stacking:** the first entry, if any.

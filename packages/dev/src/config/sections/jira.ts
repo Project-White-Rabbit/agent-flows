@@ -26,7 +26,7 @@ const FIELD_NAMES =
 const LABEL_UPDATE =
   'for a label change, leave `labels` out and pass `update.labels` as `[{ "add": <new> }, { "remove": <old> }]`, so the issue keeps its other labels'
 const TRANSITION =
-  "whose status category matches: `todo` → To Do, `in progress` and `in review` → In Progress (a status named for review when there is one), `done` and `canceled` → Done. Skip the transition when the issue is already there"
+  "to the status named for <state>, any case: `todo` → To Do, `in progress` → In Progress, `in review` → In Review (or Review), `done` → Done, `canceled` → Canceled (or Cancelled, Won't Do); when there's no status of that name, the one whose status category matches: `todo` → To Do, `in progress` and `in review` → In Progress (a status named for review, for `in review`), `done` and `canceled` → Done. Skip the transition when the issue is already there"
 
 const BROWSE_LINK =
   /\b([a-z0-9-]+\.atlassian\.net)\/browse\/([A-Z][A-Z0-9_]+)-\d+/g
