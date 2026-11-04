@@ -5,22 +5,54 @@
 // Two levels. General points (`hooks.before`, `hooks.after`) run around every
 // command but configure; a flow's own points run at its steps. Modes and
 // outcomes are filters on a hook, not more points, so the list of points stays
-// short. Each point's rules (when it runs, side effects, what a failure does)
-// live here, and its config field is built from them.
+// short; a general point's hook can filter on the flows it runs around too.
+// Each point's rules (when it runs, side effects, what a failure does) live
+// here, and its config field is built from them.
 //
 // Runtime code: Node built-ins only.
 
 import { INSTANCE_NAME } from "./instances.ts"
 import { type FieldSpec, HOOK_KEYS, type Hook } from "./types.ts"
 
-/** Values a hook's commands and prompt can use, as `{name}` and in the environment. */
-export const HOOK_VARS = ["base", "branch", "outcome", "pr", "prs"] as const
+/**
+ * Values a hook's commands and prompt can use, as `{name}` and in the
+ * environment (`AGENT_FLOWS_<NAME>`; `{merge}` is `AGENT_FLOWS_MERGE_COMMIT`).
+ * A flow passes the ones it knows; the rest are empty.
+ */
+export const HOOK_VARS = [
+  "base",
+  "branch",
+  "outcome",
+  "pr",
+  "prs",
+  "issue",
+  "result",
+  "merge",
+  "since",
+  "scope",
+] as const
 
 export type HookVar = (typeof HOOK_VARS)[number]
 
 export const HOOK_OUTCOMES = ["success", "failure"] as const
 
 export type HookOutcome = (typeof HOOK_OUTCOMES)[number]
+
+/**
+ * What `on` can be: an outcome, or `merged` at a point that knows whether the
+ * pull request merged, whatever happened after it.
+ */
+export const HOOK_ON = [...HOOK_OUTCOMES, "merged"] as const
+
+/** What a flow says it did, for `{result}`, for the flows that say. */
+export const FLOW_RESULTS: Record<string, string[]> = {
+  // Which of sync's phases ran: neither, only the local git work, only the
+  // remote writes, or both.
+  sync: ["noop", "local", "remote", "full"],
+}
+
+/** How much of the branch `evaluate.scan` runs for, for `{scope}`. */
+export const EVALUATE_SCOPES = ["full", "delta", "carry"] as const
 
 export type HookPoint = {
   /** Its config path: `hooks.before`, `ready.beforePublish`. */
@@ -38,6 +70,11 @@ export type HookPoint = {
   failure: "stop" | "report"
   /** An `after` point: it knows the outcome, so hooks there can filter on it. */
   after?: boolean
+  /**
+   * It knows whether the pull request merged (`--merged`), so hooks there can
+   * take `on: merged`.
+   */
+  merged?: boolean
   /**
    * What a command prints is findings for the flow to weigh: a command that
    * passes hands its stdout to the agent with the report, not only its exit.
@@ -64,6 +101,7 @@ export const HOOK_POINTS: HookPoint[] = [
       "Commands may have side effects outside the checkout (a notification)",
     failure: "report",
     after: true,
+    merged: true,
     example: [
       {
         name: "notify",
@@ -119,6 +157,19 @@ export const HOOK_POINTS: HookPoint[] = [
     ],
   },
   {
+    id: "ready.beforeFixPush",
+    flow: "ready",
+    when: "In ready's CI step, after each batch of CI fixes is committed, before it's pushed: the checks `beforePush` runs, for the fix pushes it doesn't see. Ready commits what hooks change, with the repo's convention for the message, before it pushes",
+    effects: NO_SHARED_EFFECTS,
+    failure: "stop",
+    example: [
+      {
+        name: "commit-scan",
+        run: "./scripts/scan-commits.sh {base}",
+      },
+    ],
+  },
+  {
     id: "ready.after",
     flow: "ready",
     when: "At the end of ready, finished or stopped, just before its report",
@@ -148,6 +199,7 @@ export const HOOK_POINTS: HookPoint[] = [
         name: "rules-scan",
         run: "python3 scripts/review_scan.py --base {base}",
         timeout: 300,
+        findings: "^(FINDING|UNTESTED):",
       },
     ],
   },
@@ -177,15 +229,16 @@ export const HOOK_POINTS: HookPoint[] = [
   {
     id: "merge.after",
     flow: "merge",
-    when: "At the end of merge, merged or stopped, just before its report: teardown the repo does itself (a preview server, a database it manages)",
+    when: "At the end of merge, merged or stopped, just before its report: teardown the repo does itself (a preview server, a database it manages). `on: merged` runs a hook whenever the pull request merged, even when what came after it (the deploy watch) failed",
     effects:
       "Commands may have side effects outside the checkout: that's what teardown is",
     failure: "report",
     after: true,
+    merged: true,
     example: [
       {
         name: "server-down",
-        on: "success",
+        on: "merged",
         run: "./scripts/dev-server.sh down {branch}",
       },
     ],
@@ -230,12 +283,19 @@ export const HOOK_FLOWS = [
   "tickets-to-work",
 ] as const
 
-/** The modes a flow's own hooks can filter on, for the flows that have points. */
+/**
+ * The modes each flow's hooks can filter on: at its own points, and at a
+ * general point with `flows`.
+ */
 export const FLOW_MODES: Record<string, string[]> = {
-  ready: ["default", "loop", "draft"],
-  merge: ["default"],
   close: ["default", "force"],
+  "create-tickets": ["default", "match"],
   evaluate: ["default"],
+  merge: ["default"],
+  ready: ["default", "loop", "draft"],
+  "start-work": ["default"],
+  sync: ["default", "local", "remote"],
+  "tickets-to-work": ["default"],
 }
 
 export function hookPoint(id: string): HookPoint | undefined {
@@ -290,7 +350,6 @@ export function checkHooks(
     return [`${where} must be a list of hooks`]
   }
   const point = hookPoint(where)
-  const modes = point?.flow ? FLOW_MODES[point.flow] : undefined
   const issues: string[] = []
   const names = new Set<string>()
   for (const [index, hook] of value.entries()) {
@@ -341,17 +400,41 @@ export function checkHooks(
     if (entry.paths !== undefined && !stringList(entry.paths)) {
       issues.push(`${at}.paths must be a list of non-empty globs`)
     }
-    if (entry.modes !== undefined) {
-      if (!modes) {
+    // At a general point, `flows` says whose modes `modes` names.
+    let flows: string[] | undefined
+    if (entry.flows !== undefined) {
+      if (point?.flow) {
         issues.push(
-          `${at}.modes is only for a flow's own points: put the hook in that flow's section`,
+          `${at}.flows is only for a general point: this one runs only in ${point.flow}`,
         )
+      } else if (
+        !stringList(entry.flows) ||
+        !entry.flows.every((flow) =>
+          (HOOK_FLOWS as readonly string[]).includes(flow),
+        )
+      ) {
+        issues.push(`${at}.flows must list flows of ${HOOK_FLOWS.join(", ")}`)
+      } else {
+        flows = entry.flows
+      }
+    }
+    if (entry.modes !== undefined) {
+      const modes = point?.flow
+        ? FLOW_MODES[point.flow]
+        : flows && [...new Set(flows.flatMap((flow) => FLOW_MODES[flow]))]
+      const whose = point?.flow ?? flows?.join(", ")
+      if (!modes) {
+        if (entry.flows === undefined) {
+          issues.push(
+            `${at}.modes at a general point needs flows, to say whose modes they are`,
+          )
+        }
       } else if (
         !stringList(entry.modes) ||
         !entry.modes.every((mode) => modes.includes(mode))
       ) {
         issues.push(
-          `${at}.modes must list modes of ${point?.flow}: ${modes.join(", ")}`,
+          `${at}.modes must list modes of ${whose}: ${modes.join(", ")}`,
         )
       }
     }
@@ -360,12 +443,47 @@ export function checkHooks(
         issues.push(
           `${at}.on is only for an after point, which knows the outcome`,
         )
-      } else if (!(HOOK_OUTCOMES as readonly unknown[]).includes(entry.on)) {
-        issues.push(`${at}.on must be ${HOOK_OUTCOMES.join(" or ")}`)
+      } else if (!(HOOK_ON as readonly unknown[]).includes(entry.on)) {
+        issues.push(`${at}.on must be ${HOOK_ON.join(", ")}`)
+      } else if (entry.on === "merged" && point && !point.merged) {
+        issues.push(
+          `${at}.on: merged is only for merge.after and hooks.after, which know whether the pull request merged`,
+        )
+      }
+    }
+    if (entry.recheck !== undefined) {
+      if (entry.run === undefined) {
+        issues.push(`${at}.recheck is only for a run command`)
+      } else if (typeof entry.recheck !== "boolean") {
+        issues.push(`${at}.recheck must be true or false`)
+      } else if (point?.findings) {
+        issues.push(
+          `${at}.recheck isn't for ${where}: its commands only read, so an exit 2 there stops rather than hands over a task`,
+        )
+      }
+    }
+    if (entry.findings !== undefined) {
+      if (point && !point.findings) {
+        issues.push(
+          `${at}.findings is only for a point whose output is findings (evaluate.scan)`,
+        )
+      } else if (entry.run === undefined) {
+        issues.push(`${at}.findings is only for a run command`)
+      } else if (!nonEmpty(entry.findings) || !validRegex(entry.findings)) {
+        issues.push(`${at}.findings must be a regular expression`)
       }
     }
   }
   return issues
+}
+
+function validRegex(source: string): boolean {
+  try {
+    new RegExp(source)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** A repo-relative glob as a regex: `*` within a directory, `**` across them. */
@@ -392,8 +510,11 @@ export function globRegex(glob: string): RegExp {
 }
 
 export type HookContext = {
+  flow?: string
   mode?: string
   outcome?: HookOutcome
+  /** The pull request merged, for `on: merged`. */
+  merged?: boolean
   /** The branch's changed files, for `paths`; read only when a hook has them. */
   changed: () => string[]
 }
@@ -403,10 +524,17 @@ export function skipReason(
   hook: Hook,
   context: HookContext,
 ): string | undefined {
+  if (hook.flows && !(context.flow && hook.flows.includes(context.flow))) {
+    return `only around ${hook.flows.join(", ")}`
+  }
   if (hook.modes && !(context.mode && hook.modes.includes(context.mode))) {
     return `only in ${hook.modes.join(", ")} mode`
   }
-  if (hook.on && hook.on !== context.outcome) {
+  if (hook.on === "merged") {
+    if (!context.merged) {
+      return "only when the pull request merged"
+    }
+  } else if (hook.on && hook.on !== context.outcome) {
     return `only on ${hook.on}`
   }
   if (hook.paths) {
@@ -418,16 +546,15 @@ export function skipReason(
   return undefined
 }
 
-/**
- * `{base}`, `{branch}`, `{outcome}`, `{pr}`, and `{prs}` filled in; unknown or
- * unset ones stay.
- */
+const VAR_PATTERN = new RegExp(`\\{(${HOOK_VARS.join("|")})\\}`, "g")
+
+/** Each of `HOOK_VARS` (`{base}`, `{pr}`) filled in; unknown or unset ones stay. */
 export function fillVars(
   text: string,
   vars: Partial<Record<HookVar, string>>,
 ): string {
   return text.replace(
-    /\{(base|branch|outcome|prs|pr)\}/g,
+    VAR_PATTERN,
     (match, name: HookVar) => vars[name] ?? match,
   )
 }

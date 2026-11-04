@@ -23,7 +23,6 @@
     },
     "packages/dev": {
       "name": "@agent-flows/dev",
-      "version": "0.0.1",
       "devDependencies": {
         "@agent-flows/core": "workspace:*",
         "@types/node": "^26.6.5",

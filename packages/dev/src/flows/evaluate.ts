@@ -135,7 +135,7 @@ export const evaluateFlow: Flow = devKit.defineFlow({
 The skill is read-only. It never writes to source control, the issue tracker, error tracking, or the working tree. It is safe to invoke at any point in a branch's life. With no argument it evaluates **everything in the working tree**: commits ahead of the base branch, uncommitted (staged and unstaged) changes, and untracked files. A PR, if one exists for the branch, supplies title/body context but never narrows the diff. With an explicit PR number or URL (including post-merge), it evaluates that PR's diff.
 
 The config's \`evaluate\` section can make it more (all of it unset by default): \`record\` keeps the verdict on the branch's pushed head, the one file evaluate writes, in the repo's git common dir, for \`merge.requireEvaluation\` to gate on; \`scope: delta\` reviews only what moved since that verdict; \`reviewer: subagent\` has a fresh subagent judge, not the session that wrote the code; \`stopOn: high\` records a confirmed HIGH risk as \`stop\`; \`instructions\` gives the judge the repo's own rubric; \`tests\` runs the tests the change touches first, and the \`scan\` hooks the repo's own checks over the diff, both as findings for the review to verify; and \`fetch\` fetches the base first. The \`full\` argument reviews the whole branch whatever the record says, and \`record\` records this run's verdict as \`evaluate.record\` would ({{cmd}}merge passes it).`,
-  invariants: [hooksInvariant("evaluate")],
+  invariants: [hooksInvariant("evaluate", { extra: "--pr <the PR's number>" })],
   phases: [
     {
       id: "main",
@@ -227,7 +227,7 @@ With \`<scope>\` \`full\` and \`<record>\` false, everything is reviewed: skip t
 
 ### Scan
 
-\`{{command:hooks}} run evaluate.scan --flow evaluate --mode default --base <the merge base: git merge-base <base-ref> HEAD>\`. ${HOOK_RESULTS} Its \`findings\`, when there are any, are what each scan printed: keep them, word for word, as \`<scan findings>\` for the judging below. They are leads to verify against the diff, each confirmed (and graded by the risk lens) or set aside with a reason in one line, never the verdict itself.
+\`{{command:hooks}} run evaluate.scan --flow evaluate --mode default --base <the merge base: git merge-base <base-ref> HEAD> --scope <full or delta, as the scope above says> --since <since> --pr <the PR's number>\`, leaving out \`--since\` when the scope didn't run or printed no \`since\`, and \`--pr\` with no PR. ${HOOK_RESULTS} A scan only reads, so one that exits 2 is a \`stop\`, not a task. Its \`findings\`, when there are any, are what each scan printed: keep them, word for word, as \`<scan findings>\` for the judging below. They are leads to verify against the diff, each confirmed (and graded by the risk lens) or set aside with a reason in one line, never the verdict itself.
 
 ### Tests
 

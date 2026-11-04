@@ -91,7 +91,7 @@ export const STACK_PARENT =
 /** The `hooks` command entry: every flow but configure runs the general points. */
 export const HOOKS_COMMAND = {
   description:
-    "`run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), or a failure that stops the command (`stop`)",
+    "`run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), a failure that stops the command (`stop`), or a hook still running (`running`)",
   args: "<subcommand>",
 }
 
@@ -100,18 +100,19 @@ export const HOOKS_COMMAND = {
  * hook's task gets the same rules wherever it runs.
  */
 export const HOOK_RESULTS =
-  "It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest; a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). An exit of 2 means bad arguments or an invalid config: relay its message and stop."
+  "It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest (with `agent.recheck`, that first runs the hook's check again, and it fails like any check when the task didn't satisfy it); a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). `running`: a hook was still running when `--max-wait` ran out, and goes on running: run the same command again with `--wait <running.resume>` in place of any `--after`, until the status is another one, relaying `running.name` and how long it has run. When the host limits how long one command runs, add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`. An exit of 2 means bad arguments or an invalid config: relay its message and stop."
 
 /**
  * The flow-wide rule for the general hooks, and the flow's own `after` point
- * when it has one. `extra` is the flags the flow passes besides its mode
- * (`--base <mergeBase>`).
+ * when it has one. `extra` is the flags the flow passes at the end besides its
+ * mode (`--base <mergeBase>`), and `note` says when it passes them.
  */
 export function hooksInvariant(
   flow: string,
-  options: { afterPoint?: boolean; extra?: string } = {},
+  options: { afterPoint?: boolean; extra?: string; note?: string } = {},
 ): string {
   const extra = options.extra ? ` ${options.extra}` : ""
+  const note = options.note ? ` ${options.note}` : ""
   const points = options.afterPoint ? `${flow}.after after` : "after"
-  return `**Run the repo's hooks around this command.** Skip this when the mode is \`help\`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: \`{{command:hooks}} run before --flow ${flow} --mode <mode>\`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: \`{{command:hooks}} run ${points} --flow ${flow} --mode <mode>${extra} --outcome <success, when it did its job, else failure>\`, leaving out a flag whose value isn't known yet. ${HOOK_RESULTS} At the end, a \`stop\` can't happen: report the \`failures\`. Say in the report which hooks ran at each point, what any task for you changed, and what failed.`
+  return `**Run the repo's hooks around this command.** Skip this when the mode is \`help\`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: \`{{command:hooks}} run before --flow ${flow} --mode <mode>\`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: \`{{command:hooks}} run ${points} --flow ${flow} --mode <mode>${extra} --outcome <success, when it did its job, else failure>\`, leaving out a flag whose value isn't known yet.${note} ${HOOK_RESULTS} At the end, a \`stop\` can't happen: report the \`failures\`. Say in the report which hooks ran at each point, what any task for you changed, and what failed.`
 }

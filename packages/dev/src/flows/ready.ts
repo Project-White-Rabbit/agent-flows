@@ -75,7 +75,10 @@ export const readyFlow: Flow = devKit.defineFlow({
     "**Never run a command with side effects outside the checkout** to check the branch: nothing that deploys, publishes, migrates or writes to a database, or calls a shared service. Read a script before running it when its name doesn't make that plain.",
     "**Never create, edit, or apply a database migration, and never move a dependency or toolchain version** to make a check pass. Those are the team's decisions: surface them.",
     "**Only change tests when fixing a failing test**, never source. A test that shows a source bug is the user's to look at.",
-    hooksInvariant("ready", { afterPoint: true, extra: "--base <mergeBase>" }),
+    hooksInvariant("ready", {
+      afterPoint: true,
+      extra: "--base <mergeBase> --pr <the pull request's number>",
+    }),
   ],
   phases: [
     {
@@ -138,8 +141,8 @@ section can name the fix and check commands; otherwise it runs the
 scripts of each package the branch touches, as the repo's agent
 instructions say. Its \`skip\` and \`ignoreChecks\` lists apply to every
 run; the flags add to them. Its \`before\`, \`beforePublish\`,
-\`beforePush\`, and \`after\` hooks, and the general ones in the
-\`hooks\` section, run whatever is skipped.
+\`beforePush\`, \`beforeFixPush\`, and \`after\` hooks, and the general
+ones in the \`hooks\` section, run whatever is skipped.
 \`\`\``,
           next: null,
         },
@@ -166,7 +169,7 @@ Stop the whole flow and tell the user if any part of this step leaves something 
 4. **Parent:** ${STACK_PARENT}
 5. **Scope:** \`{{command:ready}} plan --base <landed, else parent>\`, plus each \`--skip\` and \`--ignore-check\` from the flags as given (quote each pattern for the shell), fetches the parent and prints JSON: \`mergeBase\` (keep it as \`<mergeBase>\` for the whole flow, so a base that moves meanwhile doesn't change the scope), \`ahead\`, \`dirty\`, \`changed\` (every file the pull request will hold: committed since the merge base, uncommitted, and untracked), \`packages\` (each touched package's directory, manifest, how to run its scripts, and its fix and check scripts), \`instructions\` (the agent instruction files at the root and above each changed file, then the path-scoped rule files, \`.claude/rules/\` and \`.cursor/rules/\`, whose globs match a changed file), \`commands\` (the config's \`ready\` section, with \`{base}\` and \`{files}\` filled in: \`fix\`, \`checks\`, the \`tests\` template with \`{tests}\` still in it, and \`dropped\`, the commands left out because their \`{files}\` matched no changed file), \`skip\` (the steps this run skips: the config's \`ready.skip\` and the flags'), \`ignoreChecks\` (the CI check patterns this run ignores: the config's \`ready.ignoreChecks\` and the flags'), \`ci\` (\`timeoutMinutes\`, how long a CI pass waits, as \`<ciTimeout>\`; \`maxPasses\`, the most passes a \`loop\` run makes, when the config sets one; \`requiredChecks\`, the checks every wait holds out for until they report, which \`ci wait\` and \`ci record\` read from the config themselves), and \`logDir\`. Keep \`skip\` and \`ignoreChecks\` for the whole flow: every step below names the \`skip\` entry that turns it off. When \`skip\` has \`reviews\`, \`<reviewers>\` is empty: nobody would read the findings (say so in the report when \`--review\` asked for one). If it fails because HEAD is detached, stop and tell the user to check out a branch; because it can't skip a step, relay its message and the usage block from \`help\`, and stop.
 6. **Anything to publish?** With no pull request, \`ahead\` 0, and \`dirty\` false, stop: \`Nothing to publish: no pull request, and no work ahead of <parent>.\`
-7. **The repo's \`before\` hooks:** \`{{command:hooks}} run ready.before --flow ready --mode <mode> --base <mergeBase>\`. ${HOOK_RESULTS} They run whatever \`skip\` says: they're the repo's own requirements, not ready's steps. When they changed files, run the scope (5) again, with the same flags, so the steps below see them.
+7. **The repo's \`before\` hooks:** \`{{command:hooks}} run ready.before --flow ready --mode <mode> --base <mergeBase> --pr <pr>\` (leave \`--pr\` out with no pull request). ${HOOK_RESULTS} They run whatever \`skip\` says: they're the repo's own requirements, not ready's steps. When they changed files, run the scope (5) again, with the same flags, so the steps below see them.
 
 Read every file in \`instructions\` you haven't already: they're where the repo says what must change together and how to check it, and they win over anything below.
 
@@ -212,7 +215,7 @@ Skip when \`skip\` has both \`fix\` and \`checks\`: there's nothing to run for n
 
 ### 1f. Before publishing
 
-\`{{command:hooks}} run ready.beforePublish --flow ready --mode <mode> --base <mergeBase>\`, whatever \`skip\` says. ${HOOK_RESULTS} Sync commits what they change with the rest. When they changed source files and \`skip\` doesn't have \`checks\`, rerun 1d's checks for those packages first.`,
+\`{{command:hooks}} run ready.beforePublish --flow ready --mode <mode> --base <mergeBase> --pr <pr>\` (leave \`--pr\` out with no pull request), whatever \`skip\` says. ${HOOK_RESULTS} Sync commits what they change with the rest. When they changed source files and \`skip\` doesn't have \`checks\`, rerun 1d's checks for those packages first.`,
           next: {
             byMode: {
               default: "run/sync-local",
@@ -251,7 +254,7 @@ When sync stops (a conflict it needs you for, a hook it couldn't satisfy), stop 
 
 ### Before pushing
 
-\`{{command:hooks}} run ready.beforePush --flow ready --mode <mode> --base <mergeBase>\`, whatever \`skip\` says. ${HOOK_RESULTS} They see the commits sync just made. When they changed files, commit them (\`git add -A\`, then a message in the repo's convention) before the push, so the commit they checked is the one published.
+\`{{command:hooks}} run ready.beforePush --flow ready --mode <mode> --base <mergeBase> --pr <its number>\` (leave \`--pr\` out when \`currentPr\` found none), whatever \`skip\` says. ${HOOK_RESULTS} They see the commits sync just made. When they changed files, commit them (\`git add -A\`, then a message in the repo's convention) before the push, so the commit they checked is the one published.
 
 ### Push
 
@@ -304,7 +307,7 @@ Run it even when the local sync and the publish changed nothing: an already-publ
           kind: "action",
           title: "CI",
           refName: "ci",
-          commandCalls: ["ready"],
+          commandCalls: ["hooks", "ready"],
           body: `Read every check and the automated reviewers' threads, fix what's high-confidence, push, and in \`loop\` mode repeat. ${CONFIDENCE}
 
 **Skips** (\`skip\` and \`ignoreChecks\` from 1a of {{skill-ref:main}}):
@@ -354,7 +357,11 @@ On a **stop** bucket, don't attempt the uncertain fix and don't push any partial
 
 Apply the high-confidence fixes in this order, so later ones build on earlier ones: local check misses, then required bookkeeping, then automated review suggestions. After each bucket, \`git status --short\` must show a change; a fix that produced no diff is a stalled fix: stop and surface it.
 
-Once the commit's checks have all settled, with no stop bucket and at least one fix, **rerun the local checks** on the batch before committing it, so a fix push never trades one failure for another: the fix commands, then the check commands, chosen as in 1d of {{skill-ref:main}} (the config's \`commands\`, else the touched packages' scripts with the relevant tests), run and capped the same way, minus what \`skip\` turns off there (\`fix\`, \`checks\`). Rerun them for every package the branch touches, not only the ones the fixes did. A failure the batch caused gets a high-confidence fix and another rerun; one it didn't cause, or one that survives a fix, is a stop: report it and don't push. Then commit them in one batch: \`git add -A\`, then \`git commit -m "<message>"\` in the repo's convention (\`CI: address review comments\`, say). Push as the publish step does: the stacking entry's \`submit\`, else \`git push origin HEAD\`. The push leaves the pull request's draft or ready state alone. Then:
+Once the commit's checks have all settled, with no stop bucket and at least one fix, **rerun the local checks** on the batch before committing it, so a fix push never trades one failure for another: the fix commands, then the check commands, chosen as in 1d of {{skill-ref:main}} (the config's \`commands\`, else the touched packages' scripts with the relevant tests), run and capped the same way, minus what \`skip\` turns off there (\`fix\`, \`checks\`). Rerun them for every package the branch touches, not only the ones the fixes did. A failure the batch caused gets a high-confidence fix and another rerun; one it didn't cause, or one that survives a fix, is a stop: report it and don't push. Then commit them in one batch: \`git add -A\`, then \`git commit -m "<message>"\` in the repo's convention (\`CI: address review comments\`, say).
+
+Before each fix push, the repo's \`beforeFixPush\` hooks, whatever \`skip\` says: \`{{command:hooks}} run ready.beforeFixPush --flow ready --mode <mode> --base <mergeBase> --pr <the pull request's number>\`. ${HOOK_RESULTS} They see the batch just committed. When they changed files, commit them too (\`git add -A\`, then a message in the repo's convention), so the commit they checked is the one pushed. A \`stop\` here is a stop bucket: report it and don't push.
+
+Push as the publish step does: the stacking entry's \`submit\`, else \`git push origin HEAD\`. The push leaves the pull request's draft or ready state alone. Then:
 
 \`\`\`bash
 {{command:ready}} ci start --sha <the new HEAD> --fixed <check name>...
