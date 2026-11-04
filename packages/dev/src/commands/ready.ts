@@ -14,6 +14,7 @@ import {
   type Check,
   type CheckState,
 } from "../config/adapters/checks.ts"
+import { globRegex } from "../config/hooks.ts"
 import { matchingRules } from "../config/rules.ts"
 import { loadConfig, repoRoot } from "./configure.ts"
 import {
@@ -224,30 +225,131 @@ export function instructionFiles(root: string, files: string[]): string[] {
 }
 
 export type ReadyCommands = {
-  /** True when the config's `ready` section sets either list. */
+  /** True when the config's `ready` section sets `fix`, `checks`, or `tests`. */
   configured: boolean
   fix: string[]
   checks: string[]
+  /** The `tests` template, `{tests}` left for the agent to fill. */
+  tests?: string
+  /** Commands left out because their `{files}` matched no changed file. */
+  dropped?: string[]
 }
 
-/** The config's `ready` section, with `{base}` the merge base. */
+/** A word for `sh`: single-quoted, any `'` written as `'\''`. */
+export function shellQuote(word: string): string {
+  return /^[\w@%+=:,./-]+$/.test(word)
+    ? word
+    : `'${word.replaceAll("'", "'\\''")}'`
+}
+
+/** `{files}`, or `{files:<glob>}`: a glob without a `/` matches the file name. */
+const FILES_PLACEHOLDER = /\{files(?::([^}]+))?\}/g
+
+/**
+ * A command with `{base}` and `{files}` filled in, or undefined when it names
+ * `{files}` and none of the files match (so `black {files:*.py}` doesn't run
+ * on a branch that changed no Python).
+ */
+export function fillCommand(
+  command: string,
+  mergeBase: string,
+  files: string[],
+): string | undefined {
+  let empty = false
+  const filled = command
+    .replaceAll("{base}", mergeBase)
+    .replace(FILES_PLACEHOLDER, (_, glob: string | undefined) => {
+      const regex = glob ? globRegex(glob) : undefined
+      const matched = files.filter(
+        (file) =>
+          !regex ||
+          regex.test(glob?.includes("/") ? file : path.posix.basename(file)),
+      )
+      if (matched.length === 0) {
+        empty = true
+      }
+      return matched.map(shellQuote).join(" ")
+    })
+  return empty ? undefined : filled
+}
+
+/**
+ * The config's `ready` section, with `{base}` the merge base and `{files}`
+ * the changed files that still exist (committed, uncommitted, untracked).
+ */
 export function readyCommands(
   config: Record<string, unknown> | undefined,
   mergeBase: string,
+  files: string[] = [],
 ): ReadyCommands {
   const section =
     config?.ready && typeof config.ready === "object"
       ? (config.ready as Record<string, unknown>)
       : {}
+  const dropped: string[] = []
+  const fill = (command: string): string | undefined => {
+    const filled = fillCommand(command, mergeBase, files)
+    if (filled === undefined) {
+      dropped.push(command)
+    }
+    return filled
+  }
   const list = (value: unknown): string[] =>
     Array.isArray(value)
       ? value
           .filter((item): item is string => typeof item === "string")
-          .map((item) => item.replaceAll("{base}", mergeBase))
+          .flatMap((item) => fill(item) ?? [])
       : []
   const fix = list(section.fix)
   const checks = list(section.checks)
-  return { configured: fix.length + checks.length > 0, fix, checks }
+  const template = typeof section.tests === "string" ? section.tests : undefined
+  const tests = template === undefined ? undefined : fill(template)
+  return {
+    configured: fix.length + checks.length > 0 || template !== undefined,
+    fix,
+    checks,
+    ...(tests !== undefined ? { tests } : {}),
+    ...(dropped.length > 0 ? { dropped } : {}),
+  }
+}
+
+/** Ready's CI settings from the config: the pass timeout, the pass cap, the checks that must report. */
+export type CiSettings = {
+  timeoutSeconds: number
+  maxPasses?: number
+  requiredChecks: string[]
+}
+
+export function ciSettings(
+  config: Record<string, unknown> | undefined,
+): CiSettings {
+  const section =
+    config?.ready && typeof config.ready === "object"
+      ? (config.ready as Record<string, unknown>)
+      : {}
+  const positive = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value > 0
+      ? value
+      : undefined
+  const minutes = positive(section.ciTimeout)
+  const maxPasses = positive(section.maxPasses)
+  return {
+    timeoutSeconds:
+      minutes === undefined ? DEFAULT_TIMEOUT : Math.round(minutes * 60),
+    ...(maxPasses !== undefined ? { maxPasses: Math.floor(maxPasses) } : {}),
+    requiredChecks: stringList(section.requiredChecks),
+  }
+}
+
+/** The config's CI settings, read from the repo this runs in (none outside one). */
+function configuredCi(): CiSettings {
+  let config: Record<string, unknown> | undefined
+  try {
+    config = loadConfig(repoRoot()).config
+  } catch {
+    config = undefined
+  }
+  return ciSettings(config)
 }
 
 /** The steps ready can skip, in the order it reaches them. */
@@ -344,6 +446,7 @@ function plan(args: string[]): void {
   // Read first, so a step it can't skip stops the plan before the fetch.
   const config = loadConfig(root).config
   readySkips(config, { skip, ignoreChecks })
+  const ci = ciSettings(config)
   // A stacked parent may exist only locally, so a failed fetch isn't fatal.
   const fetched = run("git", ["fetch", "--quiet", "origin", base]).status === 0
   const baseRef = resolveBase(base)
@@ -377,8 +480,17 @@ function plan(args: string[]): void {
     untracked: untracked.length,
     packages: touchedPackages(root, changed),
     instructions: instructionFiles(root, changed),
-    commands: readyCommands(config, mergeBase),
+    commands: readyCommands(
+      config,
+      mergeBase,
+      changed.filter((file) => fs.existsSync(path.join(root, file))),
+    ),
     ...readySkips(config, { skip, ignoreChecks }),
+    ci: {
+      timeoutMinutes: Math.round(ci.timeoutSeconds / 60),
+      ...(ci.maxPasses !== undefined ? { maxPasses: ci.maxPasses } : {}),
+      requiredChecks: ci.requiredChecks,
+    },
     logDir,
   })
 }
@@ -395,6 +507,8 @@ export type Pass = {
   seen: string[]
   /** The failures once every check settled. */
   settled?: string[]
+  /** The first pass of a ready run (`ci start --first`), so a pass cap counts from it. */
+  first?: boolean
 }
 
 export type ReadyState = { passes: Pass[] }
@@ -424,6 +538,8 @@ export type CiReport = {
   ignored: string[]
   /** With `requiredOnly`, checks the base doesn't require: not waited on, never failures. */
   optional: string[]
+  /** Required check patterns no check has matched yet: pending until one reports. */
+  missing: string[]
 }
 
 /** A check name pattern, where `*` is any run of characters, case aside. */
@@ -441,6 +557,7 @@ export function startPass(
   sha: string,
   fixed: string[],
   now: Date,
+  first = false,
 ): ReadyState {
   const passes = [...state.passes]
   const last = passes.at(-1)
@@ -449,6 +566,7 @@ export function startPass(
     startedAt: now.toISOString(),
     fixed: last?.sha === sha ? [...new Set([...last.fixed, ...fixed])] : fixed,
     seen: [],
+    ...(first || (last?.sha === sha && last.first) ? { first: true } : {}),
   }
   if (last?.sha === sha) {
     passes[passes.length - 1] = pass
@@ -456,6 +574,15 @@ export function startPass(
     passes.push(pass)
   }
   return { passes: passes.slice(-KEPT_PASSES) }
+}
+
+/** The last pass's number within its ready run: from the last `first` pass, else the branch's first kept one. */
+export function runPass(state: ReadyState): number {
+  let index = state.passes.length - 1
+  while (index > 0 && !state.passes[index]?.first) {
+    index--
+  }
+  return state.passes.length - index
 }
 
 function isFailure(check: Check): boolean {
@@ -472,17 +599,29 @@ export function recordChecks(
   ignore: string[] = [],
   /** Wait only on checks the base requires, when the checks say which. */
   requiredOnly = false,
+  /** Check name patterns that must report: each counts as pending until one does. */
+  require: string[] = [],
 ): { state: ReadyState; report: CiReport } {
   const ignored = all.filter((check) =>
     ignore.some((pattern) => matchesCheck(check.name, pattern)),
   )
   const kept = all.filter((check) => !ignored.includes(check))
+  const named = (check: Check) =>
+    require.some((pattern) => matchesCheck(check.name, pattern))
   // A host that couldn't say which checks are required leaves them all in.
   const optional =
     requiredOnly && kept.some((check) => check.required !== undefined)
-      ? kept.filter((check) => check.required !== true)
+      ? kept.filter((check) => check.required !== true && !named(check))
       : []
-  const checks = kept.filter((check) => !optional.includes(check))
+  // A required check that hasn't reported yet is pending, so a quick check
+  // settling first can't read as the whole run.
+  const missing = require.filter(
+    (pattern) => !all.some((check) => matchesCheck(check.name, pattern)),
+  )
+  const checks = [
+    ...kept.filter((check) => !optional.includes(check)),
+    ...missing.map((name): Check => ({ name, state: "pending" })),
+  ]
   let next = state
   if (next.passes.at(-1)?.sha !== sha) {
     next = startPass(next, sha, [], now)
@@ -538,6 +677,7 @@ export function recordChecks(
         .filter((name) => pass.fixed.includes(name)),
       ignored: ignored.map((check) => check.name),
       optional: optional.map((check) => check.name),
+      missing,
     },
   }
 }
@@ -589,7 +729,7 @@ function readState(dir: string, branch: string): ReadyState {
   return { passes: Array.isArray(stored?.passes) ? stored.passes : [] }
 }
 
-function numberFlag(
+export function numberFlag(
   flags: Map<string, string>,
   name: string,
   fallback: number,
@@ -623,19 +763,27 @@ function takeRepeated(
 }
 
 function ciStart(args: string[]): void {
-  const { values: fixed, rest } = takeRepeated(args, "fixed")
+  const { values: fixed, rest: afterFixed } = takeRepeated(args, "fixed")
+  const { on: first, rest } = takeSwitch(afterFixed, "first")
   const flags = parseFlags(rest)
   const sha = requiredFlag(flags, "sha")
+  const ci = configuredCi()
   const dir = stateDir()
   const branch = currentBranch()
-  const state = startPass(readState(dir, branch), sha, fixed, new Date())
+  const state = startPass(readState(dir, branch), sha, fixed, new Date(), first)
   writeBranchState(dir, branch, state)
   const pass = state.passes.at(-1) as Pass
+  const inRun = runPass(state)
   printJson({
     sha,
     pass: state.passes.length,
+    runPass: inRun,
     fixed: pass.fixed,
     startedAt: pass.startedAt,
+    timeoutMinutes: Math.round(ci.timeoutSeconds / 60),
+    ...(ci.maxPasses !== undefined
+      ? { maxPasses: ci.maxPasses, capped: inRun >= ci.maxPasses }
+      : {}),
   })
 }
 
@@ -652,9 +800,14 @@ async function ciRecord(args: string[]): Promise<void> {
     args,
     "ignore-check",
   )
-  const { on: requiredOnly, rest } = takeSwitch(afterIgnore, "required-only")
+  const { values: require, rest: afterRequire } = takeRepeated(
+    afterIgnore,
+    "require-check",
+  )
+  const { on: requiredOnly, rest } = takeSwitch(afterRequire, "required-only")
   const flags = parseFlags(rest)
   const sha = requiredFlag(flags, "sha")
+  const ci = configuredCi()
   const file = flags.get("file")
   const checks = parseChecks(
     file ? JSON.stringify(readJson(file)) : await readStdin(),
@@ -666,9 +819,10 @@ async function ciRecord(args: string[]): Promise<void> {
     sha,
     checks,
     new Date(),
-    numberFlag(flags, "timeout", DEFAULT_TIMEOUT),
+    numberFlag(flags, "timeout", ci.timeoutSeconds),
     ignore,
     requiredOnly,
+    [...new Set([...ci.requiredChecks, ...require])],
   )
   writeBranchState(dir, branch, state)
   printJson(report)
@@ -691,7 +845,11 @@ export function progressLine(report: CiReport): string {
     report.ignored.length > 0 ? `, ${report.ignored.length} ignored` : ""
   const optional =
     report.optional.length > 0 ? `, ${report.optional.length} not required` : ""
-  return `[ready-ci] pass ${report.pass}, ${minutes(report.elapsedSeconds)} of ${minutes(report.timeoutSeconds)}: ${total} checks, ${report.counts.fail + report.counts.cancelled} failed${waiting}${ignored}${optional}`
+  const missing =
+    (report.missing ?? []).length > 0
+      ? `, waiting for ${report.missing.join(", ")} to report`
+      : ""
+  return `[ready-ci] pass ${report.pass}, ${minutes(report.elapsedSeconds)} of ${minutes(report.timeoutSeconds)}: ${total} checks, ${report.counts.fail + report.counts.cancelled} failed${waiting}${ignored}${optional}${missing}`
 }
 
 async function ciWait(args: string[]): Promise<void> {
@@ -699,11 +857,17 @@ async function ciWait(args: string[]): Promise<void> {
     args,
     "ignore-check",
   )
-  const { on: requiredOnly, rest } = takeSwitch(afterIgnore, "required-only")
+  const { values: require, rest: afterRequire } = takeRepeated(
+    afterIgnore,
+    "require-check",
+  )
+  const { on: requiredOnly, rest } = takeSwitch(afterRequire, "required-only")
   const flags = parseFlags(rest)
   const sha = requiredFlag(flags, "sha")
   const command = requiredFlag(flags, "command")
-  const timeout = numberFlag(flags, "timeout", DEFAULT_TIMEOUT)
+  const ci = configuredCi()
+  const required = [...new Set([...ci.requiredChecks, ...require])]
+  const timeout = numberFlag(flags, "timeout", ci.timeoutSeconds)
   const interval = numberFlag(flags, "interval", DEFAULT_INTERVAL)
   const maxWait = numberFlag(flags, "max-wait", Number.POSITIVE_INFINITY)
   const dir = stateDir()
@@ -746,6 +910,7 @@ async function ciWait(args: string[]): Promise<void> {
         timeout,
         ignore,
         requiredOnly,
+        required,
       )
       writeBranchState(dir, branch, state)
       for (const check of report.newFailures) {
@@ -772,20 +937,24 @@ const USAGE = `Usage: ready.ts <subcommand> [flags]
       package each belongs to with its check scripts, the agent instruction
       files above them and the path-scoped rule files (.claude/rules,
       .cursor/rules) that match them, the config's ready commands, and a
-      log dir. Also the
+      log dir. The ready commands have {base} and {files} filled in (a
+      command whose {files} matches no changed file is left out, under
+      dropped), and tests keeps {tests} for the agent. Also the
       steps to skip (${READY_STEPS.join(", ")}, local for the first four, or
-      all)
-      and the CI checks to ignore: the config's, plus these flags'.
+      all), the CI checks to ignore (the config's, plus these flags'), and
+      ci: the pass timeout in minutes, the pass cap, and the required checks.
 
   instructions --files <file>
       The agent instruction and matching rule files for the repo-relative
       paths in <file> (one per line), as JSON, the same way plan finds them.
 
-  ci start --sha <sha> [--fixed <check>]...
+  ci start --sha <sha> [--fixed <check>]... [--first]
       Start the CI pass for a pushed commit. --fixed names each check the
-      push meant to fix, so its failing again reads as stalled.
+      push meant to fix, so its failing again reads as stalled. --first
+      starts a ready run, so runPass counts from it; with ready.maxPasses
+      set, capped is true on the run's last allowed pass.
 
-  ci record --sha <sha> [--file <checks.json>] [--timeout <seconds>] [--ignore-check <pattern>]... [--required-only]
+  ci record --sha <sha> [--file <checks.json>] [--timeout <seconds>] [--ignore-check <pattern>]... [--require-check <pattern>]... [--required-only]
       Fold one snapshot of the commit's checks (the checks op's JSON, from
       the file or stdin) into its pass, and print where it stands: settled,
       timedOut, green, noChecks, counts, pending, failures, newFailures,
@@ -793,15 +962,17 @@ const USAGE = `Usage: ready.ts <subcommand> [flags]
       --ignore-check pattern (\`*\` is any run of characters) isn't waited on
       or failed. With --required-only, neither is a check whose \`required\`
       is false (the checks op was given the base); when no check says, all
-      count.
+      count. A --require-check pattern, or one in ready.requiredChecks, no
+      check matches yet counts as a pending check (missing) until one does.
+      The timeout defaults to ready.ciTimeout (${DEFAULT_TIMEOUT / 60} minutes).
 
-  ci wait --sha <sha> --command <cmd> [--interval <s>] [--timeout <s>] [--max-wait <s>] [--ignore-check <pattern>]... [--required-only]
+  ci wait --sha <sha> --command <cmd> [--interval <s>] [--timeout <s>] [--max-wait <s>] [--ignore-check <pattern>]... [--require-check <pattern>]... [--required-only]
       Run <cmd> (it prints the checks op's JSON) every --interval seconds
       (${DEFAULT_INTERVAL}), recording each, until the pass settles or has waited --timeout
       seconds (${DEFAULT_TIMEOUT}) since \`ci start\`; --max-wait returns sooner, for a
       host that limits how long a command runs. Progress and each new failure
-      go to stderr; the last record's report to stdout. --ignore-check and
-      --required-only as for record.
+      go to stderr; the last record's report to stdout. --ignore-check,
+      --require-check, and --required-only as for record.
 
 A pass's state is kept per branch in the repo's git common dir.`
 

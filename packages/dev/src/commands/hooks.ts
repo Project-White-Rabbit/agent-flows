@@ -67,6 +67,12 @@ export type HookReport = {
   failures: HookRun[]
   agent?: { point: string; name: string; task: string; resume: string }
   stop?: HookRun
+  /**
+   * At a point whose commands print findings (`evaluate.scan`): what each
+   * passing command printed, for the agent to weigh. Long output is cut to
+   * its first lines; the rest stays in `log`.
+   */
+  findings?: { point: string; name: string; output: string; log: string }[]
 }
 
 export type HookRequest = {
@@ -161,6 +167,16 @@ function exec(
     stderr: result.stderr ?? "",
     seconds: Math.round((Date.now() - started) / 100) / 10,
   }
+}
+
+/** Lines of a findings command's output printed; the rest stay in its log. */
+const FINDINGS_LINES = 400
+
+function head(text: string): string {
+  const all = text.split("\n")
+  return all.length > FINDINGS_LINES
+    ? `${all.slice(0, FINDINGS_LINES).join("\n")}\n[${all.length - FINDINGS_LINES} more line(s) in the log]`
+    : text
 }
 
 function tail(text: string): string {
@@ -289,6 +305,11 @@ export function runHooks(
           seconds,
           log,
         })
+        const printed = result.stdout.trim()
+        if (point.findings && printed !== "") {
+          report.findings ??= []
+          report.findings.push({ ...at, output: head(printed), log })
+        }
         continue
       }
       if (result.code === 2 && !result.timedOut) {

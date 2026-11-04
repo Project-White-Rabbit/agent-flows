@@ -38,6 +38,11 @@ export type HookPoint = {
   failure: "stop" | "report"
   /** An `after` point: it knows the outcome, so hooks there can filter on it. */
   after?: boolean
+  /**
+   * What a command prints is findings for the flow to weigh: a command that
+   * passes hands its stdout to the agent with the report, not only its exit.
+   */
+  findings?: boolean
   example: Hook[]
 }
 
@@ -101,6 +106,19 @@ export const HOOK_POINTS: HookPoint[] = [
     ],
   },
   {
+    id: "ready.beforePush",
+    flow: "ready",
+    when: "After ready's local sync has committed the branch, before it pushes: for a check that reads committed history (a scan of the commits about to publish). Ready commits what hooks change, with the repo's convention for the message, before it pushes",
+    effects: NO_SHARED_EFFECTS,
+    failure: "stop",
+    example: [
+      {
+        name: "commit-scan",
+        run: "./scripts/scan-commits.sh {base}",
+      },
+    ],
+  },
+  {
     id: "ready.after",
     flow: "ready",
     when: "At the end of ready, finished or stopped, just before its report",
@@ -114,6 +132,22 @@ export const HOOK_POINTS: HookPoint[] = [
         modes: ["default", "loop"],
         on: "success",
         prompt: "Post the pull request in #reviews",
+      },
+    ],
+  },
+  {
+    id: "evaluate.scan",
+    flow: "evaluate",
+    when: "Once evaluate has its scope, before it judges the change: the repo's own deterministic checks (a scan of the diff against its rules). What a passing command prints goes to the reviewer as findings to verify, each confirmed or set aside against the diff, never as the verdict",
+    effects:
+      "Commands only read: evaluate changes nothing, so they must not change the checkout or write anywhere",
+    failure: "stop",
+    findings: true,
+    example: [
+      {
+        name: "rules-scan",
+        run: "python3 scripts/review_scan.py --base {base}",
+        timeout: 300,
       },
     ],
   },
@@ -201,6 +235,7 @@ export const FLOW_MODES: Record<string, string[]> = {
   ready: ["default", "loop", "draft"],
   merge: ["default"],
   close: ["default", "force"],
+  evaluate: ["default"],
 }
 
 export function hookPoint(id: string): HookPoint | undefined {

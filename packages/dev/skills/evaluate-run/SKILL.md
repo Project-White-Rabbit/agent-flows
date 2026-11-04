@@ -12,7 +12,7 @@ user-invocable: false
 
 Pure reads.
 
-1. **Base branch:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" get repo.baseBranch` prints `{"values": {"repo.baseBranch": "<base>"}}`. If it exits with status 2 and prints `"configured": false`, stop this command here. Relay its `message`: the repo isn't set up for dev-flows yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `/dev-flows:configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead. Then pick the ref to diff against: `<base-ref>` is `origin/<base>` when `git rev-parse --verify --quiet refs/remotes/origin/<base>` succeeds, else `<base>`. Comparing against the remote-tracking ref keeps a stale local base branch from counting already-merged work as this branch's. Don't fetch; use the refs as they are.
+1. **Base branch:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" get repo.baseBranch` prints `{"values": {"repo.baseBranch": "<base>"}}`. If it exits with status 2 and prints `"configured": false`, stop this command here. Relay its `message`: the repo isn't set up for dev-flows yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `/dev-flows:configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead. Then `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" get evaluate.record evaluate.scope evaluate.reviewer --optional`: `<record>` (`true`: record the verdict; `null` reads as false), `<scope>` (`delta` or `full`; `null` reads as `full`), and `<reviewer>` (`subagent` or `session`; `null` reads as `session`). Then pick the ref to diff against: `<base-ref>` is `origin/<base>` when `git rev-parse --verify --quiet refs/remotes/origin/<base>` succeeds, else `<base>`. Comparing against the remote-tracking ref keeps a stale local base branch from counting already-merged work as this branch's. Don't fetch; use the refs as they are.
 2. **Source control:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/configure.ts" integrations sourceControl stacking --optional` prints `{"integrations": {"sourceControl": [...], "stacking": [...]}}`: every source-control entry the repo configured (often one, possibly several, possibly none), and the stacking entry, if any (the first). Each entry is one configured integration, or one instance of an integration configured more than once (two repositories on one host, told apart by `instance`): its `values`, its `access` (how this machine can reach it), and its `ops`. An op says how that integration does the job, with config values already filled in and `<N>`-style placeholders for you to fill: one string when it's the same however you reach the integration, else one variant per way to reach it. For each op, use the first variant, in the order the op lists them, whose way works here: `script` (an adapter: the op as code, built in or the repo's own; run it, and when it exits 3 it can't run here, so go on to the next), `mcp` when this session has tools from an MCP server whose name contains `access.mcp.server` (tools that are deferred, or from a server still connecting, count: search for them with your tool search before deciding they're missing), `cli` when `access.cli.ready` (installed and signed in), `api` when `access.api.ready` (the variant reads the token from the variable `access.api.token` names; never print or echo a token). Most ops list MCP, then CLI, then API; one that lists them otherwise does so because that way is more exact. An op given as `unsupported` is one that integration has nothing for: skip what needs it, and say so in the report with its reason. Run the chosen variant as given rather than a tool you know. When no variant of an op works, don't improvise one: tell the user what would make it work (connect the MCP server, install the CLI or sign in with `access.cli.auth`, or set the token variable) and treat that action as unavailable. An entry's `level`, for a capability that has levels, is how far the team lets flows go with that integration (set by configure, from the capability's levels); never do more with it than its level allows. A capability can have several integrations, and the skill works the same with any of them. An entry's id is its `integration`, plus `:<instance>` when it has one.
 
    This checkout can only evaluate PRs of its own repository, since the file contents come from it. So keep the **local entries**: those whose repository (from their `values`) is one of this checkout's remotes in `git remote -v`. Counting every remote, not just `origin`, keeps fork workflows working, where the PR lives in `upstream`. None configured, or none local, means there's no PR context for the working tree.
@@ -31,7 +31,23 @@ Pure reads.
 
 You now have one of: `pr:<entry>:<N>` (explicit argument or clean-tree fallback) or `worktree:<branch>` (with PR metadata attached if a PR exists).
 
-## 2. Gather the diff and context
+## 2. Scope and scan
+
+**Only for a `worktree:` target.** A `pr:` target reviews the PR's whole diff, runs no scan, and records nothing: go on to the gather-diff step.
+
+### Scope
+
+With `<scope>` `full` and `<record>` false, everything is reviewed: skip to the scan. Otherwise `node "${CLAUDE_PLUGIN_ROOT}/src/commands/evaluate.ts" scope --base <base-ref>` prints `scope`, `files` (every file the branch changes), `review` (the files to review), `dropped` (files the recorded verdict covered that the branch no longer changes), `previous` (the recorded verdict, its `sha`, and its `summary`), and `why`.
+
+- `full`: review everything.
+- `delta`: review only `review`, and say in the report header that it's a delta since `previous.sha`, with `dropped`. The gather below still collects the whole diff, for context, but the risks judge only the files in `review`, and what the previous verdict found stays found.
+- `carry`: no file's change moved since `previous.sha` (only the base was merged in). Don't review again: with `<record>` true, `node "${CLAUDE_PLUGIN_ROOT}/src/commands/evaluate.ts" record --base <base-ref> --scope carry` carries the verdict to HEAD; then report `previous`'s verdict and `summary` as this evaluation's, saying it carried from `previous.sha` (or why the record refused), and stop.
+
+### Scan
+
+`node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run evaluate.scan --flow evaluate --mode default --base <the merge base: git merge-base <base-ref> HEAD>`. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest; a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). An exit of 2 means bad arguments or an invalid config: relay its message and stop. Its `findings`, when there are any, are what each scan printed: keep them, word for word, as `<scan findings>` for the judging below. They are leads to verify against the diff, each confirmed (and graded by the risk lens) or set aside with a reason in one line, never the verdict itself.
+
+## 3. Gather the diff and context
 
 Delegate the data-gathering to a subagent on a fast, cheaper model (Sonnet on Claude Code) with this prompt, substituting `<target>`, `<base>`, `<base-ref>`, the PR metadata, and (for `pr:` targets) the target entry's `values` and, for each of the `prMetadata`, `prDiff`, `prFiles`, and `prCommits` ops, the variant you chose by the rule in the identify-target step, as a JSON block, all from the identify-target step. The subagent runs the commands and file reads against a small context; you analyze the results in the what-it-does through report steps, without re-sending the whole conversation on every file read.
 
@@ -118,7 +134,9 @@ If `GATHER NOTES` mentions a large diff, say so in the report header: large diff
 
 For `worktree:` targets, `GIT STATUS` tells you which changes are uncommitted or untracked. Uncommitted work is part of the evaluation, not a reason to ask the user to commit. Take the header's counts from `DIFF STATS`, never from the PR metadata, which describes only what the source-control host has seen.
 
-## 3. What it does (plain English)
+## 4. What it does (plain English)
+
+**Who judges.** With `<reviewer>` `session`, you do, in this step and the next two. With `subagent`, don't: hand the judging to a fresh general-purpose subagent (not a fork of this conversation, and none of it in the prompt: the session that wrote the code doesn't grade it). Give it only the target, `<base>` and `<base-ref>`, the PR and issue ids when there are any, the scope from the scope step (`full` or `delta` with its `review` files and `previous` summary), the gather results verbatim, `<scan findings>`, and the text of this step, the risks step, and the report step's output format, verdicts, and notes, pasted verbatim. Ask it for the report's What it does, What changes for a user, Risks, and Verdict sections, and each scan finding confirmed or set aside. Use its sections as given in the report; don't regrade them. When it can't run (no subagents on this host, a failure, an empty result), say so in the report, give no verdict of your own, and record nothing.
 
 Write 2-5 sentences (longer for genuinely large changes, never more than a paragraph or two). The reader should be able to skip the diff and still know what shipped.
 
@@ -133,7 +151,7 @@ Don't restate the PR title, walk through files one by one, copy the PR body verb
 
 If the stated intent (title, body, ticket) and the actual diff disagree (the diff does more, less, or something else), say so here. That drift is itself a shippability risk and also goes into the risks step.
 
-## 4. Risks
+## 5. Risks
 
 For each category below, decide **none / low / medium / high**. Include only categories where there is something specific to say; omit the rest rather than writing "no concerns."
 
@@ -192,7 +210,7 @@ For each risk, write one or two sentences: what could go wrong, where it lives (
 
 If everything is genuinely low or absent, keep the risk section short. Don't manufacture risks to fill categories. The one exception: copy-pasted code is always listed when present, even at low.
 
-## 5. Report
+## 6. Report
 
 Output, in this order, no extra ceremony:
 
@@ -227,11 +245,17 @@ Verdicts:
 - **Address first**: at least one high risk, or a cluster of mediums that together threaten shippability. List the must-fix items.
 - **Rethink**: the change as designed has a structural issue (wrong layer, wrong primitive, wrong rollout) that no incremental fix resolves. Be specific about what to rethink.
 
-The verdict is the user's call. Phrase it as a recommendation, not a gate: they may know context the diff doesn't show (a coordinated launch, an accepted risk, a planned follow-up).
+The verdict is the user's call. Phrase it as a recommendation, not a gate: they may know context the diff doesn't show (a coordinated launch, an accepted risk, a planned follow-up). The one gate is the repo's: with `merge.requireEvaluation`, merge reads the recorded verdict.
+
+When the scope step had `<scan findings>`, list them under the risks as `Scan`: each confirmed one is a risk above, and each set aside gets one line saying why.
+
+### Record
+
+**Only with `<record>` true and a `worktree:` target,** and not when a subagent was asked to judge and couldn't. Write the summary to a file in `$(git rev-parse --absolute-git-dir)/agent-flows/evaluate`, one line per entry: the verdict line first, then each high and medium risk as `[HIGH] <category>: <sentence> <path>`. Then `node "${CLAUDE_PLUGIN_ROOT}/src/commands/evaluate.ts" record --base <base-ref> --scope <full or delta, from the scope step> --verdict <pass for Ship, flag for Address first, stop for Rethink> --summary-file <file>`. It prints `recorded`; `false` comes with a `reason` (uncommitted or untracked changes, or a HEAD that isn't the pushed head): give it under the verdict, `Not recorded: <reason>. Commit and push (/dev-flows:sync), then re-run /dev-flows:evaluate.` A delta's record keeps the worse of its verdict and the previous one, and both summaries: when that differs from this run's verdict, say so (`Recorded: flag, carried from <short sha>`). Recorded: `Recorded: <verdict> on <short sha>`.
 
 ### Notes
 
-- This skill is read-only. The source-control ops it uses only read. If you find yourself editing a PR, running `git push`, or writing to any service, stop. The output is the report.
+- This skill is read-only, apart from the record the config asks for. The source-control ops it uses only read. If you find yourself editing a PR, running `git push`, or writing to any service, stop. The output is the report.
 - "Plain English" is load-bearing. If the summary reads like a dump of section headers, rewrite it as if telling a teammate in chat.
 - **What changes for a user**: **Before** is what a person saw happen (the input, the result, whether anything was raised), not what the code said; **After** is what they see now. Cause belongs in "What it does". Say plainly which paths are unchanged. Omit the section for a diff that only adds something new, and never pad it with rows where nothing moved.
 - The risk list is not a checklist. A 3-item list on a 200-line change is more useful than 14 items padded with "no concerns."

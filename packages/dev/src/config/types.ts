@@ -14,6 +14,7 @@
 export type FieldType =
   | "string"
   | "boolean"
+  | "number"
   | "string[]"
   | "number[]"
   | "hook[]"
@@ -71,6 +72,7 @@ export const HOOK_KEYS = [
 export type FieldValue =
   | string
   | boolean
+  | number
   | string[]
   | number[]
   | Hook[]

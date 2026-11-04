@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { deployState, type GithubRun, latestRun, stepState } from "./github.ts"
+import {
+  deployState,
+  deployStep,
+  type GithubRun,
+  latestRun,
+  stepState,
+} from "./github.ts"
 
 const run = (
   id: number,
@@ -34,10 +40,21 @@ describe("deployment", () => {
 
   it("reads each job as a step", () => {
     const job = (status: string, conclusion: string | null) =>
-      stepState({ name: "migrate", status, conclusion })
+      stepState({ id: 7, name: "migrate", status, conclusion })
     expect(job("queued", null)).toBe("pending")
     expect(job("completed", "success")).toBe("success")
     expect(job("completed", "skipped")).toBe("skipped")
     expect(job("completed", "timed_out")).toBe("failed")
+  })
+
+  it("gives each step its job id, so checkLog can read a failed one", () => {
+    expect(
+      deployStep({
+        id: 4242,
+        name: "Run migrations",
+        status: "completed",
+        conclusion: "failure",
+      }),
+    ).toEqual({ name: "Run migrations", state: "failed", log: "4242" })
   })
 })

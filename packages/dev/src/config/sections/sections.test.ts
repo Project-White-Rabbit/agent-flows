@@ -10,7 +10,7 @@ import { parseGraphiteConfig } from "./graphite.ts"
 import { INTEGRATIONS, SECTIONS } from "./index.ts"
 import { inferJiraProject, jiraLinkedKeys } from "./jira.ts"
 import { inferLinearTeamKey } from "./linear.ts"
-import { detectReady, ready } from "./ready.ts"
+import { detectPythonReady, detectReady, ready } from "./ready.ts"
 import { parseSentryConfig } from "./sentry.ts"
 import { BITFAB_DEV_FORMAT, sync } from "./sync.ts"
 import { ranksFromDoc, ranksProblem, tickets } from "./tickets.ts"
@@ -280,6 +280,34 @@ describe("sync format", () => {
       [expect.stringContaining("sync.prSections")],
     )
   })
+
+  it("takes another tool's state files and header, and the body knobs", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({
+        ...base,
+        sync: {
+          adoptState: ["{gitDir}/tool/state.json", ".tool/state.json"],
+          adoptHeader: "^Linear\\s*:",
+          prLinkLine: false,
+          noIssueLine: "none",
+          footer: false,
+          commitBodies: true,
+          linkUnverified: true,
+          requireBase: true,
+        },
+      }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({
+        ...base,
+        sync: { adoptState: ["{home}/x.json"], adoptHeader: "(" },
+      }).issues,
+    ).toEqual([
+      "sync.adoptState may use only the `{gitDir}` and `{gitCommonDir}` placeholders",
+      "sync.adoptHeader must be a valid regular expression",
+    ])
+  })
 })
 
 describe("merge section", () => {
@@ -325,6 +353,28 @@ describe("merge section", () => {
       "merge.requireAllChecks must be true or false",
       "merge.unresolvedThreads must be `allow`, `bots`, or `all`",
       "merge.watchDeploy must be true or false",
+    ])
+  })
+
+  it("takes how merge syncs and how long and how much the deploy watch reads", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    for (const sync of ["full", "remote"]) {
+      expect(
+        checkConfig({
+          ...base,
+          merge: { sync, deployTimeout: 40, deployLogLines: 120 },
+        }).issues,
+      ).toEqual([])
+    }
+    expect(
+      checkConfig({
+        ...base,
+        merge: { sync: "local", deployTimeout: "40", deployLogLines: 0 },
+      }).issues,
+    ).toEqual([
+      "merge.sync must be `full` or `remote`",
+      "merge.deployTimeout must be a number greater than 0",
+      "merge.deployLogLines must be a number greater than 0",
     ])
   })
 })
@@ -527,6 +577,67 @@ const MXPT_SCRIPTS = {
   "db:migrate:check": "bun scripts/check-migrations.ts",
   "check-all": "bun run validate && bun run test",
 }
+
+describe("Python ready detection", () => {
+  // The real context reads Python dependencies; the fake one, package.json only.
+  const python = (files: Record<string, unknown>, deps: string[]) => ({
+    ...checkout(files),
+    dependsOn: (pattern: RegExp) =>
+      deps.filter((line) => pattern.test(line.split(" ").at(-1) as string)),
+  })
+
+  it("proposes Black, Flake8, and pytest through uv from a uv project's dev dependencies", () => {
+    expect(
+      ready.detect?.(
+        python({ "uv.lock": "", "pyproject.toml": "[project]\n" }, [
+          "pyproject.toml depends on black",
+          "pyproject.toml depends on flake8",
+          "pyproject.toml depends on pytest",
+          "pyproject.toml depends on django",
+        ]),
+      ),
+    ).toEqual({
+      values: {
+        fix: ["uv run black {files:*.py}"],
+        checks: ["uv run flake8 {files:*.py}"],
+        tests: "uv run pytest {tests}",
+      },
+      evidence: [
+        "pyproject.toml depends on black",
+        "pyproject.toml depends on flake8",
+        "pyproject.toml depends on pytest",
+        "uv.lock is tracked, so the tools run through uv run",
+        "the commands run on the changed Python files ({files:*.py}) and the tests the branch touches ({tests}); lint rules or directories CI selects (Flake8's --select) belong in them too",
+      ],
+    })
+  })
+
+  it("prefers Ruff, found from its config, and runs tools directly without a lockfile", () => {
+    expect(
+      detectPythonReady(
+        python({ "requirements-dev.txt": "", "ruff.toml": "" }, [
+          "requirements-dev.txt depends on pytest",
+          "requirements-dev.txt depends on black",
+        ]),
+      )?.values,
+    ).toEqual({
+      fix: ["ruff format {files:*.py}", "ruff check --fix {files:*.py}"],
+      checks: ["ruff check {files:*.py}"],
+      tests: "pytest {tests}",
+    })
+  })
+
+  it("proposes nothing without Python dependencies, or without tools it knows", () => {
+    expect(detectPythonReady(checkout({ "README.md": "" }))).toBeUndefined()
+    expect(
+      detectPythonReady(
+        checkout({
+          "pyproject.toml": '[project]\ndependencies = ["django"]\n',
+        }),
+      ),
+    ).toBeUndefined()
+  })
+})
 
 describe("ready detection", () => {
   it("proposes the validate script, its fix first, and the tests a branch changed", () => {

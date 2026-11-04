@@ -8,14 +8,17 @@ import {
   BLOCK_START,
   type BranchState,
   branchFile,
+  capText,
   gate,
   lastSyncedLine,
   migrateState,
   parsePr,
   readBranchState,
   readLegacyState,
+  resolveAdopted,
   spliceBlock,
   syncFormat,
+  withoutAdopted,
   withoutLegacySync,
   workState,
   writeBranchState,
@@ -185,6 +188,62 @@ describe("spliceBlock over an earlier sync tool's body", () => {
   })
 })
 
+describe("spliceBlock over an adopted tool's body", () => {
+  const adopted = [
+    "Linear: https://linear.app/acme/issue/HEY-12",
+    "",
+    "## Summary",
+    "",
+    "- Old summary",
+    "",
+    "## Verification",
+    "",
+    "- ran it",
+    "",
+    "## Screenshots",
+    "",
+    "![x](y)",
+  ].join("\n")
+  const block =
+    "Linear: [HEY-12](https://l/HEY-12) Title\n\n## Summary\n\n- new\n\n## Verification\n\n- checked"
+
+  it("replaces its header and the sections sync writes, keeping the rest", () => {
+    const out = spliceBlock(adopted, block, { adoptHeader: "^Linear\\s*:" })
+    expect(out.match(/## Summary/g)).toHaveLength(1)
+    expect(out.match(/Linear:/g)).toHaveLength(1)
+    expect(out).not.toContain("Old summary")
+    expect(out).not.toContain("ran it")
+    expect(out).toContain("## Screenshots\n\n![x](y)")
+    expect(out.startsWith(BLOCK_START)).toBe(true)
+  })
+
+  it("does the same without markers", () => {
+    const out = spliceBlock(adopted, block, {
+      markers: false,
+      adoptHeader: "^Linear\\s*:",
+    })
+    expect(out).toBe(`${block}\n\n## Screenshots\n\n![x](y)\n`)
+  })
+
+  it("leaves a body that doesn't start with the header alone", () => {
+    const body = "Notes first\n\nLinear: x\n\n## Summary\n\nMine."
+    expect(
+      withoutAdopted(body, { header: /^Linear\s*:/, sections: ["Summary"] }),
+    ).toBe(body)
+  })
+
+  it("adds its block above an adopted body without the header setting", () => {
+    expect(spliceBlock(adopted, block)).toContain("Old summary")
+  })
+})
+
+describe("capText", () => {
+  it("cuts long text and says so", () => {
+    expect(capText("abc", 5)).toBe("abc")
+    expect(capText("abcdef", 3)).toBe("abc\n[cut at 3 characters]")
+  })
+})
+
 describe("syncFormat", () => {
   it("is sync's own format when the config leaves it out", () => {
     const own = {
@@ -194,6 +253,10 @@ describe("syncFormat", () => {
       blockMarkers: true,
       quoteLinks: true,
       prSections: null,
+      prLinkLine: true,
+      noIssueLine: null,
+      footer: true,
+      adoptHeader: null,
     }
     expect(syncFormat(undefined)).toEqual(own)
     expect(syncFormat({ version: 2 })).toEqual(own)
@@ -207,8 +270,23 @@ describe("syncFormat", () => {
       blockMarkers: false,
       quoteLinks: false,
       prSections: ["Summary", "Verification"],
+      prLinkLine: false,
+      noIssueLine: "none",
+      footer: true,
+      adoptHeader: "^Linear\\s*:",
     }
     expect(syncFormat({ sync })).toEqual(sync)
+  })
+
+  it("keeps the last-synced line without markers, where it bounds the block", () => {
+    expect(
+      syncFormat({ sync: { footer: false, blockMarkers: false } }).footer,
+    ).toBe(true)
+    expect(syncFormat({ sync: { footer: false } }).footer).toBe(false)
+  })
+
+  it("ignores an adoptHeader that isn't a regex", () => {
+    expect(syncFormat({ sync: { adoptHeader: "(" } }).adoptHeader).toBeNull()
   })
 
   it("keeps the format a branch was written in, under what the config sets", () => {
@@ -219,6 +297,10 @@ describe("syncFormat", () => {
       blockMarkers: false,
       quoteLinks: true,
       prSections: null,
+      prLinkLine: true,
+      noIssueLine: null,
+      footer: true,
+      adoptHeader: null,
     }
     expect(syncFormat(undefined, recorded)).toEqual(recorded)
     expect(
@@ -455,6 +537,67 @@ describe("readLegacyState", () => {
   })
 })
 
+describe("readLegacyState with adopted files", () => {
+  let root: string | undefined
+  afterEach(() => {
+    if (root) {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("reads an adopted tool's file from a git dir, by issueId or linearId", () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-adopt-"))
+    const gitDir = path.join(root, "gitdir")
+    fs.mkdirSync(path.join(gitDir, "tool"), { recursive: true })
+    fs.writeFileSync(
+      path.join(gitDir, "tool", "state.json"),
+      JSON.stringify({ branch: "feature", linearId: "HEY-3" }),
+    )
+    fs.writeFileSync(
+      path.join(root, "other.json"),
+      JSON.stringify({ branch: "feature", issueId: "ENG-4" }),
+    )
+    const adopt = { files: ["{gitDir}/tool/state.json"], gitDir }
+    expect(readLegacyState(root, "feature", adopt)).toEqual({
+      issue: "HEY-3",
+      errorRefs: [],
+      adopted: true,
+    })
+    expect(readLegacyState(root, "other", adopt)).toBeUndefined()
+    expect(
+      readLegacyState(root, "feature", { files: ["other.json"] }),
+    ).toMatchObject({ issue: "ENG-4", adopted: true })
+  })
+
+  it("prefers bitfab-dev's file for the branch, and falls back to adopted ones", () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-adopt-"))
+    fs.mkdirSync(path.join(root, ".bitfab-dev"))
+    fs.writeFileSync(
+      path.join(root, ".bitfab-dev", "state.json"),
+      JSON.stringify({ branch: "elsewhere", linearId: "ENG-1" }),
+    )
+    fs.writeFileSync(
+      path.join(root, "t.json"),
+      JSON.stringify({ branch: "feature", linearId: "HEY-5" }),
+    )
+    expect(
+      readLegacyState(root, "feature", { files: ["t.json"] }),
+    ).toMatchObject({ issue: "HEY-5", adopted: true })
+    expect(readLegacyState(root, "elsewhere", { files: ["t.json"] })).toEqual({
+      issue: "ENG-1",
+      errorRefs: [],
+    })
+  })
+
+  it("resolves placeholders, and skips one with no value", () => {
+    expect(
+      resolveAdopted("/r", "{gitCommonDir}/x.json", { gitCommonDir: "/g" }),
+    ).toBe("/g/x.json")
+    expect(resolveAdopted("/r", "a/x.json", {})).toBe("/r/a/x.json")
+    expect(resolveAdopted("/r", "{gitDir}/x.json", {})).toBeUndefined()
+  })
+})
+
 describe("lastSyncedLine", () => {
   it("stamps the time and the short HEAD", () => {
     expect(
@@ -600,6 +743,82 @@ describe("sync.ts (as a script)", () => {
     expect(json(survey).issue).toBeNull()
   })
 
+  it("starts a branch from an adopted tool's state, in the config's format", () => {
+    init()
+    const gitDir = git("rev-parse", "--absolute-git-dir").trim()
+    fs.mkdirSync(path.join(gitDir, "tool"))
+    fs.writeFileSync(
+      path.join(gitDir, "tool", "state.json"),
+      JSON.stringify({ branch: "feature", linearId: "HEY-9" }),
+    )
+    fs.mkdirSync(path.join(work(), ".agent-flows"))
+    fs.writeFileSync(
+      path.join(work(), ".agent-flows", "config.json"),
+      JSON.stringify({
+        version: 2,
+        repo: { baseBranch: "main" },
+        sync: { adoptState: ["{gitDir}/tool/state.json"], quoteLinks: false },
+      }),
+    )
+    const survey = ["survey", "remote", "--base", "main", "--pr", "none"]
+    const out = json(survey)
+    expect(out.issue).toBe("HEY-9")
+    // Not bitfab-dev's format: the config says how this repo writes.
+    expect(out.format).toMatchObject({
+      linkLabels: "capability",
+      blockMarkers: true,
+      quoteLinks: false,
+    })
+  })
+
+  it("stops when origin has no base branch to compare against", () => {
+    init()
+    const result = sync(["survey", "default", "--base", "dev", "--pr", "none"])
+    expect(result.status).toBe(1)
+    expect(result.stderr).toMatch(/origin\/dev doesn't exist/)
+    const facts = sync(["facts", "--base", "dev", "--pr", "none"])
+    expect(facts.status).toBe(1)
+  })
+
+  it("doesn't count commits as pushed once origin deleted the branch", () => {
+    init()
+    git("commit", "-q", "--allow-empty", "-m", "Work")
+    git("push", "-q", "-u", "origin", "HEAD")
+    const survey = ["survey", "default", "--base", "main", "--pr", "none"]
+    expect(json(survey).unpushed).toBe(0)
+    // Deleted on the host: the local remote-tracking ref is now stale.
+    execFileSync("git", [
+      "--git-dir",
+      path.join(dir as string, "origin.git"),
+      "branch",
+      "-q",
+      "-D",
+      "feature",
+    ])
+    expect(
+      git("rev-parse", "--verify", "-q", "origin/feature").trim(),
+    ).not.toBe("")
+    expect(json(survey)).toMatchObject({ unpushed: null, runLocal: true })
+  })
+
+  it("gives commit bodies in facts when the config asks", () => {
+    init()
+    git("commit", "-q", "--allow-empty", "-m", "Add x\n\nVerification: ran it")
+    const facts = ["facts", "--base", "main", "--pr", "none"]
+    expect(json(facts).commits).not.toContain("Verification")
+    fs.mkdirSync(path.join(work(), ".agent-flows"))
+    fs.writeFileSync(
+      path.join(work(), ".agent-flows", "config.json"),
+      JSON.stringify({
+        version: 2,
+        repo: { baseBranch: "main" },
+        sync: { commitBodies: true },
+      }),
+    )
+    const commits = json(facts).commits
+    expect(commits).toMatch(/^commit [0-9a-f]+\nAdd x\n\nVerification: ran it/)
+  })
+
   it("keeps its state out of the working tree", () => {
     init()
     json(["finish", "--base", "main", "--pr", "none"])
@@ -635,6 +854,10 @@ describe("sync.ts (as a script)", () => {
       blockMarkers: false,
       quoteLinks: false,
       prSections: ["Summary", "Verification"],
+      prLinkLine: false,
+      noIssueLine: "none",
+      footer: true,
+      adoptHeader: "^Linear\\s*:",
     }
     fs.mkdirSync(path.join(work(), ".agent-flows"))
     fs.writeFileSync(

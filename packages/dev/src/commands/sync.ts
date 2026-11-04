@@ -45,6 +45,14 @@ export type SyncFormat = {
   quoteLinks: boolean
   /** The headings of sync's PR body sections; null follows the template, else Summary and Test plan. */
   prSections: string[] | null
+  /** Whether the body carries the tracker's \`prLink\` line (\`Fixes <ID>\`). */
+  prLinkLine: boolean
+  /** With no issue, the issue line still goes in, with this after its label (\`none\`); null leaves it out. */
+  noIssueLine: string | null
+  /** The last-synced line ending the block; always with \`blockMarkers\` false, where it's the boundary. */
+  footer: boolean
+  /** A regex source for another tool's link lines on top of a body it wrote, so sync replaces that body. */
+  adoptHeader: string | null
 }
 
 export function syncFormat(
@@ -69,6 +77,27 @@ export function syncFormat(
       values.prSections.every((heading) => typeof heading === "string")
         ? values.prSections
         : null,
+    prLinkLine: values.prLinkLine !== false,
+    noIssueLine:
+      typeof values.noIssueLine === "string" && values.noIssueLine.trim()
+        ? values.noIssueLine
+        : null,
+    // Without markers, the last-synced line is where sync's part ends.
+    footer: values.footer !== false || values.blockMarkers === false,
+    adoptHeader:
+      typeof values.adoptHeader === "string" && compiles(values.adoptHeader)
+        ? values.adoptHeader
+        : null,
+  }
+}
+
+/** Whether `source` is a regex this runtime accepts. */
+export function compiles(source: string): boolean {
+  try {
+    new RegExp(source)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -200,10 +229,11 @@ const LEGACY_SECTIONS = new Set(["Summary", "Test plan"])
 export function withoutLegacySync(
   body: string,
   ownSections?: string[],
+  adopt?: Adopt,
 ): string {
   const lines = body.split("\n")
   if (!lines.some((line) => LAST_SYNCED.test(line.trim()))) {
-    return body
+    return adopt ? withoutAdopted(body, adopt) : body
   }
   const generated = new Set([...LEGACY_SECTIONS, ...(ownSections ?? [])])
   const kept: string[] = []
@@ -236,6 +266,45 @@ export function withoutLegacySync(
 }
 
 /**
+ * Another sync tool a repo adopts: `header` matches the link lines it puts on
+ * top of a body it wrote, and `sections` are the headings sync now writes.
+ */
+export type Adopt = { header: RegExp; sections: string[] }
+
+/**
+ * A body without what another tool wrote there, when its first line is that
+ * tool's header: the header lines (and blank lines among them) on top, and the
+ * sections sync now writes, each up to the next heading. Any other body, and
+ * every other section, is a person's and stays as it is.
+ */
+export function withoutAdopted(body: string, adopt: Adopt): string {
+  const lines = body.split("\n")
+  const first = lines.findIndex((line) => line.trim() !== "")
+  if (first === -1 || !adopt.header.test(lines[first].trim())) {
+    return body
+  }
+  const generated = new Set(adopt.sections)
+  const kept: string[] = []
+  let top = true
+  let skipping = false
+  for (const line of lines) {
+    const text = line.trim()
+    if (top && (text === "" || adopt.header.test(text))) {
+      continue
+    }
+    top = false
+    const heading = text.match(/^## (.+)$/)
+    if (heading) {
+      skipping = generated.has(heading[1].trim())
+    }
+    if (!skipping) {
+      kept.push(line)
+    }
+  }
+  return kept.join("\n")
+}
+
+/**
  * The pull request body with sync's block replaced, or put on top when the
  * body has none yet, in place of what an earlier sync tool generated there.
  * Everything else is someone else's and stays.
@@ -248,25 +317,32 @@ export function withoutLegacySync(
 export function spliceBlock(
   body: string,
   block: string,
-  { markers = true }: { markers?: boolean } = {},
+  {
+    markers = true,
+    adoptHeader,
+  }: { markers?: boolean; adoptHeader?: string | null } = {},
 ): string {
   const inner = block.replace(BLOCK_START, "").replace(BLOCK_END, "").trim()
   const wrapped = `${BLOCK_START}\n${inner}\n${BLOCK_END}`
   const start = body.indexOf(BLOCK_START)
   const end = body.indexOf(BLOCK_END, start)
+  const sections = [...inner.matchAll(/^## (.+)$/gm)].map((m) => m[1].trim())
+  const adopt =
+    adoptHeader && compiles(adoptHeader)
+      ? { header: new RegExp(adoptHeader), sections }
+      : undefined
   if (!markers) {
     const unmarked =
       start !== -1 && end !== -1
         ? body.slice(0, start) + body.slice(end + BLOCK_END.length)
         : body
-    const sections = [...inner.matchAll(/^## (.+)$/gm)].map((m) => m[1].trim())
-    const rest = withoutLegacySync(unmarked, sections).trim()
+    const rest = withoutLegacySync(unmarked, sections, adopt).trim()
     return rest ? `${inner}\n\n${rest}\n` : `${inner}\n`
   }
   if (start !== -1 && end !== -1) {
     return body.slice(0, start) + wrapped + body.slice(end + BLOCK_END.length)
   }
-  const rest = withoutLegacySync(body).trim()
+  const rest = withoutLegacySync(body, undefined, adopt).trim()
   return rest ? `${wrapped}\n\n${rest}\n` : `${wrapped}\n`
 }
 
@@ -296,6 +372,35 @@ function baseRefOf(base: string): string | undefined {
     return `origin/${base}`
   }
   return refExists(`refs/heads/${base}`) ? base : undefined
+}
+
+/**
+ * `origin/<base>`, once a fetch has had the chance to bring it. Without it,
+ * every count against the base is a guess, and a branch would read as synced:
+ * stop instead.
+ */
+function fetchedBaseRef(base: string): string {
+  if (!refExists(`refs/remotes/origin/${base}`)) {
+    throw new Error(
+      `origin/${base} doesn't exist after fetching it. Check that origin has a branch named ${base} (repo.baseBranch) and that this checkout can reach origin, then re-run.`,
+    )
+  }
+  return `origin/${base}`
+}
+
+/**
+ * Whether origin still has `branch`, by asking it: the remote-tracking ref
+ * outlives a branch deleted on the host, and would make commits read as pushed.
+ * Undefined when origin can't be asked, so the caller keeps the local ref.
+ */
+function remoteHasBranch(branch: string): boolean | undefined {
+  const result = run("git", ["ls-remote", "--heads", "origin", branch])
+  if (result.status !== 0) {
+    return undefined
+  }
+  return result.stdout
+    .split("\n")
+    .some((line) => line.trim().endsWith(`refs/heads/${branch}`))
 }
 
 function treeHash(): string {
@@ -464,42 +569,102 @@ export const LEGACY_STATE_FILES = [
 export function readLegacyState(
   root: string,
   branch: string,
-): { issue?: string; errorRefs: string[] } | undefined {
+  adopt: AdoptFiles = { files: [] },
+): LegacyState | undefined {
+  // bitfab-dev's files, newest first: the first one there decides.
   for (const file of LEGACY_STATE_FILES) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(fs.readFileSync(path.join(root, file), "utf8"))
-    } catch {
-      continue
+    const state = readStateFile(path.join(root, file))
+    if (state) {
+      if (state.branch === branch) {
+        return fromLegacy(state)
+      }
+      break
     }
-    const state = parsed as {
-      branch?: unknown
-      linearId?: unknown
-      sentryRefs?: unknown
-    }
-    if (typeof state !== "object" || state === null) {
-      continue
-    }
-    if (state.branch !== branch) {
-      return undefined
-    }
-    const refs = Array.isArray(state.sentryRefs) ? state.sentryRefs : []
-    return {
-      ...(typeof state.linearId === "string" && state.linearId
-        ? { issue: state.linearId }
-        : {}),
-      errorRefs: refs
-        .map((ref: { id?: unknown; url?: unknown }) =>
-          typeof ref?.id === "string" && ref.id
-            ? ref.id
-            : typeof ref?.url === "string"
-              ? ref.url
-              : undefined,
-        )
-        .filter((ref): ref is string => Boolean(ref)),
+  }
+  // Each adopted tool's file on its own, since each writes only its own.
+  for (const file of adopt.files) {
+    const resolved = resolveAdopted(root, file, adopt)
+    const state = resolved ? readStateFile(resolved) : undefined
+    if (state?.branch === branch) {
+      return { ...fromLegacy(state), adopted: true }
     }
   }
   return undefined
+}
+
+/** What an earlier sync tool left for a branch. `adopted`: from `sync.adoptState`. */
+export type LegacyState = {
+  issue?: string
+  errorRefs: string[]
+  adopted?: boolean
+}
+
+/** `sync.adoptState`'s paths, and the dirs their placeholders stand for. */
+export type AdoptFiles = {
+  files: string[]
+  gitDir?: string
+  gitCommonDir?: string
+}
+
+/**
+ * An adopted path: `{gitDir}` and `{gitCommonDir}` filled in, anything else
+ * relative to the worktree root. Undefined when a placeholder has no value.
+ */
+export function resolveAdopted(
+  root: string,
+  file: string,
+  dirs: Omit<AdoptFiles, "files">,
+): string | undefined {
+  let missing = false
+  const filled = file.replace(/\{(gitDir|gitCommonDir)\}/g, (_, name) => {
+    const dir = dirs[name as "gitDir" | "gitCommonDir"]
+    if (!dir) {
+      missing = true
+      return ""
+    }
+    return dir
+  })
+  if (missing) {
+    return undefined
+  }
+  return path.isAbsolute(filled) ? filled : path.join(root, filled)
+}
+
+type RawLegacy = {
+  branch?: unknown
+  linearId?: unknown
+  issueId?: unknown
+  sentryRefs?: unknown
+}
+
+function readStateFile(file: string): RawLegacy | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"))
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as RawLegacy)
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function fromLegacy(state: RawLegacy): LegacyState {
+  const refs = Array.isArray(state.sentryRefs) ? state.sentryRefs : []
+  const issue = [state.linearId, state.issueId].find(
+    (id): id is string => typeof id === "string" && id !== "",
+  )
+  return {
+    ...(issue ? { issue } : {}),
+    errorRefs: refs
+      .map((ref: { id?: unknown; url?: unknown }) =>
+        typeof ref?.id === "string" && ref.id
+          ? ref.id
+          : typeof ref?.url === "string"
+            ? ref.url
+            : undefined,
+      )
+      .filter((ref): ref is string => Boolean(ref)),
+  }
 }
 
 export function readState(file: string): SyncState {
@@ -576,18 +741,22 @@ function survey(args: Args): void {
   const pr = parsePr(required(args, "pr"))
   const branch = currentBranch()
   // Remote mode never catches up, so it doesn't need a fresh base.
+  let baseRef: string | undefined
   if (mode !== "remote") {
     run("git", ["fetch", "--quiet", "origin", base])
+    baseRef = fetchedBaseRef(base)
+  } else {
+    baseRef = baseRefOf(base)
   }
-  const baseRef = baseRefOf(base)
   const head = git(["rev-parse", "HEAD"]) ?? "none"
   const dirty = (git(["status", "--porcelain"]) ?? "") !== ""
   const ahead = baseRef ? count(`${baseRef}..HEAD`) : 0
   const behind = baseRef ? count(`HEAD..${baseRef}`) : 0
   const upstream = `refs/remotes/origin/${branch}`
-  const unpushed = refExists(upstream)
-    ? count(`origin/${branch}..HEAD`)
-    : undefined
+  const unpushed =
+    refExists(upstream) && remoteHasBranch(branch) !== false
+      ? count(`origin/${branch}..HEAD`)
+      : undefined
 
   const dir = stateDir()
   let stored = readBranchState(dir, branch)
@@ -595,8 +764,7 @@ function survey(args: Args): void {
   // A branch an earlier sync tool synced keeps its issue and error refs. Read
   // once, so an issue a later sync drops doesn't come back.
   if (!stored?.legacyRead) {
-    const root = git(["rev-parse", "--show-toplevel"])
-    const legacy = root ? readLegacyState(root, branch) : undefined
+    const legacy = legacyOf(branch)
     stored = {
       ...stored,
       ...(legacy?.issue && !stored?.issue ? { issue: legacy.issue } : {}),
@@ -606,8 +774,9 @@ function survey(args: Args): void {
           ...(legacy?.errorRefs ?? []),
         ]),
       ],
-      // Its sync wrote the PR, so keep writing it the way that tool does.
-      ...(legacy && !stored?.format
+      // bitfab-dev's sync wrote the PR, so keep writing it the way it does.
+      // A tool the config adopts has its format set there instead.
+      ...(legacy && !legacy.adopted && !stored?.format
         ? { format: syncFormat({ sync: BITFAB_DEV_FORMAT }) }
         : {}),
       legacyRead: true,
@@ -667,9 +836,9 @@ function facts(args: Args): void {
   const pr = parsePr(required(args, "pr"))
   const branch = currentBranch()
   run("git", ["fetch", "--quiet", "origin", base])
-  const baseRef = baseRefOf(base)
+  const baseRef = fetchedBaseRef(base)
   const head = git(["rev-parse", "HEAD"]) ?? "none"
-  const ahead = baseRef ? count(`${baseRef}..HEAD`) : 0
+  const ahead = count(`${baseRef}..HEAD`)
   const stored = readBranchState(stateDir(), branch)
   const full = stored?.remote?.head !== head
   printJson({
@@ -677,12 +846,74 @@ function facts(args: Args): void {
     lastSyncedLine: lastSyncedLine(head),
     // Only the pull request's state moved: refresh state and links, not prose.
     updateKind: full ? "full" : "metadata-only",
-    ...(full && baseRef
+    ...(full
       ? {
-          commits: git(["log", "--oneline", `${baseRef}..HEAD`]) ?? "",
+          commits: commitsOf(baseRef, syncSection().commitBodies === true),
           diffStat: git(["diff", "--stat", `${baseRef}...HEAD`]) ?? "",
         }
       : {}),
+  })
+}
+
+/** Commits `facts` gives the most of, and the characters their bodies may take. */
+export const COMMIT_LIMIT = 20
+export const COMMIT_BODY_CHARS = 8000
+
+/**
+ * The branch's commits: one line each, or, with `bodies`, each one's subject
+ * and body (newest first, at most COMMIT_LIMIT, cut at COMMIT_BODY_CHARS), for
+ * a repo whose commit messages carry notes the PR body draws on.
+ */
+function commitsOf(baseRef: string, bodies: boolean): string {
+  if (!bodies) {
+    return git(["log", "--oneline", `${baseRef}..HEAD`]) ?? ""
+  }
+  const text =
+    git([
+      "log",
+      `-${COMMIT_LIMIT}`,
+      "--format=commit %h%n%B",
+      `${baseRef}..HEAD`,
+    ]) ?? ""
+  return capText(text, COMMIT_BODY_CHARS)
+}
+
+/** `text`, cut at `max` characters with a note saying so. */
+export function capText(text: string, max: number): string {
+  return text.length <= max
+    ? text
+    : `${text.slice(0, max)}\n[cut at ${max} characters]`
+}
+
+/** The config's `sync` section, or nothing. */
+function syncSection(): Record<string, unknown> {
+  const root = git(["rev-parse", "--show-toplevel"])
+  const section = root ? loadConfig(root).config?.sync : undefined
+  return section && typeof section === "object"
+    ? (section as Record<string, unknown>)
+    : {}
+}
+
+/**
+ * An earlier sync tool's state for `branch`: bitfab-dev's, then the files the
+ * config's `sync.adoptState` names.
+ */
+function legacyOf(branch: string): LegacyState | undefined {
+  const root = git(["rev-parse", "--show-toplevel"])
+  if (!root) {
+    return undefined
+  }
+  const adopt = syncSection().adoptState
+  return readLegacyState(root, branch, {
+    files: Array.isArray(adopt)
+      ? adopt.filter((f): f is string => typeof f === "string")
+      : [],
+    gitDir: git(["rev-parse", "--absolute-git-dir"]),
+    gitCommonDir: git([
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]),
   })
 }
 
@@ -696,7 +927,8 @@ function splice(args: Args): void {
     // No body yet.
   }
   const markers = !args.flags.has("no-markers")
-  process.stdout.write(spliceBlock(body, block, { markers }))
+  const adoptHeader = flag(args, "adopt-header")
+  process.stdout.write(spliceBlock(body, block, { markers, adoptHeader }))
 }
 
 function finish(args: Args): void {
@@ -745,13 +977,16 @@ const USAGE = `Usage: sync.ts <command>
   facts --base <branch> --pr <pr>
                   For the remote writes: the issue's workState, the
                   lastSyncedLine, updateKind (full or metadata-only), and, for
-                  a full update, commits and diffStat against the base.
-  splice --body <file> --block <file> [--no-markers]
+                  a full update, commits and diffStat against the base
+                  (commits with their bodies when sync.commitBodies is set).
+  splice --body <file> --block <file> [--no-markers] [--adopt-header <regex>]
                   Print the pull request body with sync's block replaced (or
                   added on top, in place of the sections an earlier sync tool
                   wrote), leaving the rest of the body alone. --no-markers
                   writes the block without markers, the old one ending at its
-                  last-synced line.
+                  last-synced line. --adopt-header (sync.adoptHeader): a body
+                  whose first line matches it was written by another tool,
+                  whose header lines and same-named sections it replaces.
   issue           The issue a sync recorded for the current branch (or an
                   earlier sync tool left for it), as {"branch", "issue"}, with
                   issue null when there's none. Reads only.
@@ -765,7 +1000,10 @@ const USAGE = `Usage: sync.ts <command>
 State is kept per branch in the repo's git common dir, shared by its
 worktrees. A branch with no state yet starts from the issue and error refs
 bitfab-dev's sync left in .bitfab-dev/state.json, when they're for that
-branch, and from that tool's format.`
+branch, and from that tool's format; or, failing that, from another tool's
+state file the config's sync.adoptState names ({gitDir} and {gitCommonDir}
+are this worktree's git dirs), in the format the config sets.
+survey and facts stop when origin/<base> is missing after the fetch.`
 
 /**
  * The issue a sync recorded for the current branch, or one an earlier sync
@@ -775,11 +1013,8 @@ branch, and from that tool's format.`
 function issue(_args: Args): void {
   const branch = currentBranch()
   const stored = readBranchState(stateDir(), branch)
-  const root = git(["rev-parse", "--show-toplevel"])
   const legacy =
-    stored?.issue || stored?.legacyRead || !root
-      ? undefined
-      : readLegacyState(root, branch)
+    stored?.issue || stored?.legacyRead ? undefined : legacyOf(branch)
   printJson({ branch, issue: stored?.issue ?? legacy?.issue ?? null })
 }
 

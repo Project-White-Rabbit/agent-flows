@@ -222,7 +222,7 @@ export const github: IntegrationSpec = {
     // adapter (`adapters/github.ts`), run first.
     deployments: {
       deployment: {
-        cli: "The runs of the entry's `deployWorkflow` on the commit, `gh api 'repos/{owner}/{repo}/actions/workflows/<deployWorkflow>/runs?head_sha=<sha>&per_page=100'`, the most recently created: none is `none`; a `status` other than `completed` is `pending`; then `conclusion` `success` is `success`, anything else `failed`. `url` its `html_url`; `steps` its jobs, `gh api --paginate 'repos/{owner}/{repo}/actions/runs/<id>/jobs?per_page=100'`, each by its `status` and `conclusion` the same way (`skipped` is skipped)",
+        cli: "The runs of the entry's `deployWorkflow` on the commit, `gh api 'repos/{owner}/{repo}/actions/workflows/<deployWorkflow>/runs?head_sha=<sha>&per_page=100'`, the most recently created: none is `none`; a `status` other than `completed` is `pending`; then `conclusion` `success` is `success`, anything else `failed`. `url` its `html_url`; `steps` its jobs, `gh api --paginate 'repos/{owner}/{repo}/actions/runs/<id>/jobs?per_page=100'`, each by its `status` and `conclusion` the same way (`skipped` is skipped), with its `id` as `log`",
       },
     },
     // Opt-in (`optIn` below): most repos on GitHub track issues elsewhere.
