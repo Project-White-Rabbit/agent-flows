@@ -817,6 +817,15 @@ describe("tickets.ts", () => {
       "> Planning: [Planning, week of 2026-10-19](https://d), from [Sync](https://n/p)\n\nWork\n",
     )
     expect(cli(args).stdout.trim()).toBe("UNCHANGED")
+    // The same line as the MCP shows it: no change, and the link comes back.
+    fs.writeFileSync(
+      description,
+      '> Planning: <document id="d1" label="Planning, week of 2026-10-19" href="https://d" />, from [Sync](https://n/p)\n\nWork\n',
+    )
+    expect(cli(args).stdout.trim()).toBe("UNCHANGED")
+    expect(fs.readFileSync(description, "utf8")).toBe(
+      "> Planning: [Planning, week of 2026-10-19](https://d), from [Sync](https://n/p)\n\nWork\n",
+    )
   })
 
   it("sets certain matches in the plan and prints what's left to judge", () => {

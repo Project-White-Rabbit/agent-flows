@@ -15,6 +15,7 @@ import {
   branchFromDescription,
   withoutLinkLines,
 } from "../config/branch-line.ts"
+import { plainDocumentLinks } from "../config/links.ts"
 import { DEFAULT_RANKS, ranksProblem } from "../config/sections/tickets.ts"
 import { worktreePaths } from "../config/sections/worktree.ts"
 import { repoRoot } from "./configure.ts"
@@ -601,7 +602,8 @@ function branchLine(args: Args): void {
     console.log("UNCHANGED")
     return
   }
-  fs.writeFileSync(file, updated)
+  // It's written back whole, so its links go back plain (see links.ts).
+  fs.writeFileSync(file, plainDocumentLinks(updated))
   console.log(`ADDED ${file}`)
 }
 

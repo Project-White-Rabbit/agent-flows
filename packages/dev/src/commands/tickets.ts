@@ -11,6 +11,7 @@
 
 import fs from "node:fs"
 import { getAt } from "../config/config.ts"
+import { plainDocumentLinks } from "../config/links.ts"
 import {
   canMatchFor,
   certainMatch,
@@ -1249,7 +1250,8 @@ function planning(args: Args): void {
     source,
     sourceKey(source, text),
   )
-  const before = readText(file)
+  // Compared with its links plain, so a tag the MCP showed isn't a change.
+  const before = plainDocumentLinks(readText(file))
   const after = upsertPlanningLine(before, line)
   fs.writeFileSync(file, after)
   console.log(before.trim() === after.trim() ? "UNCHANGED" : "CHANGED")

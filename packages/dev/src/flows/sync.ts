@@ -70,7 +70,7 @@ export const syncFlow: Flow = devKit.defineFlow({
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
     sync: {
       description:
-        "`survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `finish` records the sync. State lives in the repo's git common dir, per branch",
+        "`survey` reads git state and computes the no-op gate; `facts` prints the issue state and last-synced line for the remote writes; `splice` merges sync's block into a PR body; `description` readies an issue description for writing; `finish` records the sync. State lives in the repo's git common dir, per branch",
       args: "<subcommand>",
     },
   }),
@@ -300,7 +300,7 @@ With a session-sharing entry: run its \`shareSession\` op and note the URL, for 
 
 ### 3b. Issue
 
-With an issue tracker and a new issue planned in 1a: file it with that entry's \`createIssue\` op, using the description template in 3d, \`<parent>\` when 1a planned it as a sub-issue, and \`<fields>\` from the issue fields below. Note its id: \`finish\` caches it for the next sync.
+With an issue tracker and a new issue planned in 1a: file it with that entry's \`createIssue\` op, using the description template in 3d, readied with the same \`description\` command, \`<parent>\` when 1a planned it as a sub-issue, and \`<fields>\` from the issue fields below. Note its id: \`finish\` caches it for the next sync.
 
 #### Issue fields
 
@@ -359,6 +359,14 @@ ${ISSUE_DESCRIPTION}
 - **Description:** keep the existing one. Write it only when the issue has none (a new issue, or one filed without it).
 - **Status:** regenerated every sync, 3-8 plain bullets (no checkboxes) across Done and Remaining, about the implementation only, never review, merge, or deploy. When the implementation is complete, Remaining is \`None. Implementation complete; the rest is tracked on the PR.\`
 - Keep any other section a person wrote.
+
+Write the description to \`<dir>/issue-new.md\` and run
+
+\`\`\`bash
+{{command:sync}} description --file <dir>/issue-new.md --last-synced '<lastSyncedLine>'
+\`\`\`
+
+(\`--last-synced\` left out when this write has no last-synced line). It puts back, in place, each document link the tracker's MCP showed as a tag (\`<document … />\`) as the \`[title](url)\` link the tracker stores, and drops any older last-synced line (\`*Last synced: …*\`, the way a tracker may store it, included). Pass the file's text as the description, whichever variant of the op writes it: through an API, a tag written back as text garbles the link.
 
 Then the entry's \`updateIssue\` op with the title (keep the existing one unless a new one fits strictly better, and keep any mark at its start, such as the team's \`tickets.blockerMark\` (an emoji like 🛑): it flags the issue for the team), the description, \`<state>\` \`workState\`, and \`<fields>\` from the issue fields in 3b.
 
