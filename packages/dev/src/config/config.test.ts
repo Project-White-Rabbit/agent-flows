@@ -74,6 +74,40 @@ describe("checkConfig", () => {
     ])
   })
 
+  it("allows one stacking integration at a time, GitHub's only on opt-in", () => {
+    const github = { owner: "acme", repo: "web" }
+    const stacked = {
+      ...github,
+      use: { sourceControl: "write", stacking: true },
+    }
+    const graphite = { trunk: "main" }
+    expect(
+      checkConfig({ ...base, integrations: { github, graphite } }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({ ...base, integrations: { github: stacked } }).issues,
+    ).toEqual([])
+    expect(
+      checkConfig({ ...base, integrations: { github: stacked, graphite } })
+        .issues,
+    ).toEqual([
+      "stacking can come from only one integration, but integrations.github, integrations.graphite are each used for it: leave it out of the `use` of all but one",
+    ])
+    expect(
+      checkConfig({
+        ...base,
+        integrations: {
+          github: [
+            { name: "a", ...stacked },
+            { name: "b", ...stacked, repo: "api" },
+          ],
+        },
+      }).issues,
+    ).toEqual([
+      "stacking can come from only one integration, but integrations.github[a], integrations.github[b] are each used for it: leave it out of the `use` of all but one",
+    ])
+  })
+
   it("checks the real ready section's number fields and tests template", () => {
     expect(
       checkConfig({

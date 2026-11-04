@@ -202,6 +202,12 @@ export type CapabilitySpec = {
   levels?: { id: string; description: string }[]
   /** The level of an integration whose `use` doesn't say. */
   defaultLevel?: string
+  /**
+   * At most one integration (or instance) may be used for it at a time, for
+   * a capability two tools can't share: two stacking tools would each record
+   * a different parent for the same branch.
+   */
+  exclusive?: boolean
 }
 
 /**
@@ -277,6 +283,8 @@ export type AdapterInput = {
   args: Record<string, string>
   /** The API token, read from the integration's token variable, when `needs` is `api`. */
   token?: string
+  /** The repo's base branch (`repo.baseBranch`), when the config sets it. */
+  base?: string
   fetch: typeof fetch
 }
 

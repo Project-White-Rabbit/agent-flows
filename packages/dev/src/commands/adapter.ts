@@ -129,11 +129,15 @@ export async function main(argv: string[]): Promise<void> {
     )
     return
   }
+  const base = loaded.config
+    ? getAt(loaded.config, "repo.baseBranch")
+    : undefined
   printJson(
     await adapter.run({
       values: withoutUse(values),
       args,
       token,
+      ...(typeof base === "string" ? { base } : {}),
       fetch: globalThis.fetch,
     }),
   )
