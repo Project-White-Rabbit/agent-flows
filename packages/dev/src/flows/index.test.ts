@@ -494,7 +494,7 @@ describe("dev flows", () => {
       files.find((f) => f.path === "skills/merge/SKILL.md")?.content ?? ""
     const run =
       files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
-    expect(main).toMatch(/merge\.deployLogLines merge\.sync --optional/)
+    expect(main).toMatch(/merge\.deployLogLines merge\.sync merge\.ciTimeout/)
     const remote = run.indexOf("- **`remote`:** nothing in merge pushes")
     const unpushed = run.indexOf(
       "and merge.sync is remote, so merge won't push them",
@@ -515,6 +515,39 @@ describe("dev flows", () => {
     )
     expect(run).toContain("`skipped` ones aren't failures")
     expect(run).not.toContain("each step that didn't succeed")
+  })
+
+  it("waits merge.ciTimeout for CI, and gates on blocking reviewers and a clean tree", () => {
+    const main =
+      files.find((f) => f.path === "skills/merge/SKILL.md")?.content ?? ""
+    const run =
+      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+    expect(main).toMatch(
+      /merge\.ciTimeout merge\.blockingReviewers merge\.requireClean --optional/,
+    )
+    expect(main).toContain("`null` reads as 30")
+    expect(run).toContain("--timeout <ciTimeout × 60> --required-only")
+    expect(run).not.toContain("--timeout 1800")
+    expect(run).toContain("ready.requireChecks needs one to")
+    expect(run).toContain(
+      "**Skip when `<unresolvedThreads>` is `allow` and `<blockingReviewers>` is empty.**",
+    )
+    // The clean-tree gate comes before the sync that would commit the tree.
+    const clean = main.indexOf("With `<requireClean>` true, run gate 2 first")
+    const sync = main.indexOf("1. **No pull request?**")
+    expect(clean).toBeGreaterThan(-1)
+    expect(sync).toBeGreaterThan(clean)
+  })
+
+  it("reads code-scanning alerts, works past rollups, and stops on no progress", () => {
+    const run =
+      files.find((f) => f.path === "skills/ready-run/SKILL.md")?.content ?? ""
+    expect(run).toContain("its findings are the `codeScanningAlerts` op's")
+    expect(run).toContain("| **Code scanning** |")
+    expect(run).toContain("never fix a check in `rollupFailures`")
+    expect(run).toContain("- `noProgress`:")
+    expect(run).toContain("a stalled fix, or `noProgress` ends it")
+    expect(run).toContain("`skipped`: the workflow woke for it")
   })
 
   it("bookends ready's publish with sync local and sync remote", () => {

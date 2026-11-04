@@ -1,10 +1,14 @@
-import { checks, deployment } from "../adapters/github.ts"
+import { checks, codeScanningAlerts, deployment } from "../adapters/github.ts"
 import { projectsField } from "../projects.ts"
 import type { IntegrationSpec } from "../types.ts"
 import { SLUG, WORKFLOW_FILE } from "./patterns.ts"
 
 const PR_JSON =
   "number,url,title,body,state,isDraft,baseRefName,headRefName,additions,deletions,changedFiles"
+
+// How codeScanningAlerts reads each alert of the REST list.
+const ALERTS =
+  "each alert's `rule` is its `rule.id`, `severity` its `rule.security_severity_level` (else `rule.severity`), `tool` its `tool.name`, `path` and `line` its `most_recent_instance.location.path` and `.start_line`, `message` its `most_recent_instance.message.text`, and `url` its `html_url`. A 403 or 404 (code scanning off, or no access to it) is an error, not an empty list"
 
 const PR_FIELDS =
   "number, URL, title, body, state, draft, base and head branches, additions, deletions, and changed files"
@@ -199,7 +203,7 @@ export const github: IntegrationSpec = {
       // Also an adapter (`adapters/github.ts`), run first: two paged lists,
       // check runs and commit statuses, read as one.
       checks: {
-        cli: "`gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/check-runs?per_page=100'` and `gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/status?per_page=100'`. A check run is `pending` until its `status` is `completed`, then by `conclusion`: `success` or `neutral` pass, `skipped` is skipping, `cancelled` is cancelled, anything else fails; its `link` is `details_url`, and its `log` its `id` when `app.slug` is `github-actions`. A status (named by `context`) passes on `success`, is pending on `pending`, and fails otherwise, with `link` its `target_url` and no `log`. With <base>, a check is `required` when its name is in `gh api repos/{owner}/{repo}/branches/<base> --jq '.protection.required_status_checks.contexts[]?'` or in the `required_status_checks` rules of `gh api --paginate repos/{owner}/{repo}/rules/branches/<base>` (each rule's `parameters.required_status_checks[].context`)",
+        cli: "`gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/check-runs?per_page=100'` and `gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/status?per_page=100'`. A check run is `pending` until its `status` is `completed`, then by `conclusion`: `success` or `neutral` pass, `skipped` is skipping, `cancelled` is cancelled, anything else fails; its `link` is `details_url`, its `log` its `id` when `app.slug` is `github-actions`, and `codeScanning` true when `app.slug` is `github-advanced-security` (CodeQL). A status (named by `context`) passes on `success`, is pending on `pending`, and fails otherwise, with `link` its `target_url` and no `log`. With <base>, a check is `required` when its name is in `gh api repos/{owner}/{repo}/branches/<base> --jq '.protection.required_status_checks.contexts[]?'` or in the `required_status_checks` rules of `gh api --paginate repos/{owner}/{repo}/rules/branches/<base>` (each rule's `parameters.required_status_checks[].context`)",
         api: `${API}/commits/<sha>/check-runs?per_page=100"\` and ${API}/commits/<sha>/status?per_page=100"\`, following the \`Link\` header's next pages, read as the CLI variant says (with <base>, \`required\` from ${API}/branches/<base>"\` and ${API}/rules/branches/<base>"\` as it says)`,
         mcp: "The GitHub MCP's check run and commit status tools for {owner}/{repo} at <sha>, read as the CLI variant says",
       },
@@ -216,6 +220,12 @@ export const github: IntegrationSpec = {
       resolveThread: {
         cli: `\`gh api graphql -f query='${RESOLVE_MUTATION}' -f id=<id>\``,
         api: `${GRAPHQL} with JSON \`query\` \`${RESOLVE_MUTATION}\` and \`variables\` \`{"id": "<id>"}\``,
+      },
+      // Also an adapter (`adapters/github.ts`), run first.
+      codeScanningAlerts: {
+        cli: `\`gh api --paginate 'repos/{owner}/{repo}/code-scanning/alerts?ref=refs%2Fpull%2F<N>%2Fmerge&state=open&per_page=100'\`: ${ALERTS}`,
+        api: `${API}/code-scanning/alerts?ref=refs%2Fpull%2F<N>%2Fmerge&state=open&per_page=100"\`, following the \`Link\` header's next pages: ${ALERTS}`,
+        mcp: "The GitHub MCP's code scanning alerts tool (`list_code_scanning_alerts`) for {owner}/{repo} with `ref: refs/pull/<N>/merge` and `state: open`, read as the CLI variant says",
       },
     },
     // Opt-in (`optIn` below): most repos deploy some other way. Also an
@@ -283,7 +293,7 @@ export const github: IntegrationSpec = {
     },
   },
   optIn: ["issueTracker", "deployments"],
-  adapters: { checks, deployment },
+  adapters: { checks, codeScanningAlerts, deployment },
   detect(ctx) {
     const remote = ctx.git(["remote", "get-url", "origin"])
     const parsed = remote ? parseGithubRemote(remote) : undefined

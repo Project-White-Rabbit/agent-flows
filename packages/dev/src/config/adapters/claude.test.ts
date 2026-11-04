@@ -6,6 +6,7 @@ import {
   postedSince,
   requestBody,
   reviewState,
+  skippedRun,
   type WorkflowRun,
 } from "./claude.ts"
 
@@ -77,6 +78,25 @@ describe("pickRun", () => {
   })
 })
 
+describe("skippedRun", () => {
+  it("finds a skipped run on this pull request since the request", () => {
+    const mine = run(3, "2026-11-02T10:00:20Z", { conclusion: "skipped" })
+    const runs = [
+      run(4, "2026-11-02T10:00:10Z", {
+        conclusion: "skipped",
+        display_title: "Another PR",
+      }),
+      run(1, "2026-11-02T09:59:00Z", { conclusion: "skipped" }),
+      mine,
+      run(5, "2026-11-02T10:00:30Z", { conclusion: "success" }),
+    ]
+    expect(skippedRun(runs, SINCE, "Fix the login redirect")).toBe(mine)
+    expect(skippedRun(runs.slice(0, 2), SINCE, "Fix the login redirect")).toBe(
+      undefined,
+    )
+  })
+})
+
 describe("reviewState", () => {
   const since = Date.parse(SINCE)
 
@@ -85,6 +105,16 @@ describe("reviewState", () => {
     expect(reviewState(undefined, SINCE, since + MISSING_AFTER_MS + 1)).toBe(
       "missing",
     )
+  })
+
+  it("calls it skipped past the wait when the pull request's only run since skipped", () => {
+    const skipped = run(3, "2026-11-02T10:00:20Z", { conclusion: "skipped" })
+    expect(reviewState(undefined, SINCE, since + 60_000, skipped)).toBe(
+      "pending",
+    )
+    expect(
+      reviewState(undefined, SINCE, since + MISSING_AFTER_MS + 1, skipped),
+    ).toBe("skipped")
   })
 
   it("reads a run's status and conclusion", () => {

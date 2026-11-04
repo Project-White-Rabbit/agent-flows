@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest"
 import {
+  CODE_SCANNING_APP,
+  codeScanningAlert,
   deployState,
   deployStep,
   type GithubRun,
+  githubChecks,
   latestRun,
   stepState,
 } from "./github.ts"
@@ -56,5 +59,86 @@ describe("deployment", () => {
         conclusion: "failure",
       }),
     ).toEqual({ name: "Run migrations", state: "failed", log: "4242" })
+  })
+})
+
+describe("code scanning", () => {
+  it("marks a code-scanning check run, which has no Actions log", () => {
+    expect(
+      githubChecks(
+        [
+          {
+            id: 21,
+            name: "CodeQL",
+            status: "completed",
+            conclusion: "failure",
+            details_url: "https://github.com/acme/web/runs/21",
+            app: CODE_SCANNING_APP,
+          },
+        ],
+        [],
+      ),
+    ).toEqual([
+      {
+        name: "CodeQL",
+        state: "fail",
+        link: "https://github.com/acme/web/runs/21",
+        codeScanning: true,
+      },
+    ])
+  })
+
+  it("reads an alert as where it is, its rule, and what it says", () => {
+    expect(
+      codeScanningAlert({
+        number: 7,
+        html_url: "https://github.com/acme/web/security/code-scanning/7",
+        rule: {
+          id: "py/sql-injection",
+          name: "SQL injection",
+          severity: "error",
+          security_severity_level: "high",
+          description: "Building a query from user input",
+        },
+        tool: { name: "CodeQL" },
+        most_recent_instance: {
+          message: { text: "This query depends on a user-provided value." },
+          location: { path: "api/db.py", start_line: 42 },
+        },
+      }),
+    ).toEqual({
+      rule: "py/sql-injection",
+      severity: "high",
+      tool: "CodeQL",
+      path: "api/db.py",
+      line: 42,
+      message: "This query depends on a user-provided value.",
+      url: "https://github.com/acme/web/security/code-scanning/7",
+    })
+  })
+
+  it("falls back to the rule's own severity and description", () => {
+    expect(
+      codeScanningAlert({
+        number: 8,
+        html_url: "https://github.com/acme/web/security/code-scanning/8",
+        rule: {
+          id: "js/unused-local-variable",
+          severity: "note",
+          security_severity_level: null,
+          description: "Unused variable",
+        },
+        tool: null,
+        most_recent_instance: null,
+      }),
+    ).toEqual({
+      rule: "js/unused-local-variable",
+      severity: "note",
+      tool: null,
+      path: null,
+      line: null,
+      message: "Unused variable",
+      url: "https://github.com/acme/web/security/code-scanning/8",
+    })
   })
 })

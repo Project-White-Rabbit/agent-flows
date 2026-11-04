@@ -73,8 +73,8 @@ function currentBranch(): string {
   return branch
 }
 
-function refExists(ref: string): boolean {
-  return git(["rev-parse", "--verify", "--quiet", ref]) !== undefined
+function refExists(ref: string, cwd?: string): boolean {
+  return git(["rev-parse", "--verify", "--quiet", ref], cwd) !== undefined
 }
 
 // --- plan --------------------------------------------------------------------
@@ -318,6 +318,12 @@ export type CiSettings = {
   timeoutSeconds: number
   maxPasses?: number
   requiredChecks: string[]
+  /** Seconds the set of checks and their states must hold still before it counts as settled. */
+  settleGraceSeconds: number
+  /** An empty check set never passes: it waits until one reports, or the timeout. */
+  requireChecks: boolean
+  /** Check name patterns that only report others' results, so they're never fixed themselves. */
+  rollupChecks: string[]
 }
 
 export function ciSettings(
@@ -338,6 +344,9 @@ export function ciSettings(
       minutes === undefined ? DEFAULT_TIMEOUT : Math.round(minutes * 60),
     ...(maxPasses !== undefined ? { maxPasses: Math.floor(maxPasses) } : {}),
     requiredChecks: stringList(section.requiredChecks),
+    settleGraceSeconds: positive(section.settleGrace) ?? 0,
+    requireChecks: section.requireChecks === true,
+    rollupChecks: stringList(section.rollupChecks),
   }
 }
 
@@ -426,15 +435,58 @@ export function readySkips(
   }
 }
 
-/** `origin/<base>` when it exists, so a stale local base doesn't widen the diff. */
-function resolveBase(base: string): string {
-  if (refExists(`refs/remotes/origin/${base}`)) {
-    return `origin/${base}`
+/** Where `plan` diffs from: the ref it chose, and HEAD's merge base with it. */
+export type ResolvedBase = { baseRef: string; mergeBase: string }
+
+/**
+ * The ref the branch's scope is measured from. The repo's base branch (the
+ * trunk) is always `origin/<base>`, so a stale local copy doesn't widen the
+ * diff. A stacked parent may be newer locally (unpushed) or on origin
+ * (restacked elsewhere), so of the two it takes the one whose merge base is
+ * closer to HEAD.
+ */
+export function resolveBase(
+  base: string,
+  trunk: boolean,
+  cwd?: string,
+): ResolvedBase {
+  const remote = `origin/${base}`
+  const candidates = trunk ? [remote] : [remote, base]
+  const found: (ResolvedBase & { distance: number })[] = []
+  for (const ref of candidates) {
+    const full = ref === remote ? `refs/remotes/${remote}` : ref
+    if (!refExists(`${full}^{commit}`, cwd)) {
+      continue
+    }
+    const mergeBase = git(["merge-base", ref, "HEAD"], cwd)
+    if (!mergeBase) {
+      continue
+    }
+    const count = git(["rev-list", "--count", `${mergeBase}..HEAD`], cwd)
+    found.push({
+      baseRef: ref,
+      mergeBase,
+      distance: count === undefined ? Number.POSITIVE_INFINITY : Number(count),
+    })
   }
-  if (refExists(base)) {
-    return base
+  // Ties keep origin's, listed first.
+  const closest = found.sort((a, b) => a.distance - b.distance)[0]
+  if (closest) {
+    return { baseRef: closest.baseRef, mergeBase: closest.mergeBase }
   }
-  throw new UsageError(`no branch or ref \`${base}\` (fetch it first?)`)
+  throw new UsageError(
+    trunk
+      ? `HEAD has no merge base with ${remote}`
+      : `no branch or ref \`${base}\` with a merge base with HEAD (fetch it first?)`,
+  )
+}
+
+/** The config's `repo.baseBranch`: the trunk every stack sits on. */
+function trunkOf(config: Record<string, unknown> | undefined): unknown {
+  const repo = config?.repo
+  return repo && typeof repo === "object"
+    ? (repo as Record<string, unknown>).baseBranch
+    : undefined
 }
 
 function plan(args: string[]): void {
@@ -447,13 +499,18 @@ function plan(args: string[]): void {
   const config = loadConfig(root).config
   readySkips(config, { skip, ignoreChecks })
   const ci = ciSettings(config)
-  // A stacked parent may exist only locally, so a failed fetch isn't fatal.
-  const fetched = run("git", ["fetch", "--quiet", "origin", base]).status === 0
-  const baseRef = resolveBase(base)
-  const mergeBase = git(["merge-base", baseRef, "HEAD"])
-  if (!mergeBase) {
-    throw new UsageError(`HEAD has no merge base with ${baseRef}`)
+  // A stacked parent may exist only locally, so a failed fetch of one isn't
+  // fatal; the trunk is always on origin, so scoping against a stale copy of
+  // it would widen the diff with work that's already merged.
+  const trunk = base === trunkOf(config)
+  const fetch = run("git", ["fetch", "--quiet", "origin", base])
+  const fetched = fetch.status === 0
+  if (!fetched && trunk) {
+    throw new UsageError(
+      `couldn't fetch ${base} from origin, so ready can't scope the branch against its latest: ${(fetch.stderr || fetch.stdout).trim() || "git fetch failed"}`,
+    )
   }
+  const { baseRef, mergeBase } = resolveBase(base, trunk)
   const committed = lines(git(["diff", "--name-only", mergeBase, "HEAD"]))
   const uncommitted = lines(git(["diff", "--name-only", "HEAD"]))
   const untracked = lines(git(["ls-files", "--others", "--exclude-standard"]))
@@ -490,6 +547,11 @@ function plan(args: string[]): void {
       timeoutMinutes: Math.round(ci.timeoutSeconds / 60),
       ...(ci.maxPasses !== undefined ? { maxPasses: ci.maxPasses } : {}),
       requiredChecks: ci.requiredChecks,
+      ...(ci.settleGraceSeconds > 0
+        ? { settleGraceSeconds: ci.settleGraceSeconds }
+        : {}),
+      ...(ci.requireChecks ? { requireChecks: true } : {}),
+      ...(ci.rollupChecks.length > 0 ? { rollupChecks: ci.rollupChecks } : {}),
     },
     logDir,
   })
@@ -509,6 +571,10 @@ export type Pass = {
   settled?: string[]
   /** The first pass of a ready run (`ci start --first`), so a pass cap counts from it. */
   first?: boolean
+  /** Every check and its state at the last record where none was pending, to tell a set that's still changing. */
+  signature?: string
+  /** When `signature` was first seen, for `ready.settleGrace`. */
+  stableSince?: string
 }
 
 export type ReadyState = { passes: Pass[] }
@@ -540,6 +606,24 @@ export type CiReport = {
   optional: string[]
   /** Required check patterns no check has matched yet: pending until one reports. */
   missing: string[]
+  /** Every check has reported, but the set hasn't held still for `ready.settleGrace` yet. */
+  settling: boolean
+  /** With `ready.requireChecks`, nothing it waits on has reported, so the pass stays open. */
+  awaitingChecks: boolean
+  /** Failures of rollup checks (`ready.rollupChecks`): they only report others, so they're never fixed themselves. */
+  rollupFailures: string[]
+  /** The previous pass of this run settled with failures, and every one of them failed again: nothing went green. */
+  noProgress: boolean
+}
+
+/** What a record holds out for, past the timeout and the checks' own states. */
+export type RecordOptions = {
+  /** Seconds the set of checks must hold still once none is pending (default 0). */
+  settleGrace?: number
+  /** Never take an empty check set as no CI: wait until one reports. */
+  requireChecks?: boolean
+  /** Check name patterns that only report others' results. */
+  rollups?: string[]
 }
 
 /** A check name pattern, where `*` is any run of characters, case aside. */
@@ -601,6 +685,7 @@ export function recordChecks(
   requiredOnly = false,
   /** Check name patterns that must report: each counts as pending until one does. */
   require: string[] = [],
+  options: RecordOptions = {},
 ): { state: ReadyState; report: CiReport } {
   const ignored = all.filter((check) =>
     ignore.some((pattern) => matchesCheck(check.name, pattern)),
@@ -635,11 +720,33 @@ export function recordChecks(
   )
   const pending = checks.filter((check) => check.state === "pending")
   // Every check reported is ignored or optional: nothing left to wait for.
+  // With requireChecks, an empty set never passes: it waits for one to report.
   const noChecks =
+    !options.requireChecks &&
     checks.length === 0 &&
     (ignored.length + optional.length > 0 ||
       elapsedSeconds >= Math.min(NO_CHECKS_GRACE, timeoutSeconds))
-  const settled = noChecks || (checks.length > 0 && pending.length === 0)
+  const awaitingChecks = checks.length === 0 && options.requireChecks === true
+  const terminal = checks.length > 0 && pending.length === 0
+  // A check that registers late changes the set: it settles only once the
+  // set has held still for the grace period.
+  let stable = terminal
+  if (terminal) {
+    const signature = checks
+      .map((check) => `${check.name}:${check.state}`)
+      .sort()
+      .join("\n")
+    if (signature !== pass.signature || !pass.stableSince) {
+      pass.signature = signature
+      pass.stableSince = now.toISOString()
+    }
+    const held = (now.getTime() - Date.parse(pass.stableSince)) / 1000
+    stable = held >= (options.settleGrace ?? 0)
+  } else {
+    delete pass.signature
+    delete pass.stableSince
+  }
+  const settled = noChecks || stable
   const failures = checks.filter(isFailure)
   const newFailures = failures.filter(
     (check) => !pass.seen.includes(check.name),
@@ -651,6 +758,15 @@ export function recordChecks(
     pass.settled = failures.map((check) => check.name)
   }
   passes[index] = pass
+  // Two passes of one run in a row settled with failures, and nothing that
+  // failed before went green: another fix push won't help.
+  const before = pass.first ? undefined : passes[index - 1]?.settled
+  const noProgress =
+    settled &&
+    failures.length > 0 &&
+    before !== undefined &&
+    before.length > 0 &&
+    before.every((name) => pass.settled?.includes(name))
   const counts = Object.fromEntries(
     CHECK_STATES.map((s) => [
       s,
@@ -678,6 +794,16 @@ export function recordChecks(
       ignored: ignored.map((check) => check.name),
       optional: optional.map((check) => check.name),
       missing,
+      settling: terminal && !stable,
+      awaitingChecks,
+      rollupFailures: failures
+        .map((check) => check.name)
+        .filter((name) =>
+          (options.rollups ?? []).some((pattern) =>
+            matchesCheck(name, pattern),
+          ),
+        ),
+      noProgress,
     },
   }
 }
@@ -716,6 +842,7 @@ export function parseChecks(text: string): Check[] {
       ...(typeof check.required === "boolean"
         ? { required: check.required }
         : {}),
+      ...(check.codeScanning === true ? { codeScanning: true } : {}),
     }
   })
 }
@@ -823,9 +950,19 @@ async function ciRecord(args: string[]): Promise<void> {
     ignore,
     requiredOnly,
     [...new Set([...ci.requiredChecks, ...require])],
+    recordOptions(ci),
   )
   writeBranchState(dir, branch, state)
   printJson(report)
+}
+
+/** The record options the config's CI settings give. */
+export function recordOptions(ci: CiSettings): RecordOptions {
+  return {
+    settleGrace: ci.settleGraceSeconds,
+    requireChecks: ci.requireChecks,
+    rollups: ci.rollupChecks,
+  }
 }
 
 function minutes(seconds: number): string {
@@ -849,7 +986,13 @@ export function progressLine(report: CiReport): string {
     (report.missing ?? []).length > 0
       ? `, waiting for ${report.missing.join(", ")} to report`
       : ""
-  return `[ready-ci] pass ${report.pass}, ${minutes(report.elapsedSeconds)} of ${minutes(report.timeoutSeconds)}: ${total} checks, ${report.counts.fail + report.counts.cancelled} failed${waiting}${ignored}${optional}${missing}`
+  const settling = report.settling
+    ? ", all reported, waiting for the set to hold still"
+    : ""
+  const awaiting = report.awaitingChecks
+    ? ", waiting for a check to report (ready.requireChecks)"
+    : ""
+  return `[ready-ci] pass ${report.pass}, ${minutes(report.elapsedSeconds)} of ${minutes(report.timeoutSeconds)}: ${total} checks, ${report.counts.fail + report.counts.cancelled} failed${waiting}${ignored}${optional}${missing}${settling}${awaiting}`
 }
 
 async function ciWait(args: string[]): Promise<void> {
@@ -911,6 +1054,7 @@ async function ciWait(args: string[]): Promise<void> {
         ignore,
         requiredOnly,
         required,
+        recordOptions(ci),
       )
       writeBranchState(dir, branch, state)
       for (const check of report.newFailures) {
@@ -924,6 +1068,12 @@ async function ciWait(args: string[]): Promise<void> {
         printJson(report)
         return
       }
+      // Holding out for the set to stay still: look again once the grace is up.
+      if (report.settling) {
+        const wait = Math.min(interval, Math.max(1, ci.settleGraceSeconds))
+        await new Promise((resolve) => setTimeout(resolve, wait * 1000))
+        continue
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, interval * 1000))
   }
@@ -932,7 +1082,10 @@ async function ciWait(args: string[]): Promise<void> {
 const USAGE = `Usage: ready.ts <subcommand> [flags]
 
   plan --base <branch> [--skip <step>[,<step>]]... [--ignore-check <pattern>]...
-      What the branch touches against <branch> (fetched from origin first):
+      What the branch touches against <branch> (fetched from origin first;
+      for repo.baseBranch a failed fetch stops it, and it's read as
+      origin/<branch>; for a stacked parent, whichever of origin's and the
+      local branch has the merge base closer to HEAD):
       the merge base, changed files (committed, uncommitted, untracked), the
       package each belongs to with its check scripts, the agent instruction
       files above them and the path-scoped rule files (.claude/rules,
@@ -965,6 +1118,12 @@ const USAGE = `Usage: ready.ts <subcommand> [flags]
       count. A --require-check pattern, or one in ready.requiredChecks, no
       check matches yet counts as a pending check (missing) until one does.
       The timeout defaults to ready.ciTimeout (${DEFAULT_TIMEOUT / 60} minutes).
+      From the config too: ready.settleGrace holds a set with nothing pending
+      open (settling) until it hasn't changed for that many seconds;
+      ready.requireChecks never reads an empty set as no CI (awaitingChecks,
+      until the timeout); ready.rollupChecks names the failures that only
+      gather others (rollupFailures). noProgress: the run's previous pass
+      settled with failures and every one failed again.
 
   ci wait --sha <sha> --command <cmd> [--interval <s>] [--timeout <s>] [--max-wait <s>] [--ignore-check <pattern>]... [--require-check <pattern>]... [--required-only]
       Run <cmd> (it prints the checks op's JSON) every --interval seconds

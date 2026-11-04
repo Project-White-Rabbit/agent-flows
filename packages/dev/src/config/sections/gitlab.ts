@@ -205,6 +205,10 @@ export const gitlab: IntegrationSpec = {
         cli: "`glab api -X PUT 'projects/{project:encoded}/merge_requests/<N>/discussions/<id>?resolved=true' --hostname {host|gitlab.com}`",
         api: `\`PUT\` ${API_BARE}/merge_requests/<N>/discussions/<id>?resolved=true\` (header \`PRIVATE-TOKEN: {token}\`)`,
       },
+      codeScanningAlerts: {
+        unsupported:
+          "GitLab's security scanners report as pipeline jobs, whose logs `checkLog` reads, so no check needs alerts read apart",
+      },
     },
   },
   adapters: { checks },
