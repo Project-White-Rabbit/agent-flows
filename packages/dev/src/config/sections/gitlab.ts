@@ -134,6 +134,11 @@ export const gitlab: IntegrationSpec = {
         cli: `\`glab api 'projects/{project:encoded}/merge_requests?source_branch=<branch>&state=all&order_by=updated_at&per_page=1' --hostname {host|gitlab.com}\`, the first: ${MR_FIELDS}. An empty list means none`,
         api: `${API}/merge_requests?source_branch=<branch>&state=all&order_by=updated_at&per_page=1"\`, the first: ${MR_FIELDS}. An empty list means none`,
       },
+      childPrs: {
+        mcp: "The GitLab MCP's merge request search for project `{project}` with target branch `<branch>` and state `opened`, every page: each one's `iid` as `number`, `web_url` as `url`, and `source_branch` as `head`",
+        cli: "`glab api 'projects/{project:encoded}/merge_requests?target_branch=<branch>&state=opened&per_page=100' --hostname {host|gitlab.com} --paginate`: each one's `iid` as `number`, `web_url` as `url`, and `source_branch` as `head`",
+        api: `${API}/merge_requests?target_branch=<branch>&state=opened&per_page=100"\`, following \`page\` while a page is full: each one's \`iid\` as \`number\`, \`web_url\` as \`url\`, and \`source_branch\` as \`head\``,
+      },
       prDiff: {
         mcp: "The GitLab MCP's merge request diffs tool for project `{project}` !<N>",
         cli: `\`glab mr diff <N> ${REPO} --raw\``,
@@ -204,6 +209,10 @@ export const gitlab: IntegrationSpec = {
         mcp: "The GitLab MCP's tool for resolving a merge request discussion, for project `{project}`, discussion <id>",
         cli: "`glab api -X PUT 'projects/{project:encoded}/merge_requests/<N>/discussions/<id>?resolved=true' --hostname {host|gitlab.com}`",
         api: `\`PUT\` ${API_BARE}/merge_requests/<N>/discussions/<id>?resolved=true\` (header \`PRIVATE-TOKEN: {token}\`)`,
+      },
+      codeScanningAlerts: {
+        unsupported:
+          "GitLab's security scanners report as pipeline jobs, whose logs `checkLog` reads, so no check needs alerts read apart",
       },
     },
   },

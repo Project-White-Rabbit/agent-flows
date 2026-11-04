@@ -25,6 +25,8 @@ export type Check = {
   log?: string
   /** Merging into the base needs it to pass; unset when no base was given. */
   required?: boolean
+  /** A code-scanning check (CodeQL): no log, its findings are the source-control `codeScanningAlerts` op's. */
+  codeScanning?: boolean
 }
 
 export type Checks = { checks: Check[] }

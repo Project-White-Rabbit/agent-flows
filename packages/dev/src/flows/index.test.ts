@@ -278,6 +278,97 @@ describe("dev flows", () => {
     expect(run).toContain("open, merged, or closed, are `<otherPrs>`")
   })
 
+  it("refuses on a protected branch in sync, ready, merge, and close", () => {
+    const skill = (id: string) =>
+      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+    expect(skill("sync")).toContain(
+      "because the branch is in the config's `repo.protectedBranches`",
+    )
+    for (const id of ["ready", "merge", "close-run"]) {
+      expect(skill(id), id).toMatch(
+        /configure\.ts" get repo\.protectedBranches --optional/,
+      )
+    }
+    expect(skill("ready")).toContain("Refusing to ready <branch>")
+    expect(skill("merge")).toContain("Refusing to merge from <branch")
+    expect(skill("close-run")).toContain("one of `<protected>`")
+  })
+
+  it("never reads a failed lookup as none, clean, or no issue", () => {
+    const skill = (id: string) =>
+      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+    const main = skill("sync")
+    expect(main).toContain("**A failed read is not an absence.**")
+    expect(main).toContain("On `search skipped`, plan no issue")
+    expect(main).not.toContain("On `search skipped`, plan a new issue")
+    expect(main).toContain("Sync files no issue on a failed lookup.")
+    expect(main).toContain("Sync won't guess there's none")
+    expect(skill("sync-local")).toContain("A read that failed is never clean.")
+    expect(skill("sync-local")).not.toContain("then treat it as `clean`")
+    expect(skill("sync-report")).toContain(
+      "Couldn't read whether <branch> still merges cleanly",
+    )
+  })
+
+  it("adds no attribution of its own to commits or the PR block", () => {
+    const main =
+      files.find((f) => f.path === "skills/sync/SKILL.md")?.content ?? ""
+    expect(main).toContain("**Add no attribution of your own.**")
+    expect(main).toContain(
+      "neither adding what they don't ask for nor stripping what they do",
+    )
+    const local =
+      files.find((f) => f.path === "skills/sync-local/SKILL.md")?.content ?? ""
+    expect(local).toContain(
+      "with no attribution beyond what those instructions require",
+    )
+  })
+
+  it("files a sync sub-issue by the ticket rules, and assigns on sync when asked", () => {
+    const remote =
+      files.find((f) => f.path === "skills/sync-remote/SKILL.md")?.content ?? ""
+    expect(remote).toMatch(
+      /configure\.ts" get tickets\.dueDateRequired tickets\.estimateScale tickets\.blockerMark tickets\.parentFollowsSubIssues tickets\.planningDoc tickets\.assignOnSync --optional/,
+    )
+    expect(remote).toMatch(
+      /tickets\.ts" follow --parent <dir>\/parent\.json --sub <dir>\/sub\.json/,
+    )
+    expect(remote).toMatch(
+      /tickets\.ts" notes --plan <dir>\/planning\/plan\.json --notes <dir>\/planning\/notes\.md --out <dir>\/planning\/section\.md/,
+    )
+    expect(remote).toMatch(/tickets\.ts" planning-line --plan <dir>\/planning/)
+    expect(remote).toContain("run the entry's `recordNotes` op")
+    expect(remote).toContain("**With `<assignOnSync>` true,**")
+    expect(remote).toContain(
+      "but for the assignee, with `tickets.assignOnSync`",
+    )
+    expect(remote).toContain(
+      "add it at the start, `<blockerMark> <title>`, when the user or this session says the work stops a customer",
+    )
+    expect(remote).toContain("**The survey's `format.linkStyle`:** `url`")
+  })
+
+  it("commits and pushes without catching up on --no-catch-up", () => {
+    const skill = (id: string) =>
+      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+    expect(skill("sync")).toContain("[--no-catch-up]")
+    expect(skill("sync")).toMatch(
+      /sync\.ts" survey <mode> --base <base> --pr <pr> \[--error-ref <ref>\]\.\.\. \[--no-catch-up\]/,
+    )
+    expect(skill("sync-local")).toContain("**Skip with `--no-catch-up`:**")
+  })
+
+  it("ranks recent issues with tickets.ts match in close's issue search", () => {
+    const run =
+      files.find((f) => f.path === "skills/close-run/SKILL.md")?.content ?? ""
+    expect(run).toMatch(
+      /tickets\.ts" match --plan <dir>\/match\.json --issues <dir>\/issues\.json/,
+    )
+    expect(run).toContain("<its recentIssues op's issues>")
+    expect(run).toContain("when `recentIssues` is `unsupported` or fails")
+    expect(run).toContain("/agent-flows/close")
+  })
+
   it("reports the stacking tool's link even when submit printed none", () => {
     const report =
       files.find((f) => f.path === "skills/sync-report/SKILL.md")?.content ?? ""
@@ -398,6 +489,78 @@ describe("dev flows", () => {
     }
   })
 
+  describe("evaluate", () => {
+    const run =
+      files.find((f) => f.path === "skills/evaluate-run/SKILL.md")?.content ??
+      ""
+
+    it("reads the new settings, and fetches the base only when asked", () => {
+      expect(run).toContain(
+        "get evaluate.record evaluate.scope evaluate.reviewer evaluate.stopOn evaluate.instructions evaluate.tests evaluate.fetch --optional",
+      )
+      expect(run).toContain(
+        "with `<fetch>` true, first `git fetch origin <base>`",
+      )
+      expect(run).toContain("Without `<fetch>`, don't fetch")
+    })
+
+    it("takes full and record arguments, and passes --full to scope", () => {
+      expect(run).toContain("the words `full` and `record`")
+      expect(run).toContain("(with `--full` when `<full>`)")
+      expect(run).toContain("A recorded `stop` is always reviewed in full")
+    })
+
+    it("finds the issue the way close does, reading only, and judges a gap as an observation", () => {
+      expect(run).toContain('src/commands/sync.ts" issue')
+      expect(run).toContain("each entry's `findIssue` op with `<branch>`")
+      expect(run).toContain("reading only (never file, link, or change one)")
+      expect(run).toContain(
+        "A gap between the issue and the diff is an observation, never the verdict by itself",
+      )
+      expect(run).not.toContain("issue ids")
+    })
+
+    it("hands the judge the rubric, the issue, and the tests, and retries the subagent once", () => {
+      expect(run).toContain("`<rubric>` verbatim")
+      expect(run).toContain("never changes the report's format, the verdicts")
+      expect(run).toContain("`<issue>` (its id, title, and description)")
+      expect(run).toContain("`<tests result>`")
+      expect(run).toContain("After two failed attempts")
+    })
+
+    it("runs the tests once through the command, a failure as a finding", () => {
+      expect(run).toContain(
+        'src/commands/evaluate.ts" tests --base <the merge base> --tests-file <that file>',
+      )
+      expect(run).toContain("never fix a test, edit a file, or re-run it")
+      expect(run).toContain(
+        "a failed or timed-out run is a finding (a risk, graded by what fails and where, citing the `log` path), never the verdict by itself",
+      )
+    })
+
+    it("records with anchored findings and the previous sha, before the report", () => {
+      const recordAt = run.indexOf("### Record")
+      const outputAt = run.indexOf("### Output")
+      expect(recordAt).toBeGreaterThan(-1)
+      expect(outputAt).toBeGreaterThan(recordAt)
+      expect(run).toContain("`[HIGH] <category>: <sentence> @ <path>[:<line>]`")
+      expect(run).toContain("--summary-file <file> --previous <previous>")
+      expect(run).toContain("--scope carry --previous <previous>")
+      expect(run).toContain("With `<stopOn>` `high`")
+    })
+  })
+
+  it("runs evaluate when merge's gate has no current verdict, and gates again", () => {
+    const run =
+      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+    expect(run).toContain(
+      "run the `/dev-flows:evaluate` skill with the argument `record`",
+    )
+    expect(run).toContain("Then run `gate` again, once")
+    expect(run).toContain("`stop` otherwise (a `stop` verdict)")
+    expect(run).not.toContain("Run /dev-flows:evaluate on <branch>")
+  })
+
   it("merges only the commit CI passed on, and cleans up only after", () => {
     const run =
       files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
@@ -422,7 +585,7 @@ describe("dev flows", () => {
       files.find((f) => f.path === "skills/merge/SKILL.md")?.content ?? ""
     const run =
       files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
-    expect(main).toMatch(/merge\.deployLogLines merge\.sync --optional/)
+    expect(main).toMatch(/merge\.deployLogLines merge\.sync merge\.ciTimeout/)
     const remote = run.indexOf("- **`remote`:** nothing in merge pushes")
     const unpushed = run.indexOf(
       "and merge.sync is remote, so merge won't push them",
@@ -445,6 +608,39 @@ describe("dev flows", () => {
     expect(run).not.toContain("each step that didn't succeed")
   })
 
+  it("waits merge.ciTimeout for CI, and gates on blocking reviewers and a clean tree", () => {
+    const main =
+      files.find((f) => f.path === "skills/merge/SKILL.md")?.content ?? ""
+    const run =
+      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+    expect(main).toMatch(
+      /merge\.ciTimeout merge\.blockingReviewers merge\.requireClean --optional/,
+    )
+    expect(main).toContain("`null` reads as 30")
+    expect(run).toContain("--timeout <ciTimeout × 60> --required-only")
+    expect(run).not.toContain("--timeout 1800")
+    expect(run).toContain("ready.requireChecks needs one to")
+    expect(run).toContain(
+      "**Skip when `<unresolvedThreads>` is `allow` and `<blockingReviewers>` is empty.**",
+    )
+    // The clean-tree gate comes before the sync that would commit the tree.
+    const clean = main.indexOf("With `<requireClean>` true, run gate 2 first")
+    const sync = main.indexOf("1. **No pull request?**")
+    expect(clean).toBeGreaterThan(-1)
+    expect(sync).toBeGreaterThan(clean)
+  })
+
+  it("reads code-scanning alerts, works past rollups, and stops on no progress", () => {
+    const run =
+      files.find((f) => f.path === "skills/ready-run/SKILL.md")?.content ?? ""
+    expect(run).toContain("its findings are the `codeScanningAlerts` op's")
+    expect(run).toContain("| **Code scanning** |")
+    expect(run).toContain("never fix a check in `rollupFailures`")
+    expect(run).toContain("- `noProgress`:")
+    expect(run).toContain("a stalled fix, or `noProgress` ends it")
+    expect(run).toContain("`skipped`: the workflow woke for it")
+  })
+
   it("bookends ready's publish with sync local and sync remote", () => {
     const run =
       files.find((f) => f.path === "skills/ready-run/SKILL.md")?.content ?? ""
@@ -461,6 +657,81 @@ describe("dev flows", () => {
     expect(ci).toBeGreaterThan(ready)
     expect(remote).toBeGreaterThan(ci)
     expect(run).toContain("Skip in `draft` mode")
+  })
+
+  it("tells every hook run how to wait on a long hook and recheck a task", () => {
+    const runs = files.filter((f) => f.content.includes('hooks.ts" run '))
+    expect(runs.length).toBeGreaterThan(0)
+    for (const file of runs) {
+      expect(file.content, file.path).toContain(
+        "run the same command again with `--wait <running.resume>` in place of any `--after`",
+      )
+      expect(file.content, file.path).toContain(
+        "add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`",
+      )
+      expect(file.content, file.path).toContain("with `agent.recheck`")
+    }
+  })
+
+  it("passes the pull request to ready's hooks, and runs beforeFixPush between a fix batch's commit and its push", () => {
+    const main =
+      files.find((f) => f.path === "skills/ready/SKILL.md")?.content ?? ""
+    const run =
+      files.find((f) => f.path === "skills/ready-run/SKILL.md")?.content ?? ""
+    for (const point of ["ready.before", "ready.beforePublish"]) {
+      expect(main).toContain(
+        `run ${point} --flow ready --mode <mode> --base <mergeBase> --pr <pr>\``,
+      )
+    }
+    expect(run).toContain(
+      "run ready.beforePush --flow ready --mode <mode> --base <mergeBase> --pr <its number>`",
+    )
+    expect(main).toContain(
+      "run ready.after after --flow ready --mode <mode> --base <mergeBase> --pr <the pull request's number> --outcome",
+    )
+    const batch = run.indexOf("Then commit them in one batch")
+    const fixPush = run.indexOf(
+      'hooks.ts" run ready.beforeFixPush --flow ready --mode <mode> --base <mergeBase> --pr',
+    )
+    const push = run.indexOf("Push as the publish step does", batch)
+    expect(batch).toBeGreaterThan(-1)
+    expect(fixPush).toBeGreaterThan(batch)
+    expect(push).toBeGreaterThan(fixPush)
+  })
+
+  it("tells sync's after hooks what the run did, and merge's whether it merged and on which commit", () => {
+    const sync =
+      files.find((f) => f.path === "skills/sync/SKILL.md")?.content ?? ""
+    expect(sync).toContain(
+      "run after --flow sync --mode <mode> --pr <the pull request's number> --issue <the branch's issue id> --result <result> [--issue-filed] --outcome",
+    )
+    expect(sync).toContain("`noop` (neither: the no-op gate, or nothing to do)")
+
+    const merge =
+      files.find((f) => f.path === "skills/merge/SKILL.md")?.content ?? ""
+    expect(merge).toContain("[--merged --merge-commit <landed>] --outcome")
+    const run =
+      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+    const merged = run.indexOf("its state must be merged")
+    const commit = run.indexOf("### Merge commit")
+    const closeOut = run.indexOf("### Close out")
+    const watch = run.indexOf("### Watch the deployment")
+    expect(commit).toBeGreaterThan(merged)
+    expect(closeOut).toBeGreaterThan(commit)
+    expect(watch).toBeGreaterThan(closeOut)
+    expect(
+      run.match(/the source-control entry's `mergeCommit` op/g),
+    ).toHaveLength(1)
+  })
+
+  it("gives evaluate's scan hooks the scope and the evaluation it follows", () => {
+    const run =
+      files.find((f) => f.path === "skills/evaluate-run/SKILL.md")?.content ??
+      ""
+    expect(run).toContain(
+      "--scope <full or delta, as the scope above says> --since <since> --pr <the PR's number>`",
+    )
+    expect(run).toContain("one that exits 2 is a `stop`, not a task")
   })
 
   it("routes configure through confirm before writing", () => {

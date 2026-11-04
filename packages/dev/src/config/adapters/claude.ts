@@ -15,7 +15,7 @@ export const DEFAULT_BOT = "claude[bot]"
 /** How long a request may go without a run before it counts as missed. */
 export const MISSING_AFTER_MS = 3 * 60 * 1000
 
-export type ReviewState = "pending" | "done" | "failed" | "missing"
+export type ReviewState = "pending" | "done" | "failed" | "missing" | "skipped"
 
 export type WorkflowRun = {
   id: number
@@ -74,14 +74,43 @@ export function pickRun(
   return live[0] ? { run: live[0], loose: true } : undefined
 }
 
-/** Where a request stands, from its run (or the lack of one) at `now`. */
+/**
+ * A run on this pull request since the request that skipped: with no other
+ * run, the workflow woke for the request but its condition turned it away
+ * (a mention it didn't match).
+ */
+export function skippedRun(
+  runs: WorkflowRun[],
+  since: string,
+  title: string,
+): WorkflowRun | undefined {
+  const from = Date.parse(since)
+  return runs
+    .filter(
+      (run) =>
+        run.event === "issue_comment" &&
+        run.conclusion === "skipped" &&
+        run.display_title === title &&
+        Date.parse(run.created_at) >= from,
+    )
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))[0]
+}
+
+/**
+ * Where a request stands, from its run (or the lack of one) at `now`. With no
+ * run past the wait, a skipped run on the pull request makes it `skipped`.
+ */
 export function reviewState(
   run: WorkflowRun | undefined,
   since: string,
   now: number,
+  skipped?: WorkflowRun,
 ): ReviewState {
   if (!run) {
-    return now - Date.parse(since) > MISSING_AFTER_MS ? "missing" : "pending"
+    if (now - Date.parse(since) <= MISSING_AFTER_MS) {
+      return "pending"
+    }
+    return skipped ? "skipped" : "missing"
   }
   if (run.status !== "completed") {
     return "pending"
@@ -169,7 +198,8 @@ export const reviewResult: Adapter = {
       ]),
     ) as { workflow_runs: WorkflowRun[] }
     const picked = pickRun(runs, since, title)
-    const state = reviewState(picked?.run, since, Date.now())
+    const skipped = picked ? undefined : skippedRun(runs, since, title)
+    const state = reviewState(picked?.run, since, Date.now(), skipped)
     const encoded = encodeURIComponent(since)
     const posted = postedSince(
       comments(`${repo}/issues/${pr}/comments?per_page=100&since=${encoded}`),
@@ -195,7 +225,10 @@ export const reviewResult: Adapter = {
     ]
     return {
       state,
-      run: picked?.run.html_url ?? null,
+      run:
+        picked?.run.html_url ??
+        (state === "skipped" ? skipped?.html_url : undefined) ??
+        null,
       ...(picked?.loose
         ? {
             note: `No ${values.workflow} run since the request names this pull request; this is the first one on any, which may be someone else's`,

@@ -64,8 +64,8 @@ describe("adapter.ts (as a script)", () => {
     repoAdapter(`export const adapters = {
   findIssue: {
     args: ["line"],
-    async run({ values, args }) {
-      return { issues: [{ identifier: values.teamKey + "-7", line: args.line }] }
+    async run({ values, args, base }) {
+      return { issues: [{ identifier: values.teamKey + "-7", line: args.line, base }] }
     },
   },
   notAnOp: { async run() { return {} } },
@@ -80,7 +80,7 @@ describe("adapter.ts (as a script)", () => {
     ])
     expect(result.status).toBe(0)
     expect(JSON.parse(result.stdout)).toEqual({
-      issues: [{ identifier: "ENG-7", line: "> Branch: `x`" }],
+      issues: [{ identifier: "ENG-7", line: "> Branch: `x`", base: "main" }],
     })
     expect(result.stderr).toContain("Linear has no op `notAnOp`")
 
@@ -175,6 +175,13 @@ describe("adapter.ts (as a script)", () => {
     expect(unused.status).toBe(2)
     expect(JSON.parse(unused.stdout).message).toContain(
       "doesn't use Linear for issueTracker",
+    )
+    // GitHub stacks only when `use` opts in.
+    init({ "integrations.github": { owner: "acme", repo: "web" } })
+    const unstacked = node("adapter.ts", ["run", "github", "parent"])
+    expect(unstacked.status).toBe(2)
+    expect(JSON.parse(unstacked.stdout).message).toContain(
+      "doesn't use GitHub for stacking",
     )
   })
 })

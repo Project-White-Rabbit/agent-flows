@@ -1,10 +1,20 @@
-import { checks, deployment } from "../adapters/github.ts"
+import { checks, codeScanningAlerts, deployment } from "../adapters/github.ts"
+import { stackAdapters } from "../adapters/github-stack.ts"
 import { projectsField } from "../projects.ts"
 import type { IntegrationSpec } from "../types.ts"
 import { SLUG, WORKFLOW_FILE } from "./patterns.ts"
 
+// Where GitHub stacking records a branch's parent (git config
+// `branch.<branch>.stackParent`), and the remote tip a reparent replaced.
+const STACK_RECORD = "stackParent"
+const STACK_LEASE = "stackLease"
+
 const PR_JSON =
   "number,url,title,body,state,isDraft,baseRefName,headRefName,additions,deletions,changedFiles"
+
+// How codeScanningAlerts reads each alert of the REST list.
+const ALERTS =
+  "each alert's `rule` is its `rule.id`, `severity` its `rule.security_severity_level` (else `rule.severity`), `tool` its `tool.name`, `path` and `line` its `most_recent_instance.location.path` and `.start_line`, `message` its `most_recent_instance.message.text`, and `url` its `html_url`. A 403 or 404 (code scanning off, or no access to it) is an error, not an empty list"
 
 const PR_FIELDS =
   "number, URL, title, body, state, draft, base and head branches, additions, deletions, and changed files"
@@ -140,6 +150,11 @@ export const github: IntegrationSpec = {
         cli: `\`gh pr list --repo {owner}/{repo} --head <branch> --state all --limit 1 --json ${PR_JSON}\`: an empty list means none`,
         api: `${API}/pulls?state=all&head={owner}:<branch>"\`, the most recent; then \`prMetadata\` for its counts`,
       },
+      childPrs: {
+        mcp: "The GitHub MCP's `list_pull_requests` for {owner}/{repo} with `base: <branch>` and `state: open`, every page: each one's `number`, `html_url` as `url`, and `head.ref` as `head`",
+        cli: "`gh pr list --repo {owner}/{repo} --base <branch> --state open --limit 1000 --json number,url,headRefName`: each `headRefName` as `head`",
+        api: `${API}/pulls?state=open&base=<branch>&per_page=100"\` (follow the \`Link\` header's next pages): each one's \`number\`, \`html_url\` as \`url\`, and \`head.ref\` as \`head\``,
+      },
       prDiff: {
         mcp: "The GitHub MCP's pull request read tool (`pull_request_read` with `method: get_diff`, or `get_pull_request_diff`) for {owner}/{repo} #<N>",
         cli: "`gh pr diff <N> --repo {owner}/{repo}`",
@@ -199,7 +214,7 @@ export const github: IntegrationSpec = {
       // Also an adapter (`adapters/github.ts`), run first: two paged lists,
       // check runs and commit statuses, read as one.
       checks: {
-        cli: "`gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/check-runs?per_page=100'` and `gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/status?per_page=100'`. A check run is `pending` until its `status` is `completed`, then by `conclusion`: `success` or `neutral` pass, `skipped` is skipping, `cancelled` is cancelled, anything else fails; its `link` is `details_url`, and its `log` its `id` when `app.slug` is `github-actions`. A status (named by `context`) passes on `success`, is pending on `pending`, and fails otherwise, with `link` its `target_url` and no `log`. With <base>, a check is `required` when its name is in `gh api repos/{owner}/{repo}/branches/<base> --jq '.protection.required_status_checks.contexts[]?'` or in the `required_status_checks` rules of `gh api --paginate repos/{owner}/{repo}/rules/branches/<base>` (each rule's `parameters.required_status_checks[].context`)",
+        cli: "`gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/check-runs?per_page=100'` and `gh api --paginate 'repos/{owner}/{repo}/commits/<sha>/status?per_page=100'`. A check run is `pending` until its `status` is `completed`, then by `conclusion`: `success` or `neutral` pass, `skipped` is skipping, `cancelled` is cancelled, anything else fails; its `link` is `details_url`, its `log` its `id` when `app.slug` is `github-actions`, and `codeScanning` true when `app.slug` is `github-advanced-security` (CodeQL). A status (named by `context`) passes on `success`, is pending on `pending`, and fails otherwise, with `link` its `target_url` and no `log`. With <base>, a check is `required` when its name is in `gh api repos/{owner}/{repo}/branches/<base> --jq '.protection.required_status_checks.contexts[]?'` or in the `required_status_checks` rules of `gh api --paginate repos/{owner}/{repo}/rules/branches/<base>` (each rule's `parameters.required_status_checks[].context`)",
         api: `${API}/commits/<sha>/check-runs?per_page=100"\` and ${API}/commits/<sha>/status?per_page=100"\`, following the \`Link\` header's next pages, read as the CLI variant says (with <base>, \`required\` from ${API}/branches/<base>"\` and ${API}/rules/branches/<base>"\` as it says)`,
         mcp: "The GitHub MCP's check run and commit status tools for {owner}/{repo} at <sha>, read as the CLI variant says",
       },
@@ -217,12 +232,53 @@ export const github: IntegrationSpec = {
         cli: `\`gh api graphql -f query='${RESOLVE_MUTATION}' -f id=<id>\``,
         api: `${GRAPHQL} with JSON \`query\` \`${RESOLVE_MUTATION}\` and \`variables\` \`{"id": "<id>"}\``,
       },
+      // Also an adapter (`adapters/github.ts`), run first.
+      codeScanningAlerts: {
+        cli: `\`gh api --paginate 'repos/{owner}/{repo}/code-scanning/alerts?ref=refs%2Fpull%2F<N>%2Fmerge&state=open&per_page=100'\`: ${ALERTS}`,
+        api: `${API}/code-scanning/alerts?ref=refs%2Fpull%2F<N>%2Fmerge&state=open&per_page=100"\`, following the \`Link\` header's next pages: ${ALERTS}`,
+        mcp: "The GitHub MCP's code scanning alerts tool (`list_code_scanning_alerts`) for {owner}/{repo} with `ref: refs/pull/<N>/merge` and `state: open`, read as the CLI variant says",
+      },
     },
     // Opt-in (`optIn` below): most repos deploy some other way. Also an
     // adapter (`adapters/github.ts`), run first.
     deployments: {
       deployment: {
         cli: "The runs of the entry's `deployWorkflow` on the commit, `gh api 'repos/{owner}/{repo}/actions/workflows/<deployWorkflow>/runs?head_sha=<sha>&per_page=100'`, the most recently created: none is `none`; a `status` other than `completed` is `pending`; then `conclusion` `success` is `success`, anything else `failed`. `url` its `html_url`; `steps` its jobs, `gh api --paginate 'repos/{owner}/{repo}/actions/runs/<id>/jobs?per_page=100'`, each by its `status` and `conclusion` the same way (`skipped` is skipped), with its `id` as `log`",
+      },
+    },
+    // Opt-in (`optIn` below): stacks of plain pull requests, each based on
+    // the branch below it, for a repo with no stacking tool. Also adapters
+    // (`adapters/github-stack.ts`), run first; the CLI variants say the same.
+    stacking: {
+      parent: {
+        cli: `\`git config --get "branch.$(git branch --show-current).${STACK_RECORD}"\`; else the base of the branch's open pull request (\`gh pr list --repo {owner}/{repo} --head <branch> --state open --json baseRefName\`) when that base isn't the repo's base branch and heads an open or merged pull request itself; else, with no pull request, the branch it was created from (the oldest entry of \`git reflog show refs/heads/<branch>\`, or the checkout that first moved onto it in \`git reflog show HEAD\`) when that one heads an open pull request. None of these: it fails, the branch isn't stacked`,
+      },
+      track: {
+        cli: `\`git config "branch.$(git branch --show-current).${STACK_RECORD}" <parent>\`, or, when <parent> is the repo's base branch, \`git config --unset "branch.$(git branch --show-current).${STACK_RECORD}"\` (a branch on the base isn't stacked). Any other <parent> must head an open or merged pull request (\`gh pr list --repo {owner}/{repo} --head <parent> --state all --json state\`), else it fails: recording a branch nothing stacks on would let a pull request opened against the wrong base through merge's gate`,
+      },
+      // Catching up merges, so the push after it is a plain one.
+      restack: {
+        cli: "`git fetch origin <parent>` (the `parent` op's, else the repo's base branch), then `git merge --no-edit origin/<parent>` when `git rev-list --count HEAD..origin/<parent>` isn't 0. Never a rebase",
+      },
+      continue: {
+        cli: "After a restack: `git commit --no-edit`. After a reparent (`git rev-parse -q --verify REBASE_HEAD` succeeds): `GIT_EDITOR=true git rebase --continue`, until it finishes",
+      },
+      reparent: {
+        cli: `\`git fetch origin <onto> <branch>\`; stop when \`origin/<branch>\` isn't an ancestor of HEAD. The landed tip of <old> is its merged pull request's \`headRefOid\` (\`gh pr list --repo {owner}/{repo} --head <old> --state merged --limit 1 --json number,headRefOid\`; \`git fetch origin refs/pull/<number>/head\` when it isn't here), else \`origin/<old>\`, else \`<old>\`; none of them here: stop. Record <onto> as for \`track\`, \`git config "branch.<branch>.${STACK_LEASE}" "$(git rev-parse origin/<branch>)"\` so \`submit\` may replace only that tip, retarget the open pull request with \`gh pr edit <N> --repo {owner}/{repo} --base <onto>\`, then \`git rebase --onto origin/<onto> "$(git merge-base HEAD <landed tip>)"\`. On conflicts, resolve, \`git add\`, and \`GIT_EDITOR=true git rebase --continue\``,
+      },
+      rename: {
+        cli: `\`old="$(git branch --show-current)" && git branch -m <name> && git config --get-regexp '^branch\\..*\\.${STACK_RECORD.toLowerCase()}$' | while read -r key value; do if [ "$value" = "$old" ]; then git config "$key" <name>; fi; done\``,
+      },
+      submit: {
+        cli: `\`git push -u origin HEAD\`; refused, and \`git config --get "branch.<branch>.${STACK_LEASE}"\` set (a reparent recorded the tip it replaced): \`git push --force-with-lease=refs/heads/<branch>:<that tip> -u origin HEAD\`, then \`git config --unset "branch.<branch>.${STACK_LEASE}"\`; refused without one: stop, and never force. Then, with <parent> the \`parent\` op's (else the repo's base branch): no open pull request, \`gh pr create --repo {owner}/{repo} --draft --base <parent> --head <branch> --fill\`; one whose base isn't <parent>, \`gh pr edit <N> --repo {owner}/{repo} --base <parent>\`. Record <parent> as for \`track\`. Prints the pull request's URL`,
+      },
+      downstack: {
+        cli: `Each open pull request (\`gh pr list --repo {owner}/{repo} --state open --limit 1000 --json headRefName,baseRefName\`) stacks its head on the head's recorded parent (\`git config --get-regexp '^branch\\..*\\.${STACK_RECORD.toLowerCase()}$'\`), else its base, and the checked-out branch on its \`parent\` op's. \`chain\` follows parents down from the checked-out branch while each heads an open pull request or has one recorded, stopping before the repo's base branch, bottom first; \`above\` counts the branches stacked on it, directly or not; \`size\` counts the chain's bottom branch and everything stacked on it`,
+      },
+      prUrl:
+        '`{"url": null}`: GitHub is the host, so a pull request has no other link',
+      mergeStack: {
+        cli: "Refuse when any branch of the `downstack` chain isn't pushed or differs from `origin/<branch>` after `git fetch origin <every branch>`. Then for each, bottom first: `gh pr ready <N> --repo {owner}/{repo}` for a draft; `gh pr edit <N> --repo {owner}/{repo} --base <the repo's base branch>`; poll `gh pr view <N> --repo {owner}/{repo} --json mergeable,headRefOid` every 3 seconds while `mergeable` is `UNKNOWN` (up to a minute), stopping on `CONFLICTING` or a head that isn't `origin/<branch>`; `gh pr merge <N> --repo {owner}/{repo} --merge --match-head-commit <that head>`; and poll `--json state` until `MERGED` (up to 30 seconds). Stop at the first that fails, saying why. Then delete the remote branch of each merged one below the checked-out branch that no open pull request targets (`gh pr list --repo {owner}/{repo} --base <branch> --state open`): `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/<branch>`. A merge commit always: squashing would leave the next one's diff holding this one's commits",
       },
     },
     // Opt-in (`optIn` below): most repos on GitHub track issues elsewhere.
@@ -282,8 +338,8 @@ export const github: IntegrationSpec = {
         "Closing: a `Fixes #<N>` line in the pull request body, which closes the issue when the pull request merges into the default branch (merging into another base closes nothing). Linking only: a `Part of #<N>` line, which only cross-references it. Either way the title can stay as the repo writes it",
     },
   },
-  optIn: ["issueTracker", "deployments"],
-  adapters: { checks, deployment },
+  optIn: ["issueTracker", "deployments", "stacking"],
+  adapters: { checks, codeScanningAlerts, deployment, ...stackAdapters },
   detect(ctx) {
     const remote = ctx.git(["remote", "get-url", "origin"])
     const parsed = remote ? parseGithubRemote(remote) : undefined

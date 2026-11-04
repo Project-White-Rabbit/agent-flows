@@ -11,8 +11,9 @@ import {
   USE_INTEGRATIONS,
 } from "./kit.ts"
 
-// How long merge waits for CI on the commit it lands, in seconds.
-const CI_TIMEOUT = 1800
+// How long merge waits for CI on the commit it lands, in minutes, when
+// `merge.ciTimeout` doesn't say.
+const CI_TIMEOUT_MINUTES = 30
 
 export const mergeFlow: Flow = devKit.defineFlow({
   schemaVersion: 1,
@@ -33,7 +34,7 @@ export const mergeFlow: Flow = devKit.defineFlow({
     },
     evaluate: {
       description:
-        "`gate --base <ref>` says whether `merge.requireEvaluation` lets the branch's recorded evaluation through: `off`, `pass`, `ask`, or `stop`",
+        "`gate --base <ref>` says whether `merge.requireEvaluation` lets the branch's recorded evaluation through: `off`, `pass`, `ask`, or `stop` (with `rerun` when a fresh evaluation can settle it)",
       args: "<subcommand>",
     },
   }),
@@ -58,7 +59,8 @@ export const mergeFlow: Flow = devKit.defineFlow({
     hooksInvariant("merge", {
       afterPoint: true,
       extra:
-        "--branch <branch> --pr <N> --prs '<the numbers of every pull request it lands, bottom first, space-separated>'",
+        "--branch <branch> --pr <N> --prs '<the numbers of every pull request it lands, bottom first, space-separated>' [--merged --merge-commit <landed>]",
+      note: "Pass `--merged` whenever the host said <N> merged, even when what came after (the close-out, the deploy watch) failed, with `--merge-commit` the merge commit the run step read; leave both out when nothing merged.",
     }),
   ],
   phases: [
@@ -78,15 +80,17 @@ export const mergeFlow: Flow = devKit.defineFlow({
 ### 1a. Survey
 
 1. **Arguments:** a scope (\`stack\`, \`branch\`, \`no-stack\`) and a method (\`squash\`, \`merge\`, \`no-squash\`, \`rebase\`), each at most once, in any order. Anything else: stop and show the usage, \`{{cmd}}merge [stack | branch] [squash | merge | rebase]\`.
-2. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then \`{{command:configure}} get ready.ignoreChecks merge.issueOnMerge merge.requireAllChecks merge.unresolvedThreads merge.watchDeploy merge.deployTimeout merge.deployLogLines merge.sync --optional\`: \`<ignoreChecks>\`, the CI check patterns the team never waits on (\`null\` for none); \`<issueOnMerge>\`, what happens to the issue on merge: \`close\` (merge moves it to done; \`null\` reads as \`close\`), \`tracker\` (the tracker's own integration moves it), or \`leave\` (nothing moves it); \`<requireAllChecks>\` (\`true\`: every check must pass, not only the required ones; \`null\` reads as false); \`<unresolvedThreads>\`, which unresolved review threads stop the merge (\`bots\`, \`all\`, or \`allow\`; \`null\` reads as \`allow\`); \`<watchDeploy>\` (\`true\`: watch the deployment of what landed; \`null\` reads as false), with \`<deployTimeout>\` (minutes the watch waits; \`null\` reads as 30) and \`<deployLogLines>\` (lines of each failed step's log the report leads with; \`null\`: none); and \`<syncMode>\` from \`merge.sync\` (\`remote\`: the run phase refreshes only the pull request and its issue, and pushes nothing; \`null\` reads as \`full\`).
+2. **Base branch:** \`{{command:configure}} get repo.baseBranch\` prints \`{"values": {"repo.baseBranch": "<base>"}}\`. ${REQUIRE_CONFIG} Then \`{{command:configure}} get ready.ignoreChecks merge.issueOnMerge merge.requireAllChecks merge.unresolvedThreads merge.watchDeploy merge.deployTimeout merge.deployLogLines merge.sync merge.ciTimeout merge.blockingReviewers merge.requireClean --optional\`: \`<ignoreChecks>\`, the CI check patterns the team never waits on (\`null\` for none); \`<issueOnMerge>\`, what happens to the issue on merge: \`close\` (merge moves it to done; \`null\` reads as \`close\`), \`tracker\` (the tracker's own integration moves it), or \`leave\` (nothing moves it); \`<requireAllChecks>\` (\`true\`: every check must pass, not only the required ones; \`null\` reads as false); \`<unresolvedThreads>\`, which unresolved review threads stop the merge (\`bots\`, \`all\`, or \`allow\`; \`null\` reads as \`allow\`); \`<watchDeploy>\` (\`true\`: watch the deployment of what landed; \`null\` reads as false), with \`<deployTimeout>\` (minutes the watch waits; \`null\` reads as 30) and \`<deployLogLines>\` (lines of each failed step's log the report leads with; \`null\`: none); and \`<syncMode>\` from \`merge.sync\` (\`remote\`: the run phase refreshes only the pull request and its issue, and pushes nothing; \`null\` reads as \`full\`); \`<ciTimeout>\`, the minutes the CI wait waits (\`null\` reads as ${CI_TIMEOUT_MINUTES}); \`<blockingReviewers>\`, the logins whose unresolved review threads stop the merge whatever \`<unresolvedThreads>\` says (\`null\` for none); and \`<requireClean>\` (\`true\`: uncommitted changes stop the merge even when there's no pull request yet; \`null\` reads as false).
 3. **Integrations:** \`{{command:configure}} integrations sourceControl stacking deployments --optional\`. ${USE_INTEGRATIONS}
    - **Source control:** keep the entry whose repository (from its \`values\`) is this checkout's \`origin\` in \`git remote -v\`. With none, stop: \`No configured source-control repository is this checkout's origin. Run {{cmd}}configure sourceControl, then re-run.\` At \`level\` \`read\`, stop too: \`The team uses <entry> read-only, so merge can't land pull requests. Run {{cmd}}configure <integration> to change that.\`
    - **Stacking:** the first entry, if any.
    - **Deployments:** every entry, used only when \`<watchDeploy>\` is true.
-4. **Branch:** \`git branch --show-current\` is \`<branch>\`. Detached, or \`<branch>\` is \`<base>\`: stop, \`Refusing to merge from <base or a detached HEAD>. Check out the feature branch first.\`
+4. **Branch:** \`git branch --show-current\` is \`<branch>\`. Detached, or \`<branch>\` is \`<base>\` or a branch \`{{command:configure}} get repo.protectedBranches --optional\` lists: stop, \`Refusing to merge from <branch, or a detached HEAD>. Check out the feature branch first.\`
 5. **Pull request:** the source-control entry's \`currentPr\` op.
 
 ### 1b. Gates
+
+With \`<requireClean>\` true, run gate 2 first: the sync below would commit uncommitted changes, and whether they ship is the user's call.
 
 1. **No pull request?** Say \`No pull request for <branch>. Running {{cmd}}sync to open one...\` and run the \`{{cmd}}sync\` skill with no arguments: it commits what's uncommitted, pushes, and opens the pull request and its issue. Then run \`currentPr\` again; still none: stop, \`Sync finished but there's still no pull request. Check its output, then re-run {{cmd}}merge.\` Note that sync ran, so the run phase doesn't run it again, and skip gate 2 (sync committed everything).
 2. **Uncommitted changes?** \`git status --porcelain\` prints anything: stop, \`<branch> has uncommitted changes. Commit them (or run {{cmd}}sync), then re-run {{cmd}}merge.\` Don't commit them here: whether they ship is the user's call.
@@ -164,28 +168,29 @@ When pull request <N> is a draft, the \`prReady\` op. For \`stack\`, the same fo
 
 ### Recorded evaluation
 
-\`{{command:evaluate}} gate --base origin/<the pull request's base>\` reads \`merge.requireEvaluation\` and the branch's recorded verdict, and prints \`gate\`, its \`reason\`, and the \`record\` (its \`verdict\`, \`summary\`, and \`sha\`):
+\`{{command:evaluate}} gate --base origin/<the pull request's base>\` reads \`merge.requireEvaluation\` and the branch's recorded verdict, and prints \`gate\`, its \`reason\`, \`rerun\` (on a \`stop\` a fresh evaluation can settle), and the \`record\` (its \`verdict\`, \`summary\`, and \`sha\`):
 
 - \`off\`: the repo doesn't gate on it. Go on.
 - \`pass\`: go on. When \`carried\` is true, the verdict was on an earlier commit whose files changed the same way (the branch only took in its base), and now names \`<sha>\`: say so in the report.
 - \`ask\`: show the \`summary\` lines and ask \`The evaluation of <short sha> flagged these. Merge anyway?\`; merge only on an explicit yes, and note it in the report. Anything else stops.
-- \`stop\`: stop with its \`reason\` and the \`summary\` lines, \`Run {{cmd}}evaluate on <branch>, then re-run {{cmd}}merge.\` (a \`stop\` verdict: \`Address the evaluation's findings, then re-run {{cmd}}evaluate and {{cmd}}merge.\`). Nothing has merged.
+- \`stop\` with \`rerun\` true: no verdict is recorded, or it's on another commit, so evaluate it now. Say why (its \`reason\`), then run the \`{{cmd}}evaluate\` skill with the argument \`record\`: invoke it, don't redo its steps. It reviews the pushed head (only what moved, with \`evaluate.scope: delta\`), records the verdict, and shows its report. Then run \`gate\` again, once, and act on what it prints by these same rules, except that a second \`stop\` with \`rerun\` stops: \`The evaluation of <short sha> wasn't recorded: <its Not recorded reason, else the gate's reason>. Fix that, then re-run {{cmd}}merge.\` Nothing has merged.
+- \`stop\` otherwise (a \`stop\` verdict): stop with its \`reason\` and the \`summary\` lines, \`Address the evaluation's findings, then re-run {{cmd}}evaluate and {{cmd}}merge.\` Nothing has merged.
 
 Merge waits only on the checks the base requires: the \`checks\` op given \`<base>\` (the pull request's base branch) says which, and \`--required-only\` waits on just those (all of them when the op can't say). With \`<requireAllChecks>\` true, leave \`--required-only\` off every \`ci wait\` and \`ci record\` below: it waits on every check. Checks matching \`<ignoreChecks>\` aren't waited on either: pass \`--ignore-check '<pattern>'\` for each, on every \`ci wait\` and \`ci record\` below. The host still refuses a merge a required check blocks, so the merge state below stays the authority.
 
 Run \`{{command:ready}} ci start --sha <sha>\`, then wait for the checks: with a \`script\` variant of the \`checks\` op that runs here,
 
 \`\`\`bash
-{{command:ready}} ci wait --sha <sha> --timeout ${CI_TIMEOUT} --required-only [--ignore-check '<pattern>']... --command '<the checks op's script variant, with <sha> and <base> filled in>'
+{{command:ready}} ci wait --sha <sha> --timeout <ciTimeout × 60> --required-only [--ignore-check '<pattern>']... --command '<the checks op's script variant, with <sha> and <base> filled in>'
 \`\`\`
 
-It polls every 30 seconds, prints \`[ready-ci]\` progress to stderr and the final report to stdout. Relay its progress in one line at least once a minute. When the host limits how long one command runs, add \`--max-wait <a bit under that limit>\` and run it again until it settles; the deadline stays the one \`ci start\` set. Without a \`script\` variant, every 30 seconds run the \`checks\` op for \`<sha>\` and \`<base>\`, write its JSON to a file, and run \`{{command:ready}} ci record --sha <sha> --file <file> --timeout ${CI_TIMEOUT} --required-only\` (with the \`--ignore-check\` flags), until it says \`settled\` or \`timedOut\`.
+It polls every 30 seconds, prints \`[ready-ci]\` progress to stderr and the final report to stdout. Relay its progress in one line at least once a minute. When the host limits how long one command runs, add \`--max-wait <a bit under that limit>\` and run it again until it settles; the deadline stays the one \`ci start\` set. Without a \`script\` variant, every 30 seconds run the \`checks\` op for \`<sha>\` and \`<base>\`, write its JSON to a file, and run \`{{command:ready}} ci record --sha <sha> --file <file> --timeout <ciTimeout × 60> --required-only\` (with the \`--ignore-check\` flags), until it says \`settled\` or \`timedOut\`. Both read \`ready.settleGrace\`, \`ready.requireChecks\`, and \`ready.requiredChecks\` from the config themselves.
 
-The report's \`noChecks\` means nothing it waits on runs on the commit (no CI, or every check reported is optional or ignored): go on. Keep \`optional\` and \`ignored\` for the report. \`timedOut\`: stop with the pull request open, listing \`pending\`. Settled with \`failures\` (failed or cancelled checks): with \`<requireAllChecks>\` true, stop, \`<names> failed or were cancelled, and merge.requireAllChecks needs every check to pass. Fix them with {{cmd}}ready, then re-run {{cmd}}merge.\` Otherwise go on to the merge state below, which says whether the host needs them; keep their names for the report.
+The report's \`noChecks\` means nothing it waits on runs on the commit (no CI, or every check reported is optional or ignored): go on. Keep \`optional\` and \`ignored\` for the report. \`timedOut\`: stop with the pull request open, listing \`pending\`; with \`awaitingChecks\` true, say instead \`No check it waits on reported on <short sha> within <ciTimeout> minutes, and ready.requireChecks needs one to.\` Settled with \`failures\` (failed or cancelled checks): with \`<requireAllChecks>\` true, stop, \`<names> failed or were cancelled, and merge.requireAllChecks needs every check to pass. Fix them with {{cmd}}ready, then re-run {{cmd}}merge.\` Otherwise go on to the merge state below, which says whether the host needs them; keep their names for the report.
 
 ### Review threads
 
-**Skip when \`<unresolvedThreads>\` is \`allow\`.** Otherwise the \`reviewThreads\` op for <N> (for \`stack\`, for every pull request in the chain). A thread is an automated reviewer's when its first comment's author is a bot, or is a reviewer the repo's agent instructions name as automated. With \`bots\`, any unresolved automated reviewer's thread stops the merge; with \`all\`, any unresolved thread does. Stop with each one's \`path:line\` and author: \`#<number> has unresolved review threads, and merge.unresolvedThreads is <value>: <threads>. Address them ({{cmd}}ready fixes an automated reviewer's mechanical ones), then re-run {{cmd}}merge.\` People's threads under \`bots\` don't stop it: list them in the report. An op that fails is a stop too: unread threads aren't no threads.
+**Skip when \`<unresolvedThreads>\` is \`allow\` and \`<blockingReviewers>\` is empty.** Otherwise the \`reviewThreads\` op for <N> (for \`stack\`, for every pull request in the chain). A thread is an automated reviewer's when its first comment's author is a bot, or is a reviewer the repo's agent instructions name as automated. With \`bots\`, any unresolved automated reviewer's thread stops the merge; with \`all\`, any unresolved thread does; whatever it is, so does any unresolved thread whose first comment's author is in \`<blockingReviewers>\` (case aside, with or without a \`[bot]\` suffix: \`github-advanced-security\` is CodeQL's). Stop with each one's \`path:line\` and author: \`#<number> has unresolved review threads, and <merge.unresolvedThreads is <value>, or merge.blockingReviewers names their author>: <threads>. Address them ({{cmd}}ready fixes an automated reviewer's mechanical ones), then re-run {{cmd}}merge.\` People's threads under \`bots\`, and others' threads when only \`<blockingReviewers>\` applies, don't stop it: list them in the report. An op that fails is a stop too: unread threads aren't no threads.
 
 ### Merge state
 
@@ -208,6 +213,10 @@ Then the \`prMetadata\` op for <N>: its state must be merged. If it isn't, stop:
 
 For \`stack\`, instead: the stacking entry's \`mergeStack\` op. It can take minutes; run it in the foreground. Then the \`branchPr\` op for every branch in the chain. All merged: go on. Otherwise stop and say plainly that **part of the chain is merged**: list which pull requests merged and which didn't, with the op's output. The usual next step is \`{{cmd}}sync\` to restack what's left, fix the blocked one, and re-run \`{{cmd}}merge\`. When it says local branches differ from their remotes, it refused rather than land unpushed work: \`{{cmd}}sync\`, then re-run.
 
+### Merge commit
+
+Once the host said merged: the source-control entry's \`mergeCommit\` op for <N> (for \`stack\`, the top of the chain) is \`<landed>\`; while it's null, ask again every 5 seconds, up to 3 times, then go on without it and say in the report that the merge commit couldn't be read. The repo's \`after\` hooks get it as \`--merge-commit\`.
+
 ### Close out
 
 Run the \`{{cmd}}sync\` skill with the argument \`remote\` (and \`--leave-issue\` when \`<issueOnMerge>\` is \`tracker\` or \`leave\`: the tracker moves the issue itself, or nothing does, so sync leaves it as it is). With the pull request merged, it moves the issue to done and resolves the errors the pull request fixed, as far as each integration's \`level\` allows. A failure here goes in the report; the merge stands.
@@ -218,7 +227,7 @@ Only after the host said merged. When \`above\` is more than 0, keep it: the pul
 
 ### Watch the deployment
 
-**Only when \`<watchDeploy>\` is true.** With no deployments entry, say so in the report (\`merge.watchDeploy is on, but no deployments integration is configured: run {{cmd}}configure deployments\`) and skip this. Otherwise the source-control entry's \`mergeCommit\` op for <N> (for \`stack\`, the top of the chain) is \`<landed>\`; while it's null, ask again every 5 seconds, up to 3 times, then report that the merge commit couldn't be read and skip this.
+**Only when \`<watchDeploy>\` is true.** With no deployments entry, say so in the report (\`merge.watchDeploy is on, but no deployments integration is configured: run {{cmd}}configure deployments\`) and skip this. Otherwise it watches \`<landed>\`, the merge commit read above; without one, skip this.
 
 For each deployments entry, its \`deployment\` op with \`<landed>\` as \`<sha>\`, every 30 seconds for the first 5 minutes and every 60 seconds after, until it's \`success\` or \`failed\` or \`<deployTimeout>\` minutes have gone by. Relay its state and steps in one line at least once a minute. \`none\` for 5 minutes: that entry deployed nothing for this commit (it may not deploy this branch); say so and stop watching it. Past \`<deployTimeout>\` minutes: report it still \`pending\`, with its \`url\` (\`merge.deployTimeout\` waits longer).
 
@@ -240,9 +249,9 @@ A failed deployment doesn't undo the merge, and nothing here fixes it: never red
 - **CI:** the commit it passed on (short sha), how long it waited, the checks it didn't wait on (not required by the base, or ignored by \`ready.ignoreChecks\`; with \`merge.requireAllChecks\`, only the ignored ones), and any failed checks the host didn't require.
 - **Sync:** \`full\` (caught up and pushed, or nothing to do) or \`remote\` (only the pull request and issue refreshed, from \`merge.sync\`).
 - **Hooks:** what the \`beforeCi\` hooks committed and pushed, if anything.
-- **Evaluation:** with \`merge.requireEvaluation\`, the verdict it merged on and its commit, whether it carried over from an earlier commit, and a flag the user accepted.
+- **Evaluation:** with \`merge.requireEvaluation\`, the verdict it merged on and its commit, whether it carried over from an earlier commit or merge ran evaluate for it, and a flag the user accepted.
 - **Close-out:** the issue and its state (or left to the tracker, or as it was, with \`merge.issueOnMerge\` \`tracker\` or \`leave\`), errors resolved, and any to resolve by hand, from the remote sync.
-- **Review threads:** with \`merge.unresolvedThreads\` set, the unresolved threads it checked, and people's threads still open.
+- **Review threads:** with \`merge.unresolvedThreads\` or \`merge.blockingReviewers\` set, the unresolved threads it checked, and the ones still open that didn't block.
 - **Remote branch:** deleted, already gone, or kept (and why).
 - **Deployment:** with \`merge.watchDeploy\`, each entry's result for \`<landed>\` (short sha): \`success\`, \`failed\`, still \`pending\`, or nothing deployed, with its \`url\` and how long it took; its failed steps (each with its log tail, with \`merge.deployLogLines\`), then, apart, the steps it skipped, and the ones still pending when the watch timed out.
 - **Local:** still on \`<branch>\`; deleting it and its worktree is the user's call.`,
