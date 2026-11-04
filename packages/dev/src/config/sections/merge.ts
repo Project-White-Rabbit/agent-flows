@@ -79,7 +79,7 @@ export const merge: SectionSpec = {
     {
       key: "requireEvaluation",
       description:
-        "Gate the merge on evaluate's recorded verdict (`evaluate.record`) for the commit that lands: `pass` merges only on a pass, and a flag needs the user's explicit go-ahead; `flag` merges on a pass or a flag. No verdict, one on an older commit, or `stop` stops the merge. With `evaluate.scope: delta`, a verdict carries to the head when the branch only took in its base",
+        "Gate the merge on evaluate's recorded verdict (`evaluate.record`) for the commit that lands: `pass` merges only on a pass, and a flag needs the user's explicit go-ahead; `flag` merges on a pass or a flag. With no verdict, or one on an older commit, merge runs evaluate (recording its verdict) and gates on that; a `stop` stops the merge. With `evaluate.scope: delta`, a verdict carries to the head when the branch only took in its base",
       example: "pass",
       pattern: EVALUATION,
     },

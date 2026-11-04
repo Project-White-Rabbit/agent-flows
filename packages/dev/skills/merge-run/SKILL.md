@@ -35,12 +35,13 @@ When pull request <N> is a draft, the `prReady` op. For `stack`, the same for ev
 
 ### Recorded evaluation
 
-`node "${CLAUDE_PLUGIN_ROOT}/src/commands/evaluate.ts" gate --base origin/<the pull request's base>` reads `merge.requireEvaluation` and the branch's recorded verdict, and prints `gate`, its `reason`, and the `record` (its `verdict`, `summary`, and `sha`):
+`node "${CLAUDE_PLUGIN_ROOT}/src/commands/evaluate.ts" gate --base origin/<the pull request's base>` reads `merge.requireEvaluation` and the branch's recorded verdict, and prints `gate`, its `reason`, `rerun` (on a `stop` a fresh evaluation can settle), and the `record` (its `verdict`, `summary`, and `sha`):
 
 - `off`: the repo doesn't gate on it. Go on.
 - `pass`: go on. When `carried` is true, the verdict was on an earlier commit whose files changed the same way (the branch only took in its base), and now names `<sha>`: say so in the report.
 - `ask`: show the `summary` lines and ask `The evaluation of <short sha> flagged these. Merge anyway?`; merge only on an explicit yes, and note it in the report. Anything else stops.
-- `stop`: stop with its `reason` and the `summary` lines, `Run /dev-flows:evaluate on <branch>, then re-run /dev-flows:merge.` (a `stop` verdict: `Address the evaluation's findings, then re-run /dev-flows:evaluate and /dev-flows:merge.`). Nothing has merged.
+- `stop` with `rerun` true: no verdict is recorded, or it's on another commit, so evaluate it now. Say why (its `reason`), then run the `/dev-flows:evaluate` skill with the argument `record`: invoke it, don't redo its steps. It reviews the pushed head (only what moved, with `evaluate.scope: delta`), records the verdict, and shows its report. Then run `gate` again, once, and act on what it prints by these same rules, except that a second `stop` with `rerun` stops: `The evaluation of <short sha> wasn't recorded: <its Not recorded reason, else the gate's reason>. Fix that, then re-run /dev-flows:merge.` Nothing has merged.
+- `stop` otherwise (a `stop` verdict): stop with its `reason` and the `summary` lines, `Address the evaluation's findings, then re-run /dev-flows:evaluate and /dev-flows:merge.` Nothing has merged.
 
 Merge waits only on the checks the base requires: the `checks` op given `<base>` (the pull request's base branch) says which, and `--required-only` waits on just those (all of them when the op can't say). With `<requireAllChecks>` true, leave `--required-only` off every `ci wait` and `ci record` below: it waits on every check. Checks matching `<ignoreChecks>` aren't waited on either: pass `--ignore-check '<pattern>'` for each, on every `ci wait` and `ci record` below. The host still refuses a merge a required check blocks, so the merge state below stays the authority.
 
@@ -107,7 +108,7 @@ Lead with anything that needs the user's attention: a stop and its reason, a cha
 - **CI:** the commit it passed on (short sha), how long it waited, the checks it didn't wait on (not required by the base, or ignored by `ready.ignoreChecks`; with `merge.requireAllChecks`, only the ignored ones), and any failed checks the host didn't require.
 - **Sync:** `full` (caught up and pushed, or nothing to do) or `remote` (only the pull request and issue refreshed, from `merge.sync`).
 - **Hooks:** what the `beforeCi` hooks committed and pushed, if anything.
-- **Evaluation:** with `merge.requireEvaluation`, the verdict it merged on and its commit, whether it carried over from an earlier commit, and a flag the user accepted.
+- **Evaluation:** with `merge.requireEvaluation`, the verdict it merged on and its commit, whether it carried over from an earlier commit or merge ran evaluate for it, and a flag the user accepted.
 - **Close-out:** the issue and its state (or left to the tracker, or as it was, with `merge.issueOnMerge` `tracker` or `leave`), errors resolved, and any to resolve by hand, from the remote sync.
 - **Review threads:** with `merge.unresolvedThreads` set, the unresolved threads it checked, and people's threads still open.
 - **Remote branch:** deleted, already gone, or kept (and why).

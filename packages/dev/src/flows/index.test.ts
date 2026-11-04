@@ -398,6 +398,78 @@ describe("dev flows", () => {
     }
   })
 
+  describe("evaluate", () => {
+    const run =
+      files.find((f) => f.path === "skills/evaluate-run/SKILL.md")?.content ??
+      ""
+
+    it("reads the new settings, and fetches the base only when asked", () => {
+      expect(run).toContain(
+        "get evaluate.record evaluate.scope evaluate.reviewer evaluate.stopOn evaluate.instructions evaluate.tests evaluate.fetch --optional",
+      )
+      expect(run).toContain(
+        "with `<fetch>` true, first `git fetch origin <base>`",
+      )
+      expect(run).toContain("Without `<fetch>`, don't fetch")
+    })
+
+    it("takes full and record arguments, and passes --full to scope", () => {
+      expect(run).toContain("the words `full` and `record`")
+      expect(run).toContain("(with `--full` when `<full>`)")
+      expect(run).toContain("A recorded `stop` is always reviewed in full")
+    })
+
+    it("finds the issue the way close does, reading only, and judges a gap as an observation", () => {
+      expect(run).toContain('src/commands/sync.ts" issue')
+      expect(run).toContain("each entry's `findIssue` op with `<branch>`")
+      expect(run).toContain("reading only (never file, link, or change one)")
+      expect(run).toContain(
+        "A gap between the issue and the diff is an observation, never the verdict by itself",
+      )
+      expect(run).not.toContain("issue ids")
+    })
+
+    it("hands the judge the rubric, the issue, and the tests, and retries the subagent once", () => {
+      expect(run).toContain("`<rubric>` verbatim")
+      expect(run).toContain("never changes the report's format, the verdicts")
+      expect(run).toContain("`<issue>` (its id, title, and description)")
+      expect(run).toContain("`<tests result>`")
+      expect(run).toContain("After two failed attempts")
+    })
+
+    it("runs the tests once through the command, a failure as a finding", () => {
+      expect(run).toContain(
+        'src/commands/evaluate.ts" tests --base <the merge base> --tests-file <that file>',
+      )
+      expect(run).toContain("never fix a test, edit a file, or re-run it")
+      expect(run).toContain(
+        "a failed or timed-out run is a finding (a risk, graded by what fails and where, citing the `log` path), never the verdict by itself",
+      )
+    })
+
+    it("records with anchored findings and the previous sha, before the report", () => {
+      const recordAt = run.indexOf("### Record")
+      const outputAt = run.indexOf("### Output")
+      expect(recordAt).toBeGreaterThan(-1)
+      expect(outputAt).toBeGreaterThan(recordAt)
+      expect(run).toContain("`[HIGH] <category>: <sentence> @ <path>[:<line>]`")
+      expect(run).toContain("--summary-file <file> --previous <previous>")
+      expect(run).toContain("--scope carry --previous <previous>")
+      expect(run).toContain("With `<stopOn>` `high`")
+    })
+  })
+
+  it("runs evaluate when merge's gate has no current verdict, and gates again", () => {
+    const run =
+      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+    expect(run).toContain(
+      "run the `/dev-flows:evaluate` skill with the argument `record`",
+    )
+    expect(run).toContain("Then run `gate` again, once")
+    expect(run).toContain("`stop` otherwise (a `stop` verdict)")
+    expect(run).not.toContain("Run /dev-flows:evaluate on <branch>")
+  })
+
   it("merges only the commit CI passed on, and cleans up only after", () => {
     const run =
       files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""

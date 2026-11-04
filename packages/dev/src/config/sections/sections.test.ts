@@ -379,6 +379,56 @@ describe("merge section", () => {
   })
 })
 
+describe("evaluate section", () => {
+  const base = { version: 3, repo: { baseBranch: "main" } }
+
+  it("takes what stops, the rubric, the tests, and the fetch evaluate acts on", () => {
+    for (const stopOn of ["rethink", "high"]) {
+      expect(
+        checkConfig({
+          ...base,
+          evaluate: {
+            stopOn,
+            instructions: ["docs/review.md", ".agent-flows/rubric.md"],
+            tests: "bun run test {tests}",
+            fetch: true,
+          },
+        }).issues,
+      ).toEqual([])
+    }
+    expect(
+      checkConfig({
+        ...base,
+        evaluate: {
+          stopOn: "medium",
+          instructions: "docs/review.md",
+          tests: "bun run test",
+          fetch: "yes",
+        },
+      }).issues,
+    ).toEqual([
+      "evaluate.stopOn must be `rethink` or `high`",
+      expect.stringContaining("evaluate.instructions"),
+      "evaluate.tests must name `{tests}`, the test files evaluate picks",
+      "evaluate.fetch must be true or false",
+    ])
+  })
+
+  it("takes only repo-relative rubric files", () => {
+    for (const file of ["/etc/review.md", "../review.md", "docs/../../x.md"]) {
+      expect(
+        checkConfig({ ...base, evaluate: { instructions: [file] } }).issues,
+      ).toEqual([
+        `evaluate.instructions must list only repo-relative paths (not \`${file}\`)`,
+      ])
+    }
+    expect(
+      checkConfig({ ...base, evaluate: { instructions: ["..rc/review.md"] } })
+        .issues,
+    ).toEqual([])
+  })
+})
+
 describe("parseGithubRemote", () => {
   it.each([
     "git@github.com:acme/web.git",

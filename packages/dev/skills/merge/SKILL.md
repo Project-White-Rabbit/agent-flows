@@ -19,7 +19,7 @@ Take the current branch from "in flight" to "merged" in one command: the last st
 | `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), or a failure that stops the command (`stop`) |
 | `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
 | `ready.ts <subcommand>` | `ci start` and `ci wait` track the CI pass on the commit about to land: settled, timed out, and what failed |
-| `evaluate.ts <subcommand>` | `gate --base <ref>` says whether `merge.requireEvaluation` lets the branch's recorded evaluation through: `off`, `pass`, `ask`, or `stop` |
+| `evaluate.ts <subcommand>` | `gate --base <ref>` says whether `merge.requireEvaluation` lets the branch's recorded evaluation through: `off`, `pass`, `ask`, or `stop` (with `rerun` when a fresh evaluation can settle it) |
 
 ## Invariants
 
