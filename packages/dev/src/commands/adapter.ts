@@ -4,11 +4,11 @@
 // writes out in full.
 
 import { probeAccess, systemProbe } from "../config/access.ts"
-import { loadAdapters } from "../config/adapters/index.ts"
 import { getAt, INSTANCE_KEY, instancesOf } from "../config/config.ts"
 import { readLocal, readToken, tokenFor } from "../config/local.ts"
-import { INTEGRATIONS } from "../config/sections/index.ts"
 import { usesOf, withoutUse } from "../config/use.ts"
+import { loadAdapters } from "../integrations/adapters.ts"
+import { INTEGRATIONS } from "../integrations/index.ts"
 import { loadConfig, NOT_CONFIGURED_EXIT, repoRoot } from "./configure.ts"
 import { isMain, printJson, runMain } from "./lib.ts"
 

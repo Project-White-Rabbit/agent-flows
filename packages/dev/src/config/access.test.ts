@@ -2,10 +2,10 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
+import { github } from "../integrations/github/spec.ts"
+import { findIssue } from "../integrations/linear/adapter.ts"
 import { type Probe, probeAccess, systemProbe } from "./access.ts"
-import { findIssue } from "./adapters/linear.ts"
 import { fillOps, resolveCapability } from "./integrations.ts"
-import { github } from "./sections/github.ts"
 
 function fakeProbe(
   bins: Record<string, boolean>,

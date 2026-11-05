@@ -4,11 +4,11 @@
 // each with its values and its ops filled in, so the flow never names a vendor.
 
 import path from "node:path"
+import type { LoadedAdapter } from "../integrations/adapters.ts"
+import { INTEGRATIONS } from "../integrations/index.ts"
 import { type AccessReport, accessKey } from "./access.ts"
-import type { LoadedAdapter } from "./adapters/index.ts"
 import { CAPABILITIES } from "./capabilities.ts"
 import { getAt, INSTANCE_KEY, instancesOf, type RawConfig } from "./config.ts"
-import { INTEGRATIONS } from "./sections/index.ts"
 import type {
   CapabilitySpec,
   IntegrationSpec,

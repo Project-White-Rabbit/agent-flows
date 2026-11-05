@@ -1,0 +1,235 @@
+import type { IntegrationSpec } from "../../config/types.ts"
+import { HOST, SLUG_PATH } from "../patterns.ts"
+import { checks } from "./adapter.ts"
+
+/**
+ * `git@gitlab.com:group/sub/web.git`, `https://gitlab.acme.dev:8443/group/web`,
+ * …: a remote whose host contains "gitlab". `host` is set only when it isn't
+ * gitlab.com, with the port for HTTP remotes (an SSH port isn't the web's). A
+ * dotless host is an SSH alias from ~/.ssh/config, whose real host is unknown,
+ * so it comes back as `alias` instead.
+ */
+export function parseGitlabRemote(
+  url: string,
+): { project: string; host?: string; alias?: string } | undefined {
+  const text = url.trim()
+  let host: string
+  let port = ""
+  let path: string
+  let ssh: boolean
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    let parsed: URL
+    try {
+      parsed = new URL(text)
+    } catch {
+      return undefined
+    }
+    host = parsed.hostname
+    port = parsed.port
+    path = decodeURIComponent(parsed.pathname)
+    ssh = /ssh/.test(parsed.protocol)
+  } else {
+    const scp = text.match(/^(?:[^@\s/]+@)?([^:\s/]+):([^\s]+)$/)
+    if (!scp) {
+      return undefined
+    }
+    ;[, host, path] = scp
+    ssh = true
+  }
+  host = host.toLowerCase()
+  const project = path.replace(/^\/+/, "").replace(/(\.git)?\/?$/, "")
+  if (!host.includes("gitlab") || !SLUG_PATH.regex.test(project)) {
+    return undefined
+  }
+  if (host === "gitlab.com") {
+    return { project }
+  }
+  if (!host.includes(".")) {
+    return { project, alias: host }
+  }
+  return { project, host: port && !ssh ? `${host}:${port}` : host }
+}
+
+// Every op names its project with `-R`, so each instance reads its own, and
+// `{host|gitlab.com}` makes the same command right for self-managed hosts.
+const REPO = "-R https://{host|gitlab.com}/{project}"
+
+// The REST API, authenticated from the token's variable. Each opens a quoted
+// URL the op closes, so a shell expansion can sit inside it.
+const API_BARE = "`https://{host|gitlab.com}/api/v4/projects/{project:encoded}"
+const API = `\`curl -fsSL -H "PRIVATE-TOKEN: {token}" "https://{host|gitlab.com}/api/v4/projects/{project:encoded}`
+
+const KEEP_DRAFT =
+  "GitLab marks drafts by a `Draft: ` title prefix, so keep it on a draft's <title>"
+
+const MERGE_STATUS =
+  "`has_conflicts` true is conflicting; a `detailed_merge_status` of `need_rebase` is behind, and `checking`, `unchecked`, or `preparing` is pending; anything else is clean"
+
+const MERGE_STATE =
+  "a `detailed_merge_status` of `mergeable` is ready; `conflict` is conflicting; `need_rebase` is behind; `checking`, `unchecked`, `preparing`, or `approvals_syncing` is pending; anything else (`ci_must_pass`, `not_approved`, `discussions_not_resolved`, `draft_status`, …) is blocked, with that status as the reason"
+
+// GitLab sets merge commit or fast-forward per project, not per merge request.
+const MERGE_METHOD =
+  "`squash` true for <method> `squash`, else false: GitLab merges by the project's merge method (a merge commit, or fast-forward), so for `merge` or `rebase` say which it used"
+
+const STATUSES =
+  "`status` `success` passes; `failed` fails, or is skipping when `allow_failure` is true; `canceled` is cancelled; `skipped` and `manual` are skipping; anything else is pending. Its `link` is `target_url`, and its `log` the job id at the end of a `target_url` ending `/-/jobs/<id>` (none for an outside service's status). With <base>, every one is `required` but a job whose `allow_failure` is true"
+
+const THREADS =
+  "Keep the discussions whose first note is `resolvable` and not `resolved`: its `id`, its first note's `position.new_path` and `position.new_line`, and each note's `author.username`, `author.bot`, and `body`"
+
+const MR_FIELDS =
+  "`iid`, `web_url`, `title`, `description`, `state`, `draft`, `target_branch`, `source_branch`, `changes_count`; count additions and deletions from the diff"
+
+export const gitlab: IntegrationSpec = {
+  path: "integrations.gitlab",
+  name: "GitLab",
+  purpose: "Merge requests, CI pipelines, code review",
+  fields: [
+    {
+      key: "project",
+      description: "Project path, including groups",
+      example: "acme/web",
+      required: true,
+      pattern: SLUG_PATH,
+    },
+    {
+      key: "host",
+      description: "Self-managed host name",
+      example: "gitlab.acme.dev",
+      pattern: HOST,
+    },
+  ],
+  multiple: true,
+  lookup: "`glab repo view`, or the GitLab MCP",
+  access: {
+    mcp: { server: "GitLab" },
+    cli: { bin: "glab", auth: ["glab", "auth", "status"] },
+    api: {
+      base: "https://<host>/api/v4 (gitlab.com unless `host` is set)",
+      token: ["GITLAB_TOKEN"],
+    },
+  },
+  provides: {
+    sourceControl: {
+      prRef:
+        "A bare number, or `https://{host|gitlab.com}/{project}/-/merge_requests/<N>`",
+      currentPr: {
+        mcp: `The GitLab MCP's merge request search for project \`{project}\` with source branch \`<branch>\`, the most recent: ${MR_FIELDS}`,
+        cli: `\`glab mr view "$(git branch --show-current)" ${REPO} --output json\`: ${MR_FIELDS}`,
+        api: `${API}/merge_requests?source_branch=$(git branch --show-current)&order_by=updated_at"\`, the first: ${MR_FIELDS}`,
+      },
+      prMetadata: {
+        mcp: `The GitLab MCP's merge request read tool for project \`{project}\` !<N>: ${MR_FIELDS}`,
+        cli: `\`glab mr view <N> ${REPO} --output json\`: ${MR_FIELDS}`,
+        api: `${API}/merge_requests/<N>"\`: ${MR_FIELDS}`,
+      },
+      mergeCommit: {
+        mcp: "The GitLab MCP's merge request read tool for project `{project}` !<N>: once `state` is `merged`, its `merge_commit_sha`, else its `squash_commit_sha`, else its `sha`; null before then",
+        cli: `\`glab mr view <N> ${REPO} --output json\`: once \`state\` is \`merged\`, its \`merge_commit_sha\`, else its \`squash_commit_sha\`, else its \`sha\`; null before then`,
+        api: `${API}/merge_requests/<N>"\`: once \`state\` is \`merged\`, its \`merge_commit_sha\`, else its \`squash_commit_sha\`, else its \`sha\`; null before then`,
+      },
+      branchPr: {
+        mcp: `The GitLab MCP's merge request search for project \`{project}\` with source branch \`<branch>\`, any state, the most recent: ${MR_FIELDS}`,
+        cli: `\`glab api 'projects/{project:encoded}/merge_requests?source_branch=<branch>&state=all&order_by=updated_at&per_page=1' --hostname {host|gitlab.com}\`, the first: ${MR_FIELDS}. An empty list means none`,
+        api: `${API}/merge_requests?source_branch=<branch>&state=all&order_by=updated_at&per_page=1"\`, the first: ${MR_FIELDS}. An empty list means none`,
+      },
+      childPrs: {
+        mcp: "The GitLab MCP's merge request search for project `{project}` with target branch `<branch>` and state `opened`, every page: each one's `iid` as `number`, `web_url` as `url`, and `source_branch` as `head`",
+        cli: "`glab api 'projects/{project:encoded}/merge_requests?target_branch=<branch>&state=opened&per_page=100' --hostname {host|gitlab.com} --paginate`: each one's `iid` as `number`, `web_url` as `url`, and `source_branch` as `head`",
+        api: `${API}/merge_requests?target_branch=<branch>&state=opened&per_page=100"\`, following \`page\` while a page is full: each one's \`iid\` as \`number\`, \`web_url\` as \`url\`, and \`source_branch\` as \`head\``,
+      },
+      prDiff: {
+        mcp: "The GitLab MCP's merge request diffs tool for project `{project}` !<N>",
+        cli: `\`glab mr diff <N> ${REPO} --raw\``,
+        api: `${API}/merge_requests/<N>/raw_diffs"\``,
+      },
+      prFiles:
+        "The `b/` paths of the `diff --git` lines in the `prDiff` output",
+      prCommits: {
+        mcp: "The GitLab MCP's merge request commits tool for project `{project}` !<N>, each commit's `title`",
+        cli: "`glab api projects/{project:encoded}/merge_requests/<N>/commits --hostname {host|gitlab.com} --paginate`, each commit's `title`",
+        api: `${API}/merge_requests/<N>/commits?per_page=100"\`, each commit's \`title\``,
+      },
+      prCreate: {
+        mcp: "The GitLab MCP's create merge request tool for project `{project}`: source branch the checked-out branch, target `<base>`, title `Draft: <title>`, description the contents of <body-file>",
+        cli: `\`glab mr create ${REPO} --draft --target-branch <base> --source-branch "$(git branch --show-current)" --title <title> --description "$(cat <body-file>)" --yes\``,
+        api: `\`POST\` ${API_BARE}/merge_requests\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`source_branch\` (the checked-out branch), \`target_branch\`, \`title\` (\`Draft: <title>\`), and \`description\` (the file's contents)`,
+      },
+      prEdit: {
+        mcp: `The GitLab MCP's update merge request tool for project \`{project}\` !<N> with the title and the contents of <body-file> as description. ${KEEP_DRAFT}`,
+        cli: `\`glab mr update <N> ${REPO} --title <title> --description "$(cat <body-file>)"\`. ${KEEP_DRAFT}`,
+        api: `\`PUT\` ${API_BARE}/merge_requests/<N>\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`title\` and \`description\` (the file's contents). ${KEEP_DRAFT}`,
+      },
+      prMergeability: {
+        mcp: `The GitLab MCP's merge request read tool for project \`{project}\` !<N>: ${MERGE_STATUS}`,
+        cli: `\`glab mr view <N> ${REPO} --output json\`: ${MERGE_STATUS}`,
+        api: `${API}/merge_requests/<N>"\`: ${MERGE_STATUS}`,
+      },
+      prMergeState: {
+        mcp: `The GitLab MCP's merge request read tool for project \`{project}\` !<N>: ${MERGE_STATE}`,
+        cli: `\`glab mr view <N> ${REPO} --output json\`: ${MERGE_STATE}`,
+        api: `${API}/merge_requests/<N>"\`: ${MERGE_STATE}`,
+      },
+      // CLI and API first: they pin the head with `sha`. Not `glab mr merge`,
+      // which sets auto-merge by default.
+      prMerge: {
+        cli: `\`glab api -X PUT 'projects/{project:encoded}/merge_requests/<N>/merge' --hostname {host|gitlab.com} -F squash=<true|false> -f sha=<sha> -F should_remove_source_branch=false\`, with ${MERGE_METHOD}. 405 or 422 is refused, with the reason in \`message\`; 409 is a moved head`,
+        api: `\`PUT\` ${API_BARE}/merge_requests/<N>/merge\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`sha\` <sha>, \`should_remove_source_branch\` false, and ${MERGE_METHOD}. 405 or 422 is refused, with the reason in \`message\`; 409 is a moved head`,
+        mcp: `The GitLab MCP's merge tool for project \`{project}\` !<N>, with \`sha\` <sha> when it takes one (else check the head is <sha> just before), not removing the source branch, and ${MERGE_METHOD}`,
+      },
+      prClose: {
+        mcp: "The GitLab MCP's update merge request tool for project `{project}` !<N>, with `state_event: close`",
+        cli: `\`glab mr close <N> ${REPO}\``,
+        api: `\`PUT\` ${API_BARE}/merge_requests/<N>\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`state_event\` \`close\``,
+      },
+      prReady: {
+        mcp: "The GitLab MCP's update merge request tool for project `{project}` !<N>, with its title without the `Draft: ` prefix",
+        cli: `\`glab mr update <N> ${REPO} --ready\``,
+        api: `\`PUT\` ${API_BARE}/merge_requests/<N>\` (header \`PRIVATE-TOKEN: {token}\`) with JSON \`title\`, the current title without its \`Draft: \` prefix`,
+      },
+      // Also an adapter (`adapters/gitlab.ts`), run first: the statuses come
+      // a page at a time.
+      checks: {
+        cli: `\`glab api 'projects/{project:encoded}/repository/commits/<sha>/statuses?per_page=100' --hostname {host|gitlab.com} --paginate\`: ${STATUSES}`,
+        api: `${API}/repository/commits/<sha>/statuses?per_page=100"\`, following \`page\` while a page is full: ${STATUSES}`,
+        mcp: `The GitLab MCP's pipeline jobs for project \`{project}\` at commit <sha>: ${STATUSES}`,
+      },
+      checkLog: {
+        mcp: "The GitLab MCP's job log tool for project `{project}`, job <log>, its last 200 lines",
+        cli: "`glab api projects/{project:encoded}/jobs/<log>/trace --hostname {host|gitlab.com} | tail -200`",
+        api: `${API}/jobs/<log>/trace" | tail -200\``,
+      },
+      reviewThreads: {
+        mcp: `The GitLab MCP's merge request discussions tool for project \`{project}\` !<N>. ${THREADS}`,
+        cli: `\`glab api 'projects/{project:encoded}/merge_requests/<N>/discussions?per_page=100' --hostname {host|gitlab.com} --paginate\`. ${THREADS}`,
+        api: `${API}/merge_requests/<N>/discussions?per_page=100"\`, following \`page\` while a page is full. ${THREADS}`,
+      },
+      resolveThread: {
+        mcp: "The GitLab MCP's tool for resolving a merge request discussion, for project `{project}`, discussion <id>",
+        cli: "`glab api -X PUT 'projects/{project:encoded}/merge_requests/<N>/discussions/<id>?resolved=true' --hostname {host|gitlab.com}`",
+        api: `\`PUT\` ${API_BARE}/merge_requests/<N>/discussions/<id>?resolved=true\` (header \`PRIVATE-TOKEN: {token}\`)`,
+      },
+      codeScanningAlerts: {
+        unsupported:
+          "GitLab's security scanners report as pipeline jobs, whose logs `checkLog` reads, so no check needs alerts read apart",
+      },
+    },
+  },
+  adapters: { checks },
+  detect(ctx) {
+    const remote = ctx.git(["remote", "get-url", "origin"])
+    const parsed = remote ? parseGitlabRemote(remote) : undefined
+    if (!parsed) {
+      return undefined
+    }
+    const { alias, ...values } = parsed
+    const evidence = [`origin remote ${remote}`]
+    if (alias) {
+      evidence.push(
+        `origin uses the SSH alias ${alias}: set host if it points at a self-managed GitLab`,
+      )
+    }
+    return { values, evidence }
+  },
+}
