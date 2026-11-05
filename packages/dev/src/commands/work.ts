@@ -17,7 +17,7 @@ import {
 } from "../config/branch-line.ts"
 import { plainDocumentLinks } from "../config/links.ts"
 import { DEFAULT_RANKS, ranksProblem } from "../config/sections/tickets.ts"
-import { worktreePaths } from "../config/sections/worktree.ts"
+import { worktreePaths } from "../integrations/worktree/spec.ts"
 import { repoRoot } from "./configure.ts"
 import {
   type Flags,

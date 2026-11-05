@@ -1,11 +1,11 @@
 // CLI over the repository's agent-flows config (.agent-flows/config.json).
-// Everything section-specific lives in src/config/sections; this file only
-// reads, plans, and writes, so every section behaves the same way.
+// Everything section-specific lives in src/config/sections (the repo's settings)
+// and src/integrations (each integration's spec); this file only reads, plans,
+// and writes, so every section behaves the same way.
 
 import fs from "node:fs"
 import path from "node:path"
 import { probeAll, systemProbe } from "../config/access.ts"
-import { type LoadedAdapter, loadAdapters } from "../config/adapters/index.ts"
 import { CAPABILITIES } from "../config/capabilities.ts"
 import {
   applyPatch,
@@ -50,7 +50,9 @@ import {
   tokenKey,
   writeLocal,
 } from "../config/local.ts"
-import { INTEGRATIONS, SECTIONS } from "../config/sections/index.ts"
+import { SECTIONS } from "../config/sections/index.ts"
+import { type LoadedAdapter, loadAdapters } from "../integrations/adapters.ts"
+import { INTEGRATIONS } from "../integrations/index.ts"
 import { isMain, printJson, readStdin, run, runMain } from "./lib.ts"
 
 /** Exit code that tells a flow the repo isn't configured for what it needs. */

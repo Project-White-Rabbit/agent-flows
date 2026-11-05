@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import type { Check } from "../config/adapters/checks.ts"
+import type { Check } from "../integrations/checks.ts"
 import {
   ciSettings,
   DEFAULT_TIMEOUT,

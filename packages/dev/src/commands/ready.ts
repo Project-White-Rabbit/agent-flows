@@ -9,13 +9,13 @@
 import { spawnSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
+import { globRegex } from "../config/hooks.ts"
+import { matchingRules } from "../config/rules.ts"
 import {
   CHECK_STATES,
   type Check,
   type CheckState,
-} from "../config/adapters/checks.ts"
-import { globRegex } from "../config/hooks.ts"
-import { matchingRules } from "../config/rules.ts"
+} from "../integrations/checks.ts"
 import { loadConfig, repoRoot } from "./configure.ts"
 import {
   isMain,
