@@ -93,7 +93,7 @@ describe("dev flows", () => {
     const vendorFree = files.filter((f) => !f.path.includes("configure"))
     for (const file of vendorFree) {
       expect(file.content, file.path).not.toMatch(
-        /\b(gh|glab|gt|superset|conductor) |GitHub|GitLab|Graphite|Linear|Jira|Sentry|Lore|Superset|Conductor/,
+        /\b(gh|glab|gt|superset|conductor|orca) |GitHub|GitLab|Graphite|Linear|Jira|Sentry|Lore|Superset|Conductor|Orca/,
       )
     }
   })

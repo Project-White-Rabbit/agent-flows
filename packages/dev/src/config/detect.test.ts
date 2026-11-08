@@ -69,7 +69,7 @@ describe("detect", () => {
       )
     }
 
-    const found = detectSections(createDetectContext(dir))
+    const found = detectSections(createDetectContext(dir, {}))
     expect(found["integrations.github"]?.values).toEqual({
       owner: "acme",
       repo: "web",
@@ -115,7 +115,7 @@ describe("detect", () => {
       )
     }
     execFileSync("git", ["-C", root, "add", "apps", "packages"])
-    const vercel = detectSections(createDetectContext(root))[
+    const vercel = detectSections(createDetectContext(root, {}))[
       "integrations.vercel"
     ]
     // Two apps called web: the full path tells them apart.
@@ -159,10 +159,12 @@ describe("detect ready", () => {
     )
     execFileSync("git", ["-C", root, "init", "-q"])
     execFileSync("git", ["-C", root, "add", "."])
-    expect(detectSections(createDetectContext(root)).ready?.values).toEqual({
-      fix: ["bun run lint:fix"],
-      checks: ["bun run validate", "bunx vitest run --changed {base}"],
-    })
+    expect(detectSections(createDetectContext(root, {})).ready?.values).toEqual(
+      {
+        fix: ["bun run lint:fix"],
+        checks: ["bun run validate", "bunx vitest run --changed {base}"],
+      },
+    )
   })
 
   it("finds the test runner a shared stack package brings in", () => {
@@ -188,10 +190,12 @@ describe("detect ready", () => {
     )
     execFileSync("git", ["-C", root, "init", "-q"])
     execFileSync("git", ["-C", root, "add", "."])
-    expect(detectSections(createDetectContext(root)).ready?.values).toEqual({
-      fix: ["bun run lint:fix"],
-      checks: ["bun run validate", "bunx vitest run --changed {base}"],
-    })
+    expect(detectSections(createDetectContext(root, {})).ready?.values).toEqual(
+      {
+        fix: ["bun run lint:fix"],
+        checks: ["bun run validate", "bunx vitest run --changed {base}"],
+      },
+    )
   })
 })
 

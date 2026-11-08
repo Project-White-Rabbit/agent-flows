@@ -1,8 +1,38 @@
 import type { IntegrationSpec } from "../../config/types.ts"
 import { SLUG } from "../patterns.ts"
 
-/** Where Superset checks out its workspaces. */
-export const SUPERSET_WORKTREES = "/.superset/worktrees/"
+/**
+ * Where Superset checks out its workspaces by default: `~/.superset/worktrees/`,
+ * or `~/.paradev/worktrees/` since it became Paradev. People can move them
+ * (its `worktreeBaseDir` setting, or a project's own), so this is only a clue.
+ */
+export const SUPERSET_WORKTREES = [
+  "/.superset/worktrees/",
+  "/.paradev/worktrees/",
+]
+
+/** Set in Superset's terminals. */
+const SUPERSET_ENV = "SUPERSET_WORKSPACE_ID"
+
+/**
+ * Whether `superset ws list --json` output has a worktree workspace checked
+ * out at `root`. Not a `local` one: that's a repo's main checkout, which other
+ * apps may list too, so it says nothing about which app this session is in.
+ */
+export function hasWorktree(stdout: string, root: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(stdout)
+    const list = Array.isArray(parsed)
+      ? parsed
+      : ((parsed as { workspaces?: unknown[] })?.workspaces ?? [])
+    return list.some((ws) => {
+      const { worktreePath, type } = ws as Record<string, unknown>
+      return worktreePath === root && type !== "local"
+    })
+  } catch {
+    return false
+  }
+}
 
 export const superset: IntegrationSpec = {
   path: "integrations.superset",
@@ -27,10 +57,17 @@ export const superset: IntegrationSpec = {
   lookup:
     "`superset projects list --local --json`: the project whose `repo` is this repository's origin, or whose `path` is its main checkout",
   access: { cli: { bin: "superset", auth: ["superset", "auth", "whoami"] } },
+  session: {
+    env: [SUPERSET_ENV],
+    check: {
+      command: ["superset", "ws", "list", "--local", "--json"],
+      matches: hasWorktree,
+    },
+  },
   provides: {
     workspaces: {
       workspaces: {
-        cli: "`superset ws list --local --json`, keeping the ones with `projectId` `{project}` (with <repository>, that project's `id`, as for `createWorkspace`) and no `archivedAt`. Each has `id`, `name`, `branch`, and `tags` (its sidebar section, empty for none). This session runs in the one whose `id` is `$SUPERSET_WORKSPACE_ID`",
+        cli: "`superset ws list --local --json`, keeping the ones with `projectId` `{project}` (with <repository>, that project's `id`, as for `createWorkspace`) and no `archivedAt`. Each has `id`, `name`, `branch`, and `tags` (its sidebar section, empty for none). This session runs in the one whose `id` is `$SUPERSET_WORKSPACE_ID`, or, with that unset, whose `worktreePath` is `git rev-parse --show-toplevel`",
       },
       renameWorkspace: {
         cli: "`superset ws update <id> --local --json --name <name>`, adding `--tag <section>` for a section or `--clear-tags` for `none` (a tag files the workspace in the sidebar section of that name, making it)",
@@ -46,13 +83,15 @@ export const superset: IntegrationSpec = {
       .split("\n")
       .filter(
         (line) =>
-          line.startsWith("worktree ") && line.includes(SUPERSET_WORKTREES),
+          line.startsWith("worktree ") &&
+          SUPERSET_WORKTREES.some((part) => line.includes(part)),
       ).length
-    return count > 0
-      ? {
-          values: {},
-          evidence: [`${count} git worktree(s) checked out by Superset`],
-        }
-      : undefined
+    const evidence = [
+      ...(ctx.env[SUPERSET_ENV] ? ["this session runs in Superset"] : []),
+      ...(count > 0
+        ? [`${count} git worktree(s) in Superset's default folder`]
+        : []),
+    ]
+    return evidence.length > 0 ? { values: {}, evidence } : undefined
   },
 }

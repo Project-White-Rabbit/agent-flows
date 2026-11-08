@@ -118,7 +118,47 @@ export type ResolvedIntegration = {
   values: SectionValues
   /** How this machine can reach it, when it was probed. */
   access?: AccessReport
+  /** This session runs inside it (see `IntegrationSpec.session`). */
+  here?: true
   ops: Record<string, OpImpl>
+}
+
+/** Where this session runs: its environment, its checkout, and a way to ask. */
+export type SessionContext = {
+  env: Record<string, string | undefined>
+  root: string
+  /** `command`'s stdout when it exits 0 in `cwd`, else undefined. */
+  run(command: string[], cwd: string): Promise<string | undefined>
+}
+
+/**
+ * The paths of the integrations this session runs inside (see
+ * `IntegrationSpec.session`): the ones whose variable is set, else the ones
+ * whose app says this checkout is one of its worktrees.
+ */
+export async function runningIn(
+  specs: IntegrationSpec[],
+  session: SessionContext,
+): Promise<Set<string>> {
+  const byEnv = specs.filter((spec) =>
+    spec.session?.env.some((name) => Boolean(session.env[name])),
+  )
+  if (byEnv.length > 0) {
+    return new Set(byEnv.map((spec) => spec.path))
+  }
+  const asked = await Promise.all(
+    specs.map(async (spec) => {
+      const check = spec.session?.check
+      if (!check) {
+        return undefined
+      }
+      const out = await session.run(check.command, session.root)
+      const yes =
+        out !== undefined && (check.matches?.(out, session.root) ?? true)
+      return yes ? spec.path : undefined
+    }),
+  )
+  return new Set(asked.filter((p): p is string => p !== undefined))
 }
 
 /** Put a `script` variant first on every op that has an adapter. */
@@ -141,7 +181,10 @@ function withScripts(
 }
 
 export type CapabilityResolution = {
-  /** Every configured provider, in registry order. Flows use all of them. */
+  /**
+   * Every configured provider, in registry order except that the ones this
+   * session runs in come first. Flows use all of them.
+   */
   configured: ResolvedIntegration[]
   /** Providers the team declined (listed in `skipped`). */
   skipped: string[]
@@ -155,6 +198,8 @@ export function resolveCapability(
   integrations: IntegrationSpec[] = INTEGRATIONS,
   access: Record<string, AccessReport> = {},
   scripts: Record<string, Record<string, LoadedAdapter>> = {},
+  /** Paths of the integrations this session runs inside (`runningIn`). */
+  here: Set<string> = new Set(),
 ): CapabilityResolution {
   const skippedPaths = Array.isArray(config.skipped)
     ? (config.skipped as string[])
@@ -188,6 +233,7 @@ export function resolveCapability(
           ...(typeof level === "string" ? { level } : {}),
           values: withoutUse(values),
           ...(reach ? { access: reach } : {}),
+          ...(here.has(spec.path) ? { here: true as const } : {}),
           ops: withScripts(
             fillOps(
               spec.provides[capability],
@@ -206,6 +252,10 @@ export function resolveCapability(
       out.unconfigured.push(id)
     }
   }
+  // Stable: the rest keep registry order.
+  out.configured.sort(
+    (a, b) => Number(Boolean(b.here)) - Number(Boolean(a.here)),
+  )
   return out
 }
 

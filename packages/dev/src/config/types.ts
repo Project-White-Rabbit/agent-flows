@@ -153,6 +153,11 @@ export type DetectContext = {
    * every JS or Python dependency whose name matches.
    */
   dependsOn(pattern: RegExp): string[]
+  /**
+   * This session's environment variables, for the few detectors that check
+   * whether it runs inside an app (`IntegrationSpec.session`). Never secrets.
+   */
+  env: Record<string, string | undefined>
   /** Committed env templates (.env.example and friends). Real .env files are never read. */
   envTemplates: { file: string; text: string }[]
 }
@@ -274,6 +279,27 @@ export type IntegrationSpec = SectionSpec & {
   optIn?: string[]
   /** Ops this integration can run as code: see `Adapter`. */
   adapters?: Record<string, Adapter>
+  /**
+   * How to tell this session runs inside the tool, for an app that hosts the
+   * agent (a workspace app). When several integrations provide a capability,
+   * the one the session runs in comes first and is marked `here`, so the same
+   * repo opened from two apps acts through whichever one it's in. Never by
+   * where the checkout is: these apps let people put worktrees anywhere.
+   */
+  session?: {
+    /** Variables the app sets in its terminals; any one set settles it. */
+    env: string[]
+    /**
+     * When no app's variable is set (a terminal of its own, opened in the
+     * app's worktree): a command, run in the checkout, that asks the app.
+     * It's this app's worktree when the command exits 0 and, with `matches`,
+     * its output matches.
+     */
+    check?: {
+      command: string[]
+      matches?(stdout: string, root: string): boolean
+    }
+  }
 }
 
 /** What an adapter gets: the entry's values, its arguments, and its access. */

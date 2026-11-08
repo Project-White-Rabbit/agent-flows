@@ -3,6 +3,7 @@
 // and src/integrations (each integration's spec); this file only reads, plans,
 // and writes, so every section behaves the same way.
 
+import { execFile } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { probeAll, systemProbe } from "../config/access.ts"
@@ -39,6 +40,7 @@ import {
   findCapability,
   providersOf,
   resolveCapability,
+  runningIn,
 } from "../config/integrations.ts"
 import {
   checkSource,
@@ -336,6 +338,20 @@ async function integrations(root: string, args: string[]): Promise<void> {
     systemProbe(),
     readLocal(root).tokens,
   )
+  const here = await runningIn(configured, {
+    env: process.env,
+    root,
+    run: (command, cwd) =>
+      new Promise((resolve) => {
+        // Asking a local app; never let one that's stuck hang the flow.
+        execFile(
+          command[0],
+          command.slice(1),
+          { cwd, timeout: 10_000, maxBuffer: 16 * 1024 * 1024 },
+          (error, stdout) => resolve(error ? undefined : stdout),
+        )
+      }),
+  })
   const scripts: Record<string, Record<string, LoadedAdapter>> = {}
   const adapterIssues: string[] = []
   for (const spec of configured) {
@@ -347,7 +363,7 @@ async function integrations(root: string, args: string[]): Promise<void> {
     (id) =>
       [
         id,
-        resolveCapability(config, id, INTEGRATIONS, access, scripts),
+        resolveCapability(config, id, INTEGRATIONS, access, scripts, here),
       ] as const,
   )
   const missing = resolved.filter(([, r]) => r.configured.length === 0)
@@ -701,7 +717,9 @@ const HELP = `Usage: configure.ts <command>
   integrations <capability>... [--optional]
                   Print {"integrations": {"<capability>": [...]}}: every
                   configured integration providing it (one per instance), with
-                  its values and ops.
+                  its values and ops. The ones this session runs inside (a
+                  workspace app's terminal or worktree) come first, marked
+                  "here": true.
                   Exits ${NOT_CONFIGURED_EXIT} with {"configured": false} when the config is
                   missing or invalid, or (without --optional) a capability has
                   no integration.
