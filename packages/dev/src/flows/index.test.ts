@@ -34,6 +34,21 @@ describe("dev flows", () => {
     ])
   })
 
+  it("falls back to an op's next variant when its way in fails, never twice for a write", () => {
+    const users = files.filter((f) =>
+      f.content.includes('configure.ts" integrations'),
+    )
+    expect(users.length).toBeGreaterThan(0)
+    for (const file of users) {
+      expect(file.content, file.path).toContain(
+        "go on to the next variant the op lists",
+      )
+      expect(file.content, file.path).toContain(
+        "whether the write landed anyway",
+      )
+    }
+  })
+
   it("runs commands from the installed plugin root", () => {
     for (const file of files.filter((f) => f.content.includes("node "))) {
       expect(file.content).toContain(
