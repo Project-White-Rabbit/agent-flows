@@ -178,6 +178,13 @@ export const CAPABILITIES: CapabilitySpec[] = [
     },
   },
   {
+    id: "browser",
+    name: "Browser",
+    purpose:
+      "A browser built into the workspace app, for opening a branch's preview next to its agent. No flow uses it yet",
+    ops: {},
+  },
+  {
     id: "deployments",
     name: "Deployments",
     purpose: "Preview and production deployments, runtime logs",

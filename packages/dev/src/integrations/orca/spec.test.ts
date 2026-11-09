@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { DetectContext } from "../../config/types.ts"
+import { superset } from "../superset/spec.ts"
 import { worktreeDirectory } from "../worktree/spec.ts"
 import { orca } from "./spec.ts"
 
@@ -47,6 +48,11 @@ describe("orca", () => {
     expect(
       orca.detect?.(checkout("worktree /Users/sam/code/web\n")),
     ).toBeUndefined()
+  })
+
+  it("has a browser, like Superset", () => {
+    expect(Object.keys(orca.provides)).toContain("browser")
+    expect(Object.keys(superset.provides)).toContain("browser")
   })
 
   it("keeps Orca's worktrees out of the repo's own worktree directory", () => {
