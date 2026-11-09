@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { CAPABILITIES } from "../config/capabilities.ts"
-import { OP_PLACEHOLDER, providersOf } from "../config/integrations.ts"
+import {
+  OP_PLACEHOLDER,
+  providersOf,
+  resolveCapability,
+  runningIn,
+} from "../config/integrations.ts"
 import { parseGithubRemote } from "./github/spec.ts"
 import { parseGitlabRemote } from "./gitlab/spec.ts"
 import { parseGraphiteConfig } from "./graphite/spec.ts"
@@ -262,5 +267,91 @@ describe("parseSentryConfig", () => {
         "[auth]\ntoken=secret\n[defaults]\norg=acme\nproject=web\nurl=https://s.acme.dev",
       ),
     ).toEqual({ org: "acme", project: "web", url: "https://s.acme.dev" })
+  })
+})
+
+// The same repo set up in two workspace apps acts through the one it's in.
+describe("the workspace app this session runs in", () => {
+  const config = {
+    integrations: {
+      superset: { project: "a10b8f37" },
+      orca: { repo: "66ee3232" },
+    },
+  }
+  const ROOT = "/Users/sam/anywhere/web-fix"
+  type Inside = "orca" | "superset" | "main" | "none"
+  // Answers as the apps' CLIs do (from their source) for a checkout at ROOT:
+  // both list a registered repo's main checkout as one of theirs.
+  const apps = (inside: Inside) => async (command: string[], cwd: string) => {
+    if (command[0] === "orca") {
+      const linked = inside === "orca"
+      return (linked || inside === "main") && cwd === ROOT
+        ? JSON.stringify({
+            ok: true,
+            result: { worktree: { path: ROOT, isMainWorktree: !linked } },
+          })
+        : undefined
+    }
+    return JSON.stringify([
+      {
+        worktreePath: inside === "superset" || inside === "main" ? ROOT : "/x",
+        type: inside === "main" ? "local" : "worktree",
+      },
+    ])
+  }
+  const order = async (
+    env: Record<string, string>,
+    inside: Inside = "none",
+  ) => {
+    const here = await runningIn(INTEGRATIONS, {
+      env,
+      root: ROOT,
+      run: apps(inside),
+    })
+    return resolveCapability(
+      config,
+      "workspaces",
+      INTEGRATIONS,
+      {},
+      {},
+      here,
+    ).configured.map((r) => [r.integration, r.here ?? false])
+  }
+
+  it("comes first, marked here, by the variable its terminals set", async () => {
+    expect(await order({ ORCA_WORKTREE_ID: "wt-1" })).toEqual([
+      ["orca", true],
+      ["superset", false],
+    ])
+    expect(await order({ SUPERSET_WORKSPACE_ID: "ws-1" })).toEqual([
+      ["superset", true],
+      ["orca", false],
+    ])
+  })
+
+  it("trusts the variable over what the other app says", async () => {
+    expect(await order({ ORCA_WORKTREE_ID: "wt-1" }, "superset")).toEqual([
+      ["orca", true],
+      ["superset", false],
+    ])
+  })
+
+  it("asks the apps when no variable is set, wherever the worktree is", async () => {
+    expect((await order({}, "orca"))[0]).toEqual(["orca", true])
+    expect((await order({}, "superset"))[0]).toEqual(["superset", true])
+  })
+
+  it("claims no app for a main checkout both apps list", async () => {
+    expect(await order({}, "main")).toEqual([
+      ["superset", false],
+      ["orca", false],
+    ])
+  })
+
+  it("leaves registry order alone outside any app", async () => {
+    expect(await order({})).toEqual([
+      ["superset", false],
+      ["orca", false],
+    ])
   })
 })

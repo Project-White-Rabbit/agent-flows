@@ -1,6 +1,7 @@
 import path from "node:path"
 import type { IntegrationSpec } from "../../config/types.ts"
 import { CONDUCTOR_WORKSPACES } from "../conductor/spec.ts"
+import { ORCA_WORKSPACES } from "../orca/spec.ts"
 import { PATH, SLUG } from "../patterns.ts"
 import { SUPERSET_WORKTREES } from "../superset/spec.ts"
 
@@ -22,8 +23,9 @@ export function worktreeDirectory(porcelain: string): string | undefined {
   const counts = new Map<string, number>()
   for (const worktree of linked) {
     if (
-      worktree.includes(SUPERSET_WORKTREES) ||
-      worktree.includes(CONDUCTOR_WORKSPACES)
+      SUPERSET_WORKTREES.some((part) => worktree.includes(part)) ||
+      worktree.includes(CONDUCTOR_WORKSPACES) ||
+      worktree.includes(ORCA_WORKSPACES)
     ) {
       continue
     }

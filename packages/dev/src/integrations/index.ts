@@ -13,6 +13,7 @@ import { jira } from "./jira/spec.ts"
 import { linear } from "./linear/spec.ts"
 import { lore } from "./lore/spec.ts"
 import { neon } from "./neon/spec.ts"
+import { orca } from "./orca/spec.ts"
 import { posthog } from "./posthog/spec.ts"
 import { sentry } from "./sentry/spec.ts"
 import { slack } from "./slack/spec.ts"
@@ -34,6 +35,7 @@ export const INTEGRATIONS: IntegrationSpec[] = [
   slack,
   lore,
   superset,
+  orca,
   conductor,
   worktree,
 ]

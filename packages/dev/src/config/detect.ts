@@ -71,7 +71,10 @@ export function pythonDependencyNames(file: string, text: string): string[] {
   return [...names]
 }
 
-export function createDetectContext(root: string): DetectContext {
+export function createDetectContext(
+  root: string,
+  env: Record<string, string | undefined> = process.env,
+): DetectContext {
   const git = (args: string[]) => {
     const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" })
     return result.status === 0 ? result.stdout.trim() : undefined
@@ -111,6 +114,7 @@ export function createDetectContext(root: string): DetectContext {
   }
   return {
     root,
+    env,
     git,
     gitCommonDir: git([
       "rev-parse",
