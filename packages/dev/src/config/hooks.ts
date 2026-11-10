@@ -30,6 +30,7 @@ export const HOOK_VARS = [
   "merge",
   "since",
   "scope",
+  "url",
 ] as const
 
 export type HookVar = (typeof HOOK_VARS)[number]
@@ -80,6 +81,11 @@ export type HookPoint = {
    * passes hands its stdout to the agent with the report, not only its exit.
    */
   findings?: boolean
+  /**
+   * Why configure can't try a command here before writing it, for a point
+   * that needs what the flow has set up by then (an open page).
+   */
+  untried?: string
   example: Hook[]
 }
 
@@ -240,6 +246,22 @@ export const HOOK_POINTS: HookPoint[] = [
         name: "server-down",
         on: "merged",
         run: "./scripts/dev-server.sh down {branch}",
+      },
+    ],
+  },
+  {
+    id: "preview.afterOpen",
+    flow: "preview",
+    when: "Once preview has opened the page, before its report: for getting the person onto it (signing in as a test user, picking an account, setting the state it shows). `{url}` is the page it opened. A prompt is a task in the browser that opened it, done only when this session can drive that browser; else preview tells the person what it asked",
+    effects:
+      "Commands may change the local dev server's own data (a test session, seeded rows), but not the checkout, since preview never edits it, and not deploy, publish, migrate, or write to a shared service or database",
+    failure: "report",
+    untried: "it needs the dev server running and the page open",
+    example: [
+      {
+        name: "sign-in",
+        prompt:
+          "If {url} went to a sign-in page, sign in with TEST_USER_EMAIL and TEST_USER_PASSWORD from .env.local, then go back to {url}",
       },
     ],
   },

@@ -3,6 +3,7 @@ import {
   CONFIGURE_GET_AND_INTEGRATIONS,
   DEV_COMMANDS,
   devKit,
+  HOOK_RESULTS,
   HOOKS_COMMAND,
   hooksInvariant,
   USE_INTEGRATIONS,
@@ -102,7 +103,7 @@ Run \`{{command:preview}} server\`. It reads \`preview.command\`, \`preview.url\
 
 A route with dynamic segments (\`[id]\`, \`:slug\`) needs real values: take them from the session's work, the repo's seed data or fixtures, or a link on the parent page that already answers. When none turns up, use the nearest page without one, and say so. With no page in the change (a back-end change, a config change), \`<target>\` is \`<url>\`, and say which change it serves.
 
-Check it before opening: \`curl -s -o /dev/null -w '%{http_code}' <target>\`. A 404 means the route was read wrong: look again, once. A 5xx is the page failing: open it anyway (its error is worth seeing), and give the server's log or output in the report. A redirect to a sign-in page is fine: say the person may need to sign in.
+Check it before opening: \`curl -s -o /dev/null -w '%{http_code}' <target>\`. A 404 means the route was read wrong: look again, once. A 5xx is the page failing: open it anyway (its error is worth seeing), and give the server's log or output in the report. A redirect to a sign-in page is fine: a \`preview.afterOpen\` hook may get past it (step 4); else say the person may need to sign in.
 
 Keep the other pages the change touches, their URLs, for the report.`,
           next: "main/open",
@@ -119,6 +120,16 @@ Keep the other pages the change touches, their URLs, for the report.`,
 3. **The system's default browser.** \`open '<target>'\` on macOS, \`xdg-open '<target>'\` on Linux, \`start "" "<target>"\` on Windows. Skip it when there's no display to open one on (a remote shell, a container, CI).
 
 When none works, give the person \`<target>\` to open themselves.`,
+          next: "main/after-open",
+        },
+        {
+          id: "after-open",
+          kind: "action",
+          title: "The repo's steps on the page",
+          commandCalls: ["hooks"],
+          body: `Run \`{{command:hooks}} run preview.afterOpen --flow preview --mode <mode> --url <target>\`: the repo's own steps for getting the person onto the page (signing in as a test user, picking an account). ${HOOK_RESULTS} A failure here doesn't stop preview: the page is open, so name it in the report.
+
+A task a hook hands you is about the page, so do it in the browser that opened \`<target>\`, and only when this session can drive that one: with this session's browser tools when the page opened there, or with the tools this session has for the workspace app's browser pane (its CLI, or a skill for it) when it opened there. Never open another browser to do it: the person sees the one that opened. When nothing here drives that browser (the system's browser, or none opened), don't do the task: put what it asks in the report for the person to do, and go on with \`--after <agent.resume>\`. A secret the task needs (a test user's password) comes from where the task says (an env file, a variable): type it into the page, never print or echo it, and never make one up.`,
           next: "main/report",
         },
         {
@@ -128,6 +139,7 @@ When none works, give the person \`<target>\` to open themselves.`,
           body: `A few lines:
 
 - **Opened:** \`<target>\`, and where (the workspace app's browser, this session's browser tools, the system's browser, or not opened), with why it's the page: the change it shows. Any trouble \`curl\` found (a 5xx and the log lines behind it, a sign-in).
+- **On the page:** each \`preview.afterOpen\` hook and what it did (signed in as whom), or what it asks the person to do when this session couldn't drive the browser, and any that failed.
 - **Server:** started now (\`pid\`, \`log\`) or already running (whose: preview's, or one started by hand), and its \`url\`. When preview started it: \`{{cmd}}preview stop\` stops it. When the command came from the repo rather than the config: \`{{cmd}}configure preview\` saves it.
 - **Also changed:** the other pages the change touches, as URLs, when there are any.`,
           next: null,

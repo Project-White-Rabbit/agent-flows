@@ -280,5 +280,8 @@ describe("fillVars", () => {
         scope: "delta",
       }),
     ).toBe("ENG-1 full abc def delta")
+    expect(fillVars("open {url}", { url: "http://localhost:3000/a" })).toBe(
+      "open http://localhost:3000/a",
+    )
   })
 })
