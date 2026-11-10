@@ -24,8 +24,10 @@ import {
   readJson,
   readStdin,
   requiredFlag,
+  requireGitPath,
   run,
   runMain,
+  stateDir,
   USAGE_EXIT,
   UsageError,
 } from "./lib.ts"
@@ -55,14 +57,6 @@ function git(args: string[], cwd?: string): string | undefined {
 
 function lines(text: string | undefined): string[] {
   return (text ?? "").split("\n").filter(Boolean)
-}
-
-function gitPath(flag: string): string {
-  const dir = git(["rev-parse", "--path-format=absolute", flag])
-  if (!dir) {
-    throw new Error("not inside a git repository")
-  }
-  return dir
 }
 
 function currentBranch(): string {
@@ -494,7 +488,7 @@ function plan(args: string[]): void {
   const { values: ignoreChecks, rest } = takeRepeated(afterSkip, "ignore-check")
   const flags = parseFlags(rest)
   const base = requiredFlag(flags, "base")
-  const root = gitPath("--show-toplevel")
+  const root = requireGitPath("--show-toplevel")
   // Read first, so a step it can't skip stops the plan before the fetch.
   const config = loadConfig(root).config
   readySkips(config, { skip, ignoreChecks })
@@ -517,12 +511,7 @@ function plan(args: string[]): void {
   const changed = [
     ...new Set([...committed, ...uncommitted, ...untracked]),
   ].sort()
-  const logDir = path.join(
-    gitPath("--absolute-git-dir"),
-    "agent-flows",
-    "ready",
-    "logs",
-  )
+  const logDir = path.join(stateDir("ready"), "logs")
   fs.mkdirSync(logDir, { recursive: true })
   printJson({
     branch: currentBranch(),
@@ -847,10 +836,6 @@ export function parseChecks(text: string): Check[] {
   })
 }
 
-function stateDir(): string {
-  return path.join(gitPath("--git-common-dir"), "agent-flows", "ready")
-}
-
 function readState(dir: string, branch: string): ReadyState {
   const stored = readBranchState<ReadyState>(dir, branch)
   return { passes: Array.isArray(stored?.passes) ? stored.passes : [] }
@@ -895,7 +880,7 @@ function ciStart(args: string[]): void {
   const flags = parseFlags(rest)
   const sha = requiredFlag(flags, "sha")
   const ci = configuredCi()
-  const dir = stateDir()
+  const dir = stateDir("ready", { shared: true })
   const branch = currentBranch()
   const state = startPass(readState(dir, branch), sha, fixed, new Date(), first)
   writeBranchState(dir, branch, state)
@@ -939,7 +924,7 @@ async function ciRecord(args: string[]): Promise<void> {
   const checks = parseChecks(
     file ? JSON.stringify(readJson(file)) : await readStdin(),
   )
-  const dir = stateDir()
+  const dir = stateDir("ready", { shared: true })
   const branch = currentBranch()
   const { state, report } = recordChecks(
     readState(dir, branch),
@@ -1013,7 +998,7 @@ async function ciWait(args: string[]): Promise<void> {
   const timeout = numberFlag(flags, "timeout", ci.timeoutSeconds)
   const interval = numberFlag(flags, "interval", DEFAULT_INTERVAL)
   const maxWait = numberFlag(flags, "max-wait", Number.POSITIVE_INFINITY)
-  const dir = stateDir()
+  const dir = stateDir("ready", { shared: true })
   const branch = currentBranch()
   const began = Date.now()
   let errors = 0

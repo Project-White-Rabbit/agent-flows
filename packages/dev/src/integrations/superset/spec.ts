@@ -65,7 +65,11 @@ export const superset: IntegrationSpec = {
     },
   },
   provides: {
-    browser: {},
+    browser: {
+      openUrl: {
+        cli: "`superset browser open --workspace <workspace> --url <url> --show --json`: it opens <url> in the workspace's browser pane (making one when there's none) and shows the workspace. It prints the pane's id",
+      },
+    },
     workspaces: {
       workspaces: {
         cli: "`superset ws list --local --json`, keeping the ones with `projectId` `{project}` (with <repository>, that project's `id`, as for `createWorkspace`) and no `archivedAt`. Each has `id`, `name`, `branch`, and `tags` (its sidebar section, empty for none). This session runs in the one whose `id` is `$SUPERSET_WORKSPACE_ID`, or, with that unset, whose `worktreePath` is `git rev-parse --show-toplevel`",

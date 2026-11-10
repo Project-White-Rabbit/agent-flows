@@ -8,6 +8,7 @@ import { close } from "./close.ts"
 import { evaluate } from "./evaluate.ts"
 import { hooks } from "./hooks.ts"
 import { merge } from "./merge.ts"
+import { preview } from "./preview.ts"
 import { ready } from "./ready.ts"
 import { repo } from "./repo.ts"
 import { sync } from "./sync.ts"
@@ -21,6 +22,7 @@ export const SECTIONS: SectionSpec[] = [
   evaluate,
   merge,
   close,
+  preview,
   hooks,
   ...INTEGRATIONS,
 ]
