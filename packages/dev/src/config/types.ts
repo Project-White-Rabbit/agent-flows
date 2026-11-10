@@ -53,7 +53,7 @@ export type Hook = {
   modes?: string[]
   /**
    * Only at an `after` point: only when the command succeeded, or failed;
-   * `merged` (at `merge.after` and `hooks.after`) when the pull request merged,
+   * `merged` (at `finish.after` and `hooks.after`) when the pull request merged,
    * whatever came after.
    */
   on?: "success" | "failure" | "merged"

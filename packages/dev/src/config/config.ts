@@ -28,7 +28,7 @@ import { checkUse, USE_KEY, usesOf } from "./use.ts"
 export const CONFIG_PATH = ".agent-flows/config.json"
 
 export { INSTANCE_KEY }
-export const CONFIG_VERSION = 3
+export const CONFIG_VERSION = 4
 
 /** Upgrades from each older version. */
 export const MIGRATIONS: Migration[] = [
@@ -69,7 +69,48 @@ export const MIGRATIONS: Migration[] = [
       return config
     },
   },
+  {
+    // The merge flow became finish and the close flow became cancel, since
+    // finishing work doesn't always mean merging a pull request, and closing
+    // read as finishing. Their sections, skipped paths, and the flows a
+    // general hook names follow.
+    from: 3,
+    migrate(config) {
+      const renamed = (name: string): string =>
+        FLOW_RENAMES[name as keyof typeof FLOW_RENAMES] ?? name
+      for (const [from, to] of Object.entries(FLOW_RENAMES)) {
+        if (from in config && !(to in config)) {
+          const { [from]: section, ...rest } = config
+          config = { ...rest, [to]: section }
+        }
+      }
+      if (Array.isArray(config.skipped)) {
+        config.skipped = config.skipped.map((p: unknown) =>
+          typeof p === "string" ? p.replace(/^[^.]+/, renamed) : p,
+        )
+      }
+      const hooks = config.hooks
+      if (isRecord(hooks)) {
+        for (const point of Object.values(hooks)) {
+          if (!Array.isArray(point)) {
+            continue
+          }
+          for (const hook of point) {
+            if (isRecord(hook) && Array.isArray(hook.flows)) {
+              hook.flows = hook.flows.map((flow: unknown) =>
+                typeof flow === "string" ? renamed(flow) : flow,
+              )
+            }
+          }
+        }
+      }
+      return config
+    },
+  },
 ]
+
+/** Flows renamed in format 4, by their old names. */
+const FLOW_RENAMES = { merge: "finish", close: "cancel" } as const
 
 export type RawConfig = Record<string, unknown>
 

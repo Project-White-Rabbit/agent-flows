@@ -1176,7 +1176,7 @@ survey and facts stop when origin/<base> is missing after the fetch.`
 /**
  * The issue a sync recorded for the current branch, or one an earlier sync
  * tool left for it. Reads only: for a flow that needs the branch's issue
- * without syncing (close).
+ * without syncing (cancel).
  */
 function issue(_args: Args): void {
   const branch = currentBranch()

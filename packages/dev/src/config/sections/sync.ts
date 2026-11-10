@@ -147,7 +147,7 @@ export const sync: SectionSpec = {
       key: "requireBase",
       type: "boolean",
       description:
-        "Stop when the pull request targets neither `repo.baseBranch` nor the branch's stack parent, as merge does (default false: sync catches up to whatever base the pull request has)",
+        "Stop when the pull request targets neither `repo.baseBranch` nor the branch's stack parent, as finish does (default false: sync catches up to whatever base the pull request has)",
       example: true,
     },
     {

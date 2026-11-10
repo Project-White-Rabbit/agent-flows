@@ -46,7 +46,7 @@ const CHECK_FILE =
 const TEARDOWN_FILE = /(?:server|services|stack)[-_]?(?:down|stop)|teardown/
 
 /** A branch's resources go once it lands, or once it's thrown away. */
-const TEARDOWN_POINTS = ["merge.after", "close.after"] as const
+const TEARDOWN_POINTS = ["finish.after", "cancel.after"] as const
 
 /** CI lines worth running before cleanup. */
 const CI_CHECK = /version|changelog|migrat/i
@@ -215,7 +215,7 @@ export function suggestHooks(ctx: DetectContext): HookSuggestion[] {
             on: "success",
             run: fileCommand(ctx, file),
           },
-          evidence: `${file} looks like teardown; see what arguments it takes (\`{branch}\` is the ${point === "merge.after" ? "merged" : "closed"} branch)`,
+          evidence: `${file} looks like teardown; see what arguments it takes (\`{branch}\` is the ${point === "finish.after" ? "merged" : "closed"} branch)`,
         })
       }
     }

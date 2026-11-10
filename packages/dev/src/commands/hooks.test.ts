@@ -132,10 +132,10 @@ describe("runHooks", () => {
     const report = runHooks(
       root,
       config({
-        merge: { after: [{ name: "down", run: "exit 3" }] },
+        finish: { after: [{ name: "down", run: "exit 3" }] },
         hooks: { after: [{ name: "notify", run: "touch notified" }] },
       }),
-      request(["merge.after", "after"], "merge", { outcome: "success" }),
+      request(["finish.after", "after"], "finish", { outcome: "success" }),
     )
     expect(report.status).toBe("done")
     expect(report.failures.map((f) => f.name)).toEqual(["down"])
@@ -259,11 +259,11 @@ describe("runHooks", () => {
     runHooks(
       root,
       config({
-        merge: {
+        finish: {
           after: [{ name: "vars", run: `${env}; echo {merge} >> out.txt` }],
         },
       }),
-      request(["merge.after"], "merge", {
+      request(["finish.after"], "finish", {
         outcome: "failure",
         merged: true,
         mergeCommit: "abc123",
@@ -291,7 +291,7 @@ describe("runHooks", () => {
     const hooks = config({
       hooks: {
         before: [
-          { name: "ship", flows: ["sync", "ready", "merge"], run: "true" },
+          { name: "ship", flows: ["sync", "ready", "finish"], run: "true" },
           { name: "local", flows: ["sync"], modes: ["local"], run: "true" },
         ],
       },
@@ -303,7 +303,7 @@ describe("runHooks", () => {
         r.reason,
       ]),
     ).toEqual([
-      ["ship", "skipped", "only around sync, ready, merge"],
+      ["ship", "skipped", "only around sync, ready, finish"],
       ["local", "skipped", "only around sync"],
     ])
     expect(
@@ -318,7 +318,7 @@ describe("runHooks", () => {
   it("runs an on: merged hook whenever the pull request merged, whatever the outcome", () => {
     const root = repo()
     const hooks = config({
-      merge: {
+      finish: {
         after: [
           { name: "release", on: "merged", run: "true" },
           { name: "won", on: "success", run: "true" },
@@ -329,7 +329,10 @@ describe("runHooks", () => {
       runHooks(
         root,
         hooks,
-        request(["merge.after"], "merge", { outcome: "failure", merged: true }),
+        request(["finish.after"], "finish", {
+          outcome: "failure",
+          merged: true,
+        }),
       ).ran.map((r) => [r.name, r.result]),
     ).toEqual([
       ["release", "passed"],
@@ -339,7 +342,7 @@ describe("runHooks", () => {
       runHooks(
         root,
         hooks,
-        request(["merge.after"], "merge", { outcome: "failure" }),
+        request(["finish.after"], "finish", { outcome: "failure" }),
       ).ran[0],
     ).toMatchObject({
       result: "skipped",
@@ -475,7 +478,9 @@ describe("parsePoints", () => {
     expect(
       parsePoints(["ready.beforeFixPush"], "ready").map((p) => p.failure),
     ).toEqual(["stop"])
-    expect(() => parsePoints(["merge.after"], "ready")).toThrow("merge's point")
+    expect(() => parsePoints(["finish.after"], "ready")).toThrow(
+      "finish's point",
+    )
     expect(() => parsePoints(["before"], "configure")).toThrow("--flow")
     expect(() => parsePoints(["ready.during"], "ready")).toThrow(
       "no hook point",
@@ -513,7 +518,7 @@ describe("tryHook", () => {
 
   it("refuses an after point and a hook that isn't valid", () => {
     const root = repo()
-    const [after] = parsePoints(["merge.after"], "merge")
+    const [after] = parsePoints(["finish.after"], "finish")
     const [before] = parsePoints(["ready.before"], "ready")
     expect(() =>
       tryHook(
@@ -521,7 +526,7 @@ describe("tryHook", () => {
         config({}),
         after as HookPoint,
         { name: "x", run: "true" },
-        { flow: "merge" },
+        { flow: "finish" },
       ),
     ).toThrow("isn't tried")
     expect(() =>
@@ -623,7 +628,7 @@ describe("checkFlags", () => {
       "--scope must be full, delta, carry",
     )
     expect(() => checkFlags(flags({ merged: "yes" }), "ready")).toThrow(
-      "--merged is only for merge",
+      "--merged is only for finish",
     )
     expect(() =>
       checkFlags(flags({ after: "a/b", wait: "a/b" }), "ready"),

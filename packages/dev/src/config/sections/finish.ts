@@ -24,16 +24,16 @@ const ISSUE_ON_MERGE: FieldPattern = {
   hint: "`close`, `tracker`, or `leave`",
 }
 
-export const merge: SectionSpec = {
-  path: "merge",
+export const finish: SectionSpec = {
+  path: "finish",
   name: "Merge",
   purpose:
-    "Whether merge closes the issue itself, and the repo's own steps before merge lands a branch, before its CI wait, and after, for checks and cleanup no integration covers",
+    "Whether finish closes the issue itself, and the repo's own steps before finish lands a branch, before its CI wait, and after, for checks and cleanup no integration covers",
   fields: [
     {
       key: "issueOnMerge",
       description:
-        "What happens to the pull request's issue when it merges. `close` (the default): sync links it with the issue tracker's closing form (`Fixes <ID>`) and merge's close-out moves it to done. `tracker`: the closing form, but merge leaves the issue to the tracker's own integration with the source-control host (one that moves it to a state of its own, like In QA). `leave`: the linking-only form (`Part of <ID>`) and no close-out, so merging leaves the issue's state alone",
+        "What happens to the pull request's issue when it merges. `close` (the default): sync links it with the issue tracker's closing form (`Fixes <ID>`) and finish's close-out moves it to done. `tracker`: the closing form, but finish leaves the issue to the tracker's own integration with the source-control host (one that moves it to a state of its own, like In QA). `leave`: the linking-only form (`Part of <ID>`) and no close-out, so merging leaves the issue's state alone",
       example: "leave",
       pattern: ISSUE_ON_MERGE,
     },
@@ -67,14 +67,14 @@ export const merge: SectionSpec = {
       key: "requireClean",
       type: "boolean",
       description:
-        "Refuse to merge with uncommitted changes even when the branch has no pull request yet, before merge's own sync could commit them (default false: with no pull request, merge runs sync, which commits what's uncommitted)",
+        "Refuse to merge with uncommitted changes even when the branch has no pull request yet, before finish's own sync could commit them (default false: with no pull request, finish runs sync, which commits what's uncommitted)",
       example: true,
     },
     {
       key: "ciTimeout",
       type: "number",
       description:
-        "Minutes merge waits for CI on the commit it lands to settle (default 30)",
+        "Minutes finish waits for CI on the commit it lands to settle (default 30)",
       example: 45,
     },
     {
@@ -101,21 +101,21 @@ export const merge: SectionSpec = {
     {
       key: "sync",
       description:
-        "How merge syncs the branch before its CI wait: `full` (the default) runs the whole sync, which catches the branch up to its base and pushes; `remote` refreshes only the pull request and its issue, so merge pushes nothing, and a branch that's behind, conflicting, or has unpushed commits stops for the user to sync first. `remote` keeps the commit CI and a recorded review saw as the one that lands",
+        "How finish syncs the branch before its CI wait: `full` (the default) runs the whole sync, which catches the branch up to its base and pushes; `remote` refreshes only the pull request and its issue, so finish pushes nothing, and a branch that's behind, conflicting, or has unpushed commits stops for the user to sync first. `remote` keeps the commit CI and a recorded review saw as the one that lands",
       example: "remote",
       pattern: SYNC,
     },
     {
       key: "requireEvaluation",
       description:
-        "Gate the merge on evaluate's recorded verdict (`evaluate.record`) for the commit that lands: `pass` merges only on a pass, and a flag needs the user's explicit go-ahead; `flag` merges on a pass or a flag. With no verdict, or one on an older commit, merge runs evaluate (recording its verdict) and gates on that; a `stop` stops the merge. With `evaluate.scope: delta`, a verdict carries to the head when the branch only took in its base",
+        "Gate the merge on evaluate's recorded verdict (`evaluate.record`) for the commit that lands: `pass` merges only on a pass, and a flag needs the user's explicit go-ahead; `flag` merges on a pass or a flag. With no verdict, or one on an older commit, finish runs evaluate (recording its verdict) and gates on that; a `stop` stops the merge. With `evaluate.scope: delta`, a verdict carries to the head when the branch only took in its base",
       example: "pass",
       pattern: EVALUATION,
     },
-    hookField("merge.before"),
-    hookField("merge.beforeCi"),
-    hookField("merge.after"),
+    hookField("finish.before"),
+    hookField("finish.beforeCi"),
+    hookField("finish.after"),
   ],
   lookup:
-    "Leave it out when merging needs nothing of the repo's own. Set `requireAllChecks` when the team never merges past a failing check, required or not; `unresolvedThreads` to `bots` when an automated reviewer's open thread should block, or `blockingReviewers` when only some reviewers' should (CodeQL's `github-advanced-security`); `requireClean` when uncommitted work should never ride along with merge's own sync; `ciTimeout` when CI on the landing commit takes longer than 30 minutes; `watchDeploy` when merging to the base deploys, and a merge isn't done until that deploy is, with `deployTimeout` when the deploy can take longer than 30 minutes and `deployLogLines` when a failed step's log says more than its name; `sync` to `remote` when catching up shouldn't happen inside merge (a slow CI run, or a review gate on the head commit). Set `requireEvaluation` when nothing lands without a review of its head (with `evaluate.record`). Set `issueOnMerge` to `tracker` when the tracker's integration with the host moves the issue on merge, `leave` when merging shouldn't move it at all (the team does by hand), `after` for teardown done by hand after a merge today (with `on: success`), `before` for a check that must pass before anything lands, `beforeCi` for a commit that must land with the merge (a changelog entry)",
+    "Leave it out when merging needs nothing of the repo's own. Set `requireAllChecks` when the team never merges past a failing check, required or not; `unresolvedThreads` to `bots` when an automated reviewer's open thread should block, or `blockingReviewers` when only some reviewers' should (CodeQL's `github-advanced-security`); `requireClean` when uncommitted work should never ride along with finish's own sync; `ciTimeout` when CI on the landing commit takes longer than 30 minutes; `watchDeploy` when merging to the base deploys, and a merge isn't done until that deploy is, with `deployTimeout` when the deploy can take longer than 30 minutes and `deployLogLines` when a failed step's log says more than its name; `sync` to `remote` when catching up shouldn't happen inside finish (a slow CI run, or a review gate on the head commit). Set `requireEvaluation` when nothing lands without a review of its head (with `evaluate.record`). Set `issueOnMerge` to `tracker` when the tracker's integration with the host moves the issue on merge, `leave` when merging shouldn't move it at all (the team does by hand), `after` for teardown done by hand after a merge today (with `on: success`), `before` for a check that must pass before anything lands, `beforeCi` for a commit that must land with the merge (a changelog entry)",
 }

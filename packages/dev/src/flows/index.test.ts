@@ -13,16 +13,16 @@ describe("dev flows", () => {
 
   it("renders each flow's Claude Code skills", () => {
     expect(files.map((f) => f.path)).toEqual([
-      "skills/close/SKILL.md",
-      "skills/close-run/SKILL.md",
+      "skills/cancel/SKILL.md",
+      "skills/cancel-run/SKILL.md",
       "skills/configure/SKILL.md",
       "skills/create-tickets/SKILL.md",
       "skills/create-tickets-confirm/SKILL.md",
       "skills/create-tickets-apply/SKILL.md",
       "skills/evaluate/SKILL.md",
       "skills/evaluate-run/SKILL.md",
-      "skills/merge/SKILL.md",
-      "skills/merge-run/SKILL.md",
+      "skills/finish/SKILL.md",
+      "skills/finish-run/SKILL.md",
       "skills/preview/SKILL.md",
       "skills/ready/SKILL.md",
       "skills/ready-run/SKILL.md",
@@ -256,12 +256,12 @@ describe("dev flows", () => {
     expect(remote?.content).toContain("Only an explicit yes passes `workState`")
   })
 
-  it("picks the PR's issue link form from merge.issueOnMerge", () => {
+  it("picks the PR's issue link form from finish.issueOnMerge", () => {
     const main =
       files.find((f) => f.path === "skills/sync/SKILL.md")?.content ?? ""
     const remote =
       files.find((f) => f.path === "skills/sync-remote/SKILL.md")?.content ?? ""
-    expect(main).toMatch(/configure\.ts" get merge\.issueOnMerge --optional/)
+    expect(main).toMatch(/configure\.ts" get finish\.issueOnMerge --optional/)
     expect(main).toContain("(`null` reads as `close`)")
     // close (or unset) and tracker: the closing form at track
     expect(remote).toContain(
@@ -276,9 +276,9 @@ describe("dev flows", () => {
     )
   })
 
-  it("leaves the issue to sync's close-out only with merge.issueOnMerge close", () => {
+  it("leaves the issue to sync's close-out only with finish.issueOnMerge close", () => {
     const run =
-      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
     expect(run).toContain(
       "`--leave-issue` when `<issueOnMerge>` is `tracker` or `leave`",
     )
@@ -286,7 +286,7 @@ describe("dev flows", () => {
 
   it("never cancels an issue close only looked up, and keeps one other pull requests used", () => {
     const run =
-      files.find((f) => f.path === "skills/close-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/cancel-run/SKILL.md")?.content ?? ""
     expect(run).toContain(
       "keep what turns up as `<candidates>`, never `<issue>`",
     )
@@ -302,14 +302,14 @@ describe("dev flows", () => {
     expect(skill("sync")).toContain(
       "because the branch is in the config's `repo.protectedBranches`",
     )
-    for (const id of ["ready", "merge", "close-run"]) {
+    for (const id of ["ready", "finish", "cancel-run"]) {
       expect(skill(id), id).toMatch(
         /configure\.ts" get repo\.protectedBranches --optional/,
       )
     }
     expect(skill("ready")).toContain("Refusing to ready <branch>")
-    expect(skill("merge")).toContain("Refusing to merge from <branch")
-    expect(skill("close-run")).toContain("one of `<protected>`")
+    expect(skill("finish")).toContain("Refusing to merge from <branch")
+    expect(skill("cancel-run")).toContain("one of `<protected>`")
   })
 
   it("never reads a failed lookup as none, clean, or no issue", () => {
@@ -376,15 +376,15 @@ describe("dev flows", () => {
     expect(skill("sync-local")).toContain("**Skip with `--no-catch-up`:**")
   })
 
-  it("ranks recent issues with tickets.ts match in close's issue search", () => {
+  it("ranks recent issues with tickets.ts match in cancel's issue search", () => {
     const run =
-      files.find((f) => f.path === "skills/close-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/cancel-run/SKILL.md")?.content ?? ""
     expect(run).toMatch(
       /tickets\.ts" match --plan <dir>\/match\.json --issues <dir>\/issues\.json/,
     )
     expect(run).toContain("<its recentIssues op's issues>")
     expect(run).toContain("when `recentIssues` is `unsupported` or fails")
-    expect(run).toContain("/agent-flows/close")
+    expect(run).toContain("/agent-flows/cancel")
   })
 
   it("reports the stacking tool's link even when submit printed none", () => {
@@ -498,7 +498,7 @@ describe("dev flows", () => {
       .map((f) => f.path)
     expect(withParent).toEqual([
       "skills/evaluate-run/SKILL.md",
-      "skills/merge/SKILL.md",
+      "skills/finish/SKILL.md",
       "skills/ready/SKILL.md",
       "skills/sync-local/SKILL.md",
     ])
@@ -528,7 +528,7 @@ describe("dev flows", () => {
       expect(run).toContain("A recorded `stop` is always reviewed in full")
     })
 
-    it("finds the issue the way close does, reading only, and judges a gap as an observation", () => {
+    it("finds the issue the way cancel does, reading only, and judges a gap as an observation", () => {
       expect(run).toContain('src/commands/sync.ts" issue')
       expect(run).toContain("each entry's `findIssue` op with `<branch>`")
       expect(run).toContain("reading only (never file, link, or change one)")
@@ -568,9 +568,9 @@ describe("dev flows", () => {
     })
   })
 
-  it("runs evaluate when merge's gate has no current verdict, and gates again", () => {
+  it("runs evaluate when finish's gate has no current verdict, and gates again", () => {
     const run =
-      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
     expect(run).toContain(
       "run the `/dev-flows:evaluate` skill with the argument `record`",
     )
@@ -581,7 +581,7 @@ describe("dev flows", () => {
 
   it("merges only the commit CI passed on, and cleans up only after", () => {
     const run =
-      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
     const ci = run.indexOf('ready.ts" ci start --sha <sha>')
     const state = run.indexOf("The `prMergeState` op")
     const merge = run.indexOf(
@@ -598,15 +598,17 @@ describe("dev flows", () => {
     expect(remove).toBeGreaterThan(closeOut)
   })
 
-  it("syncs only the pull request and issue with merge.sync remote", () => {
+  it("syncs only the pull request and issue with finish.sync remote", () => {
     const main =
-      files.find((f) => f.path === "skills/merge/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/finish/SKILL.md")?.content ?? ""
     const run =
-      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
-    expect(main).toMatch(/merge\.deployLogLines merge\.sync merge\.ciTimeout/)
-    const remote = run.indexOf("- **`remote`:** nothing in merge pushes")
+      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
+    expect(main).toMatch(
+      /finish\.deployLogLines finish\.sync finish\.ciTimeout/,
+    )
+    const remote = run.indexOf("- **`remote`:** nothing in finish pushes")
     const unpushed = run.indexOf(
-      "and merge.sync is remote, so merge won't push them",
+      "and finish.sync is remote, so finish won't push them",
     )
     const ci = run.indexOf('ready.ts" ci start --sha <sha>')
     expect(remote).toBeGreaterThan(-1)
@@ -614,9 +616,9 @@ describe("dev flows", () => {
     expect(ci).toBeGreaterThan(unpushed)
   })
 
-  it("waits merge.deployTimeout, tails failed steps' logs, and keeps skipped steps apart", () => {
+  it("waits finish.deployTimeout, tails failed steps' logs, and keeps skipped steps apart", () => {
     const run =
-      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
     expect(run).toContain("or `<deployTimeout>` minutes have gone by")
     expect(run).not.toContain("or 30 minutes have gone by")
     expect(run).toContain(
@@ -626,13 +628,13 @@ describe("dev flows", () => {
     expect(run).not.toContain("each step that didn't succeed")
   })
 
-  it("waits merge.ciTimeout for CI, and gates on blocking reviewers and a clean tree", () => {
+  it("waits finish.ciTimeout for CI, and gates on blocking reviewers and a clean tree", () => {
     const main =
-      files.find((f) => f.path === "skills/merge/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/finish/SKILL.md")?.content ?? ""
     const run =
-      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
     expect(main).toMatch(
-      /merge\.ciTimeout merge\.blockingReviewers merge\.requireClean --optional/,
+      /finish\.ciTimeout finish\.blockingReviewers finish\.requireClean --optional/,
     )
     expect(main).toContain("`null` reads as 30")
     expect(run).toContain("--timeout <ciTimeout × 60> --required-only")
@@ -717,7 +719,7 @@ describe("dev flows", () => {
     expect(push).toBeGreaterThan(fixPush)
   })
 
-  it("tells sync's after hooks what the run did, and merge's whether it merged and on which commit", () => {
+  it("tells sync's after hooks what the run did, and finish's whether it merged and on which commit", () => {
     const sync =
       files.find((f) => f.path === "skills/sync/SKILL.md")?.content ?? ""
     expect(sync).toContain(
@@ -726,10 +728,10 @@ describe("dev flows", () => {
     expect(sync).toContain("`noop` (neither: the no-op gate, or nothing to do)")
 
     const merge =
-      files.find((f) => f.path === "skills/merge/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/finish/SKILL.md")?.content ?? ""
     expect(merge).toContain("[--merged --merge-commit <landed>] --outcome")
     const run =
-      files.find((f) => f.path === "skills/merge-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
     const merged = run.indexOf("its state must be merged")
     const commit = run.indexOf("### Merge commit")
     const closeOut = run.indexOf("### Close out")

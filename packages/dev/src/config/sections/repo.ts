@@ -16,7 +16,7 @@ export const repo: SectionSpec = {
       key: "protectedBranches",
       type: "string[]",
       description:
-        "Branches besides the base that no flow works on directly, such as a production branch the base is promoted to: sync, ready, merge, and close refuse on them",
+        "Branches besides the base that no flow works on directly, such as a production branch the base is promoted to: sync, ready, finish, and cancel refuse on them",
       example: ["main"],
       pattern: {
         regex: /^[^\s~^:?*[\\]+$/,

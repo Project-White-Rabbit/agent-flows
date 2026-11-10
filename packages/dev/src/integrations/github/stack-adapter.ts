@@ -358,7 +358,7 @@ export async function trackOp(
     throw new Error(`${branch} can't be stacked on itself`)
   }
   // Only on a stacked branch: recording any other base (a pull request
-  // opened by hand against the wrong branch) would get it past merge's gate.
+  // opened by hand against the wrong branch) would get it past finish's gate.
   if (
     parent !== ctx.base &&
     !openPrs(ctx).some((pr) => pr.headRefName === parent) &&
