@@ -251,16 +251,16 @@ describe("merge section", () => {
   it("takes only the issueOnMerge values merge and sync act on", () => {
     const base = { version: 3, repo: { baseBranch: "main" } }
     for (const issueOnMerge of ["close", "tracker", "leave"]) {
-      expect(checkConfig({ ...base, merge: { issueOnMerge } }).issues).toEqual(
+      expect(checkConfig({ ...base, finish: { issueOnMerge } }).issues).toEqual(
         [],
       )
     }
     expect(
-      checkConfig({ ...base, merge: { issueOnMerge: false } }).issues,
-    ).toEqual([expect.stringContaining("merge.issueOnMerge")])
+      checkConfig({ ...base, finish: { issueOnMerge: false } }).issues,
+    ).toEqual([expect.stringContaining("finish.issueOnMerge")])
     expect(
-      checkConfig({ ...base, merge: { issueOnMerge: "never" } }).issues,
-    ).toEqual(["merge.issueOnMerge must be `close`, `tracker`, or `leave`"])
+      checkConfig({ ...base, finish: { issueOnMerge: "never" } }).issues,
+    ).toEqual(["finish.issueOnMerge must be `close`, `tracker`, or `leave`"])
   })
 
   it("takes the gates and the deploy watch merge acts on", () => {
@@ -269,7 +269,7 @@ describe("merge section", () => {
       expect(
         checkConfig({
           ...base,
-          merge: {
+          finish: {
             requireAllChecks: true,
             unresolvedThreads,
             watchDeploy: true,
@@ -280,16 +280,16 @@ describe("merge section", () => {
     expect(
       checkConfig({
         ...base,
-        merge: {
+        finish: {
           requireAllChecks: "yes",
           unresolvedThreads: "people",
           watchDeploy: 1,
         },
       }).issues,
     ).toEqual([
-      "merge.requireAllChecks must be true or false",
-      "merge.unresolvedThreads must be `allow`, `bots`, or `all`",
-      "merge.watchDeploy must be true or false",
+      "finish.requireAllChecks must be true or false",
+      "finish.unresolvedThreads must be `allow`, `bots`, or `all`",
+      "finish.watchDeploy must be true or false",
     ])
   })
 
@@ -299,19 +299,19 @@ describe("merge section", () => {
       expect(
         checkConfig({
           ...base,
-          merge: { sync, deployTimeout: 40, deployLogLines: 120 },
+          finish: { sync, deployTimeout: 40, deployLogLines: 120 },
         }).issues,
       ).toEqual([])
     }
     expect(
       checkConfig({
         ...base,
-        merge: { sync: "local", deployTimeout: "40", deployLogLines: 0 },
+        finish: { sync: "local", deployTimeout: "40", deployLogLines: 0 },
       }).issues,
     ).toEqual([
-      "merge.sync must be `full` or `remote`",
-      "merge.deployTimeout must be a number greater than 0",
-      "merge.deployLogLines must be a number greater than 0",
+      "finish.sync must be `full` or `remote`",
+      "finish.deployTimeout must be a number greater than 0",
+      "finish.deployLogLines must be a number greater than 0",
     ])
   })
 
@@ -320,7 +320,7 @@ describe("merge section", () => {
     expect(
       checkConfig({
         ...base,
-        merge: {
+        finish: {
           blockingReviewers: ["github-advanced-security", "claude[bot]"],
           requireClean: true,
           ciTimeout: 45,
@@ -330,20 +330,20 @@ describe("merge section", () => {
     expect(
       checkConfig({
         ...base,
-        merge: {
+        finish: {
           blockingReviewers: ["github advanced security"],
           requireClean: "yes",
           ciTimeout: 0,
         },
       }).issues,
     ).toEqual([
-      "merge.blockingReviewers must list logins (`github-advanced-security`, `claude[bot]`)",
-      "merge.requireClean must be true or false",
-      "merge.ciTimeout must be a number greater than 0",
+      "finish.blockingReviewers must list logins (`github-advanced-security`, `claude[bot]`)",
+      "finish.requireClean must be true or false",
+      "finish.ciTimeout must be a number greater than 0",
     ])
     expect(
-      checkConfig({ ...base, merge: { blockingReviewers: "codeql" } }).issues,
-    ).toEqual([expect.stringContaining("merge.blockingReviewers")])
+      checkConfig({ ...base, finish: { blockingReviewers: "codeql" } }).issues,
+    ).toEqual([expect.stringContaining("finish.blockingReviewers")])
   })
 })
 

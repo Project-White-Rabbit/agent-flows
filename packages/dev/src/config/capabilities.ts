@@ -28,7 +28,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
       {
         id: "write",
         description:
-          "Also push branches, open and edit draft pull requests (sync), mark them ready, resolve review threads (ready), and merge them (merge)",
+          "Also push branches, open and edit draft pull requests (sync), mark them ready, resolve review threads (ready), and merge them (finish)",
       },
     ],
     defaultLevel: "write",

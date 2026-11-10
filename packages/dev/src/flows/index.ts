@@ -1,21 +1,21 @@
 import type { FlowOutputs, GeneratedFile } from "@agent-flows/core"
-import { closeFlow } from "./close.ts"
+import { cancelFlow } from "./cancel.ts"
 import { configureFlow } from "./configure.ts"
 import { createTicketsFlow } from "./create-tickets.ts"
 import { evaluateFlow } from "./evaluate.ts"
+import { finishFlow } from "./finish.ts"
 import { type DevTargetName, devKit } from "./kit.ts"
-import { mergeFlow } from "./merge.ts"
 import { readyFlow } from "./ready.ts"
 import { startWorkFlow } from "./start-work.ts"
 import { syncFlow } from "./sync.ts"
 import { ticketsToWorkFlow } from "./tickets-to-work.ts"
 
 export const DEV_FLOWS = [
-  closeFlow,
+  cancelFlow,
   configureFlow,
   createTicketsFlow,
   evaluateFlow,
-  mergeFlow,
+  finishFlow,
   readyFlow,
   startWorkFlow,
   syncFlow,

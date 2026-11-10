@@ -70,7 +70,7 @@ function setup(): { root: string } {
 
 const DELTA = {
   evaluate: { scope: "delta", record: true },
-  merge: { requireEvaluation: "pass" },
+  finish: { requireEvaluation: "pass" },
 }
 
 /** Push HEAD to origin's feature, so a record takes it. */
@@ -549,7 +549,7 @@ describe("runTests", () => {
 })
 
 describe("gate", () => {
-  it("is off without merge.requireEvaluation", () => {
+  it("is off without finish.requireEvaluation", () => {
     const { root } = setup()
     expect(gate(root, {}, "main")).toEqual({ gate: "off" })
   })
@@ -575,7 +575,7 @@ describe("gate", () => {
     })
     expect(gate(root, DELTA, "main").gate).toBe("ask")
     expect(
-      gate(root, { ...DELTA, merge: { requireEvaluation: "flag" } }, "main")
+      gate(root, { ...DELTA, finish: { requireEvaluation: "flag" } }, "main")
         .gate,
     ).toBe("pass")
   })
@@ -628,7 +628,7 @@ describe("gate", () => {
     })
     sh(root, "commit", "-q", "--allow-empty", "-m", "empty")
     expect(
-      gate(root, { merge: { requireEvaluation: "pass" } }, "main").gate,
+      gate(root, { finish: { requireEvaluation: "pass" } }, "main").gate,
     ).toBe("stop")
   })
 })

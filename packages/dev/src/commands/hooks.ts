@@ -126,7 +126,7 @@ export type HookRequest = {
   issueFiled?: boolean
   /** What the flow did, in its own words (`FLOW_RESULTS`). */
   result?: string
-  /** The pull request merged (merge), for `on: merged`. */
+  /** The pull request merged (finish), for `on: merged`. */
   merged?: boolean
   /** The commit the merge landed. */
   mergeCommit?: string
@@ -657,8 +657,8 @@ export function checkFlags(flags: Map<string, string>, flow: string): void {
   ) {
     throw new UsageError(`--scope must be ${EVALUATE_SCOPES.join(", ")}`)
   }
-  if (flags.has("merged") && flow !== "merge") {
-    throw new UsageError("--merged is only for merge")
+  if (flags.has("merged") && flow !== "finish") {
+    throw new UsageError("--merged is only for finish")
   }
   if (flags.has("after") && flags.has("wait")) {
     throw new UsageError(
@@ -782,7 +782,7 @@ const USAGE = `Usage: hooks.ts run <point>... --flow <flow> [flags]
 
   run <point>...  Run the repo's hooks at these points, in order: \`before\`
       or \`after\` (around every command), or a flow's own (\`ready.before\`,
-      \`merge.after\`). Prints JSON: \`status\` (done, agent, stop, or
+      \`finish.after\`). Prints JSON: \`status\` (done, agent, stop, or
       running), \`ran\` (each hook's result: passed, fixed, failed, timedOut,
       or skipped and why), \`failures\` (at points that report rather than
       stop), \`agent\` (a task for the agent: a prompt, or what a command
@@ -809,7 +809,7 @@ Flags:
   --issue <id>           The branch's issue, for {issue}
   --issue-filed          This run filed that issue (AGENT_FLOWS_ISSUE_FILED=1)
   --result <result>      What the flow did, for {result} (sync: ${FLOW_RESULTS.sync?.join(", ")})
-  --merged               The pull request merged (merge), for \`on: merged\`
+  --merged               The pull request merged (finish), for \`on: merged\`
   --merge-commit <sha>   The commit the merge landed, for {merge}
   --since <sha>          The previous recorded evaluation's commit, for {since}
   --scope <scope>        What evaluate reviews (${EVALUATE_SCOPES.join(", ")}), for {scope}

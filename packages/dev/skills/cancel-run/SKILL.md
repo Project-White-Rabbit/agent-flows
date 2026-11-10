@@ -1,10 +1,10 @@
 ---
-name: close-run
-description: Run phase of the /dev-flows:close flow. Invoked by the close flow; not run directly
+name: cancel-run
+description: Run phase of the /dev-flows:cancel flow. Invoked by the cancel flow; not run directly
 user-invocable: false
 ---
 
-# /dev-flows:close: Run
+# /dev-flows:cancel: Run
 
 **Mode:** you were dispatched with a mode (`default` or `force`); which steps apply and where they route below depend on it.
 
@@ -12,7 +12,7 @@ user-invocable: false
 
 ## 1. Survey and gates
 
-Reads only, apart from one `git fetch`, the issue search's files in the worktree's git dir, and the repo's `close.before` hooks. A gate that fails stops the command with nothing written.
+Reads only, apart from one `git fetch`, the issue search's files in the worktree's git dir, and the repo's `cancel.before` hooks. A gate that fails stops the command with nothing written.
 
 ### Survey
 
@@ -36,7 +36,7 @@ Reads only, apart from one `git fetch`, the issue search's files in the worktree
    **When none of those finds one:** look for it, and keep what turns up as `<candidates>`, never `<issue>`: nothing the branch names ties it to this work, so it's never changed without the person's answer, in `force` mode too.
    1. Each entry's `findIssue` op with `<branch>`: open issues whose description has a `> Branch:` line for this branch. They come first, marked `anchored`.
    2. Each entry's `searchIssues` op with the pull request's title (else the branch name in words), then with each of up to three commit subjects (`git log --format=%s <base>..<branch>`): open issues that plausibly describe this branch's work, best first.
-   3. The ranking create-tickets matches by, over every recent issue rather than the search's few. In `<dir>`, `git rev-parse --absolute-git-dir` plus `/agent-flows/close` (create it), write `match.json` as `{"items": [{"key": "branch", "title": "<the pull request's title, else the branch name in words>", "description": "<the commit subjects, one per line>"}]}`, and `issues.json` as `{"<entry>": {"link": <true at level link>, "issues": [<its recentIssues op's issues>], "hits": {"branch": [<the ids 2 found in it, best first>]}}}`, under each entry's `instance` (else its `integration`); when `recentIssues` is `unsupported` or fails, put the issues 2 returned in `issues`. Then `node "${CLAUDE_PLUGIN_ROOT}/src/commands/tickets.ts" match --plan <dir>/match.json --issues <dir>/issues.json`: its `CANDIDATE` lines (and a `MATCH` line) rank issues by the words they share with the work and by the search. Take the open ones (not marked `closed`) that plausibly describe this branch's work, after the anchored ones and beside 2's, judged against the pull request and the commits. It writes only the plan file.
+   3. The ranking create-tickets matches by, over every recent issue rather than the search's few. In `<dir>`, `git rev-parse --absolute-git-dir` plus `/agent-flows/cancel` (create it), write `match.json` as `{"items": [{"key": "branch", "title": "<the pull request's title, else the branch name in words>", "description": "<the commit subjects, one per line>"}]}`, and `issues.json` as `{"<entry>": {"link": <true at level link>, "issues": [<its recentIssues op's issues>], "hits": {"branch": [<the ids 2 found in it, best first>]}}}`, under each entry's `instance` (else its `integration`); when `recentIssues` is `unsupported` or fails, put the issues 2 returned in `issues`. Then `node "${CLAUDE_PLUGIN_ROOT}/src/commands/tickets.ts" match --plan <dir>/match.json --issues <dir>/issues.json`: its `CANDIDATE` lines (and a `MATCH` line) rank issues by the words they share with the work and by the search. Take the open ones (not marked `closed`) that plausibly describe this branch's work, after the anchored ones and beside 2's, judged against the pull request and the commits. It writes only the plan file.
 
    Keep up to three in all, each with its id, title, URL, state, assignee, attached pull requests, and a one-sentence summary of its description.
 
@@ -46,16 +46,16 @@ In order. 1 to 3 refuse; 4 and 5 drop one action and carry on; 6 ends a close wi
 
 1. **The base branch:** `<branch>` is `<base>` or one of `<protected>`, or HEAD is detached: stop, `Refusing to close <branch, or a detached HEAD>.`
 2. **Stacked branches:** `above` is more than 0, or `<children>` isn't empty: stop, `Refusing to close <branch>: <the larger of the two counts> branch(es) are stacked on it (<the children's URLs>). Closing it would leave their pull requests pointing at a deleted branch. Close or restack those first.`
-3. **A merged pull request:** stop, `Pull request <N> merged. close is for abandoning work, not finishing it; /dev-flows:sync remote closes out its issue.`
+3. **A merged pull request:** stop, `Pull request <N> merged. cancel is for abandoning work, not finishing it; /dev-flows:sync remote closes out its issue.`
 4. **Already closed:** a closed pull request isn't closed again; an issue already done or canceled isn't changed. Note each for the report.
 5. **Other work on the issue:** `<otherPrs>` isn't empty (a merged one counts: the issue may hold work that shipped): leave `<issue>` open, and say so.
-6. **Nothing to do:** no open pull request to close, no remote branch, no issue to change, and no `<candidates>`: print `Nothing to close: no open pull request, no remote branch, and no issue to cancel.` and stop. Without them, the repo's teardown still runs: when `close.after` has hooks, carry on to run them rather than stopping.
+6. **Nothing to do:** no open pull request to close, no remote branch, no issue to change, and no `<candidates>`: print `Nothing to close: no open pull request, no remote branch, and no issue to cancel.` and stop. Without them, the repo's teardown still runs: when `cancel.after` has hooks, carry on to run them rather than stopping.
 
 A close whose only action is deleting an orphaned remote branch is still a close.
 
 ### The repo's `before` hooks
 
-`node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run close.before --flow close --mode <mode> --branch <branch> --pr <N>` (leave `--pr` out with no pull request). It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest (with `agent.recheck`, that first runs the hook's check again, and it fails like any check when the task didn't satisfy it); a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). `running`: a hook was still running when `--max-wait` ran out, and goes on running: run the same command again with `--wait <running.resume>` in place of any `--after`, until the status is another one, relaying `running.name` and how long it has run. When the host limits how long one command runs, add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`. An exit of 2 means bad arguments or an invalid config: relay its message and stop.
+`node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run cancel.before --flow cancel --mode <mode> --branch <branch> --pr <N>` (leave `--pr` out with no pull request). It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest (with `agent.recheck`, that first runs the hook's check again, and it fails like any check when the task didn't satisfy it); a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). `running`: a hook was still running when `--max-wait` ran out, and goes on running: run the same command again with `--wait <running.resume>` in place of any `--after`, until the status is another one, relaying `running.name` and how long it has run. When the host limits how long one command runs, add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`. An exit of 2 means bad arguments or an invalid config: relay its message and stop.
 
 ## 2. Summary and the searched issue
 
@@ -66,7 +66,7 @@ Show what will run, then go on without asking, except about a searched issue.
 - `Close pull request #<N> ("<title>")`
 - `Delete remote branch origin/<branch>`
 - `Cancel issue <ID> ("<title>")`
-- `Run the repo's teardown: <the close.after hooks' names>`
+- `Run the repo's teardown: <the cancel.after hooks' names>`
 
 **Warnings**, below them, the first one first:
 
@@ -77,7 +77,7 @@ Show what will run, then go on without asking, except about a searched issue.
 
 ### The searched issue
 
-Only with `<candidates>`. Invoking close doesn't authorize changing an issue the branch never named (one whose `> Branch:` line names it included: that line can be stale or copied), so the person picks it.
+Only with `<candidates>`. Invoking cancel doesn't authorize changing an issue the branch never named (one whose `> Branch:` line names it included: that line can be stale or copied), so the person picks it.
 
 **In `force` mode,** nobody can answer: change none, and list each as `Possible issue, left open: [<ID>: <title>](<URL>)`.
 
@@ -100,12 +100,12 @@ Never delete the local branch, switch branches, or touch the working tree: that'
 
 ## 4. Report
 
-The repo's `close.after` hooks run just before this, as the hooks rule above says: that's where its own teardown happens (a database branch, dev servers, a closed marker).
+The repo's `cancel.after` hooks run just before this, as the hooks rule above says: that's where its own teardown happens (a database branch, dev servers, a closed marker).
 
 Lead with anything that needs attention: a failed write, a failed teardown hook, commits on the remote branch that were thrown away (`Discarded <remoteAhead> remote-only commit(s) on origin/<branch>.`). Then one line per action, with its outcome:
 
 - **Pull request:** closed, already closed, none, or failed (and why).
 - **Remote branch:** deleted, already gone, none, or failed.
 - **Issue:** canceled or marked done (as a link), already done or canceled, left open (other pull requests attached, or a tracker at `link`), no issue changed (with the candidates' links when the person picked none, or `force` mode skipped the question), or none found.
-- **Teardown:** each `close.after` hook and how it went.
+- **Teardown:** each `cancel.after` hook and how it went.
 - **Local:** `<branch>` and its working tree are still here; deleting them is the person's call.

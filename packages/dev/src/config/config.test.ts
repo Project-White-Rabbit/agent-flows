@@ -243,7 +243,7 @@ describe("migrate", () => {
       }),
     ).toEqual({
       config: {
-        version: 3,
+        version: 4,
         repo: { baseBranch: "main" },
         integrations: { github: { owner: "acme", repo: "web" } },
         skipped: ["integrations.sentry"],
@@ -252,7 +252,7 @@ describe("migrate", () => {
     })
   })
 
-  it("turns v2 merge.closeIssue into merge.issueOnMerge", () => {
+  it("turns v2 merge.closeIssue into issueOnMerge", () => {
     const merged = (closeIssue: boolean) =>
       migrate({
         version: 2,
@@ -260,14 +260,56 @@ describe("migrate", () => {
         skipped: ["merge.closeIssue"],
       }).config
     expect(merged(true)).toEqual({
-      version: 3,
-      merge: { after: [], issueOnMerge: "close" },
-      skipped: ["merge.issueOnMerge"],
+      version: 4,
+      finish: { after: [], issueOnMerge: "close" },
+      skipped: ["finish.issueOnMerge"],
     })
-    expect(merged(false)?.merge).toEqual({ after: [], issueOnMerge: "leave" })
+    expect(merged(false)?.finish).toEqual({ after: [], issueOnMerge: "leave" })
     expect(migrate({ version: 2, merge: {} }).config).toEqual({
-      version: 3,
-      merge: {},
+      version: 4,
+      finish: {},
+    })
+  })
+
+  it("renames v3's merge and close sections to finish and cancel", () => {
+    expect(
+      migrate({
+        version: 3,
+        merge: { ciTimeout: 45, after: [{ name: "down", run: "./down.sh" }] },
+        close: { after: [{ name: "db", run: "./db.sh delete {branch}" }] },
+        hooks: {
+          before: [
+            { name: "ship", flows: ["sync", "merge", "close"], run: "x" },
+          ],
+          after: [{ name: "note", run: "y" }],
+        },
+        skipped: ["close", "merge.watchDeploy", "integrations.sentry"],
+      }).config,
+    ).toEqual({
+      version: 4,
+      finish: { ciTimeout: 45, after: [{ name: "down", run: "./down.sh" }] },
+      cancel: { after: [{ name: "db", run: "./db.sh delete {branch}" }] },
+      hooks: {
+        before: [
+          { name: "ship", flows: ["sync", "finish", "cancel"], run: "x" },
+        ],
+        after: [{ name: "note", run: "y" }],
+      },
+      skipped: ["cancel", "finish.watchDeploy", "integrations.sentry"],
+    })
+  })
+
+  it("keeps a v3 finish section a hand edit already added over merge", () => {
+    expect(
+      migrate({
+        version: 3,
+        merge: { ciTimeout: 45 },
+        finish: { ciTimeout: 10 },
+      }).config,
+    ).toEqual({
+      version: 4,
+      merge: { ciTimeout: 45 },
+      finish: { ciTimeout: 10 },
     })
   })
 

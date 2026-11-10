@@ -1,7 +1,7 @@
 // The mechanical half of evaluate's record: which files a review covers, the
-// verdict recorded for a branch, and the gate merge reads. The judging stays
+// verdict recorded for a branch, and the gate finish reads. The judging stays
 // in the skill; this keeps what it judged (each file's change, by patch-id)
-// so a later run reviews only what moved, and so merge can tell a verdict on
+// so a later run reviews only what moved, and so finish can tell a verdict on
 // the commit it lands from one on an older commit.
 //
 // Records live in the repo's git common dir, one file per branch, beside
@@ -97,9 +97,9 @@ export function settings(config: Record<string, unknown>): Settings {
         ? (at("evaluate.tests") as string)
         : null,
     requireEvaluation:
-      at("merge.requireEvaluation") === "pass" ||
-      at("merge.requireEvaluation") === "flag"
-        ? (at("merge.requireEvaluation") as "pass" | "flag")
+      at("finish.requireEvaluation") === "pass" ||
+      at("finish.requireEvaluation") === "flag"
+        ? (at("finish.requireEvaluation") as "pass" | "flag")
         : null,
   }
 }
@@ -511,7 +511,7 @@ export function record(
 }
 
 export type GateResult = {
-  /** `off`: merge.requireEvaluation is unset. `ask`: a flag the user must accept. */
+  /** `off`: finish.requireEvaluation is unset. `ask`: a flag the user must accept. */
   gate: "off" | "pass" | "ask" | "stop"
   reason?: string
   record?: EvaluationRecord
@@ -525,7 +525,7 @@ export type GateResult = {
 }
 
 /**
- * What merge does about the branch's recorded evaluation. A verdict on an
+ * What finish does about the branch's recorded evaluation. A verdict on an
  * older commit carries to HEAD by itself only with `evaluate.scope: delta`,
  * a clean tree, and every file's change as it was (the base merged in, say).
  */
@@ -544,7 +544,7 @@ export function gate(
   if (!found) {
     return {
       gate: "stop",
-      reason: `no evaluation is recorded for ${branch}, and merge.requireEvaluation is ${s.requireEvaluation}`,
+      reason: `no evaluation is recorded for ${branch}, and finish.requireEvaluation is ${s.requireEvaluation}`,
       rerun: true,
     }
   }
@@ -589,7 +589,7 @@ export function gate(
       gate: "ask",
       record: found,
       reason:
-        "the recorded verdict is flag, and merge.requireEvaluation is pass",
+        "the recorded verdict is flag, and finish.requireEvaluation is pass",
       ...extra,
     }
   }
@@ -700,7 +700,7 @@ const USAGE = `Usage: evaluate.ts <subcommand>
                                <file> (one per line), its output in a log in
                                the git dir, and print whether it passed
   get [--branch <branch>]      The branch's recorded evaluation
-  gate [--base <ref>]          What merge.requireEvaluation says about it`
+  gate [--base <ref>]          What finish.requireEvaluation says about it`
 
 type Args = { flags: Map<string, string> }
 

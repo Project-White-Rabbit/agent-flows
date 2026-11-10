@@ -4,10 +4,10 @@
 
 import { INTEGRATIONS } from "../../integrations/index.ts"
 import type { SectionSpec } from "../types.ts"
-import { close } from "./close.ts"
+import { cancel } from "./cancel.ts"
 import { evaluate } from "./evaluate.ts"
+import { finish } from "./finish.ts"
 import { hooks } from "./hooks.ts"
-import { merge } from "./merge.ts"
 import { ready } from "./ready.ts"
 import { repo } from "./repo.ts"
 import { sync } from "./sync.ts"
@@ -19,8 +19,8 @@ export const SECTIONS: SectionSpec[] = [
   tickets,
   ready,
   evaluate,
-  merge,
-  close,
+  finish,
+  cancel,
   hooks,
   ...INTEGRATIONS,
 ]

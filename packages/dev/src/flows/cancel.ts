@@ -11,10 +11,10 @@ import {
   USE_INTEGRATIONS,
 } from "./kit.ts"
 
-export const closeFlow: Flow = devKit.defineFlow({
+export const cancelFlow: Flow = devKit.defineFlow({
   schemaVersion: 1,
-  id: "close",
-  title: "{{cmd}}close",
+  id: "cancel",
+  title: "{{cmd}}cancel",
   frontmatter: {
     description:
       "Abandon the current branch's work: close its pull request, delete its remote branch, cancel its issue, and run the repo's teardown. Invoking it authorizes the cleanup. Only for scrapping work without merging, never for landing it.",
@@ -55,14 +55,14 @@ export const closeFlow: Flow = devKit.defineFlow({
     help: "Show usage and exit without closing anything.",
   },
   intro:
-    "Winds down a branch whose work is being abandoned: the destructive sibling of `{{cmd}}sync`. It closes the pull request, deletes the remote branch, cancels the issue, and runs the repo's own teardown (`close.after` hooks: a database branch, dev servers, a marker a worktree setup script reads). Every vendor-specific action goes through the repo's configured integrations (`{{cmd}}configure`). The local branch and working tree are left alone, for the person (or their workspace app's teardown) to remove.",
+    "Winds down a branch whose work is being abandoned: the destructive sibling of `{{cmd}}sync`. It closes the pull request, deletes the remote branch, cancels the issue, and runs the repo's own teardown (`cancel.after` hooks: a database branch, dev servers, a marker a worktree setup script reads). Every vendor-specific action goes through the repo's configured integrations (`{{cmd}}configure`). The local branch and working tree are left alone, for the person (or their workspace app's teardown) to remove.",
   invariants: [
     "**Invoking this command is the authorization for the cleanup.** Don't ask for a second confirmation. The one question it asks is which issue, if any, belongs to the branch when the branch never named one, and in `force` mode it asks nothing.",
     "**Act through the integrations' ops.** Pull requests and issues are reached only through the ops `configure.ts integrations` returns, run as given. Plain `git` is fine for the remote branch and everything local.",
     '**A failed read is not an absence.** A lookup that errors (sign-in, rate limit, network) stops the command before any write: mistaking it for "no pull request" could delete a branch out from under an open one.',
     "**Never touch the local branch or working tree:** no `git branch -D`, no switching branches, no reset or stash. Only what's remote, and what the repo's own hooks tear down.",
     "**Change only the issue the branch names,** or one the person picks. An issue another pull request is attached to (open or merged) stays open, and one found only by its `> Branch:` line or a search is asked about, never changed in `force` mode.",
-    hooksInvariant("close", {
+    hooksInvariant("cancel", {
       afterPoint: true,
       extra: "--branch <branch> --pr <N>",
     }),
@@ -80,7 +80,7 @@ export const closeFlow: Flow = devKit.defineFlow({
           preamble: true,
           body: `If mode is \`help\`, print the block below verbatim and exit. No reads, no writes.
 
-> \`{{cmd}}close\` winds down a branch whose work is being abandoned. Invoking it is the confirmation.
+> \`{{cmd}}cancel\` winds down a branch whose work is being abandoned. Invoking it is the confirmation.
 >
 > Modes:
 >   - (no arg) -- close what applies, below
@@ -92,7 +92,7 @@ export const closeFlow: Flow = devKit.defineFlow({
 >   - deletes the remote branch
 >   - cancels the issue the branch names (left open when another pull request, open or merged, is attached to it)
 >   - when the branch names no issue, looks for one (a \`> Branch:\` line naming the branch, then a search and create-tickets' ranking of recent issues) and asks which, if any, to cancel or mark done; \`force\` changes none of them
->   - runs the repo's teardown (\`close.after\` hooks)
+>   - runs the repo's teardown (\`cancel.after\` hooks)
 >
 > It never deletes the local branch, switches branches, or touches the working tree. It refuses on the base branch (and the config's \`repo.protectedBranches\`), on a branch other branches are stacked on, and on a pull request that merged.`,
           next: null,
@@ -110,7 +110,7 @@ export const closeFlow: Flow = devKit.defineFlow({
           title: "Survey and gates",
           refName: "survey",
           commandCalls: ["configure", "sync", "tickets", "hooks"],
-          body: `Reads only, apart from one \`git fetch\`, the issue search's files in the worktree's git dir, and the repo's \`close.before\` hooks. A gate that fails stops the command with nothing written.
+          body: `Reads only, apart from one \`git fetch\`, the issue search's files in the worktree's git dir, and the repo's \`cancel.before\` hooks. A gate that fails stops the command with nothing written.
 
 ### Survey
 
@@ -134,7 +134,7 @@ export const closeFlow: Flow = devKit.defineFlow({
    **When none of those finds one:** look for it, and keep what turns up as \`<candidates>\`, never \`<issue>\`: nothing the branch names ties it to this work, so it's never changed without the person's answer, in \`force\` mode too.
    1. Each entry's \`findIssue\` op with \`<branch>\`: open issues whose description has a \`> Branch:\` line for this branch. They come first, marked \`anchored\`.
    2. Each entry's \`searchIssues\` op with the pull request's title (else the branch name in words), then with each of up to three commit subjects (\`git log --format=%s <base>..<branch>\`): open issues that plausibly describe this branch's work, best first.
-   3. The ranking create-tickets matches by, over every recent issue rather than the search's few. In \`<dir>\`, ${flowDir("close")} (create it), write \`match.json\` as \`{"items": [{"key": "branch", "title": "<the pull request's title, else the branch name in words>", "description": "<the commit subjects, one per line>"}]}\`, and \`issues.json\` as \`{"<entry>": {"link": <true at level link>, "issues": [<its recentIssues op's issues>], "hits": {"branch": [<the ids 2 found in it, best first>]}}}\`, under each entry's \`instance\` (else its \`integration\`); when \`recentIssues\` is \`unsupported\` or fails, put the issues 2 returned in \`issues\`. Then \`{{command:tickets}} match --plan <dir>/match.json --issues <dir>/issues.json\`: its \`CANDIDATE\` lines (and a \`MATCH\` line) rank issues by the words they share with the work and by the search. Take the open ones (not marked \`closed\`) that plausibly describe this branch's work, after the anchored ones and beside 2's, judged against the pull request and the commits. It writes only the plan file.
+   3. The ranking create-tickets matches by, over every recent issue rather than the search's few. In \`<dir>\`, ${flowDir("cancel")} (create it), write \`match.json\` as \`{"items": [{"key": "branch", "title": "<the pull request's title, else the branch name in words>", "description": "<the commit subjects, one per line>"}]}\`, and \`issues.json\` as \`{"<entry>": {"link": <true at level link>, "issues": [<its recentIssues op's issues>], "hits": {"branch": [<the ids 2 found in it, best first>]}}}\`, under each entry's \`instance\` (else its \`integration\`); when \`recentIssues\` is \`unsupported\` or fails, put the issues 2 returned in \`issues\`. Then \`{{command:tickets}} match --plan <dir>/match.json --issues <dir>/issues.json\`: its \`CANDIDATE\` lines (and a \`MATCH\` line) rank issues by the words they share with the work and by the search. Take the open ones (not marked \`closed\`) that plausibly describe this branch's work, after the anchored ones and beside 2's, judged against the pull request and the commits. It writes only the plan file.
 
    Keep up to three in all, each with its id, title, URL, state, assignee, attached pull requests, and a one-sentence summary of its description.
 
@@ -144,16 +144,16 @@ In order. 1 to 3 refuse; 4 and 5 drop one action and carry on; 6 ends a close wi
 
 1. **The base branch:** \`<branch>\` is \`<base>\` or one of \`<protected>\`, or HEAD is detached: stop, \`Refusing to close <branch, or a detached HEAD>.\`
 2. **Stacked branches:** \`above\` is more than 0, or \`<children>\` isn't empty: stop, \`Refusing to close <branch>: <the larger of the two counts> branch(es) are stacked on it (<the children's URLs>). Closing it would leave their pull requests pointing at a deleted branch. Close or restack those first.\`
-3. **A merged pull request:** stop, \`Pull request <N> merged. close is for abandoning work, not finishing it; {{cmd}}sync remote closes out its issue.\`
+3. **A merged pull request:** stop, \`Pull request <N> merged. cancel is for abandoning work, not finishing it; {{cmd}}sync remote closes out its issue.\`
 4. **Already closed:** a closed pull request isn't closed again; an issue already done or canceled isn't changed. Note each for the report.
 5. **Other work on the issue:** \`<otherPrs>\` isn't empty (a merged one counts: the issue may hold work that shipped): leave \`<issue>\` open, and say so.
-6. **Nothing to do:** no open pull request to close, no remote branch, no issue to change, and no \`<candidates>\`: print \`Nothing to close: no open pull request, no remote branch, and no issue to cancel.\` and stop. Without them, the repo's teardown still runs: when \`close.after\` has hooks, carry on to run them rather than stopping.
+6. **Nothing to do:** no open pull request to close, no remote branch, no issue to change, and no \`<candidates>\`: print \`Nothing to close: no open pull request, no remote branch, and no issue to cancel.\` and stop. Without them, the repo's teardown still runs: when \`cancel.after\` has hooks, carry on to run them rather than stopping.
 
 A close whose only action is deleting an orphaned remote branch is still a close.
 
 ### The repo's \`before\` hooks
 
-\`{{command:hooks}} run close.before --flow close --mode <mode> --branch <branch> --pr <N>\` (leave \`--pr\` out with no pull request). ${HOOK_RESULTS}`,
+\`{{command:hooks}} run cancel.before --flow cancel --mode <mode> --branch <branch> --pr <N>\` (leave \`--pr\` out with no pull request). ${HOOK_RESULTS}`,
           next: "run/confirm",
         },
         {
@@ -168,7 +168,7 @@ A close whose only action is deleting an orphaned remote branch is still a close
 - \`Close pull request #<N> ("<title>")\`
 - \`Delete remote branch origin/<branch>\`
 - \`Cancel issue <ID> ("<title>")\`
-- \`Run the repo's teardown: <the close.after hooks' names>\`
+- \`Run the repo's teardown: <the cancel.after hooks' names>\`
 
 **Warnings**, below them, the first one first:
 
@@ -179,7 +179,7 @@ A close whose only action is deleting an orphaned remote branch is still a close
 
 ### The searched issue
 
-Only with \`<candidates>\`. Invoking close doesn't authorize changing an issue the branch never named (one whose \`> Branch:\` line names it included: that line can be stale or copied), so the person picks it.
+Only with \`<candidates>\`. Invoking cancel doesn't authorize changing an issue the branch never named (one whose \`> Branch:\` line names it included: that line can be stale or copied), so the person picks it.
 
 **In \`force\` mode,** nobody can answer: change none, and list each as \`Possible issue, left open: [<ID>: <title>](<URL>)\`.
 
@@ -210,14 +210,14 @@ Never delete the local branch, switch branches, or touch the working tree: that'
           kind: "action",
           title: "Report",
           refName: "report",
-          body: `The repo's \`close.after\` hooks run just before this, as the hooks rule above says: that's where its own teardown happens (a database branch, dev servers, a closed marker).
+          body: `The repo's \`cancel.after\` hooks run just before this, as the hooks rule above says: that's where its own teardown happens (a database branch, dev servers, a closed marker).
 
 Lead with anything that needs attention: a failed write, a failed teardown hook, commits on the remote branch that were thrown away (\`Discarded <remoteAhead> remote-only commit(s) on origin/<branch>.\`). Then one line per action, with its outcome:
 
 - **Pull request:** closed, already closed, none, or failed (and why).
 - **Remote branch:** deleted, already gone, none, or failed.
 - **Issue:** canceled or marked done (as a link), already done or canceled, left open (other pull requests attached, or a tracker at \`link\`), no issue changed (with the candidates' links when the person picked none, or \`force\` mode skipped the question), or none found.
-- **Teardown:** each \`close.after\` hook and how it went.
+- **Teardown:** each \`cancel.after\` hook and how it went.
 - **Local:** \`<branch>\` and its working tree are still here; deleting them is the person's call.`,
           next: null,
         },

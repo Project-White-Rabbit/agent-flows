@@ -358,7 +358,7 @@ export const ready: SectionSpec = {
       key: "requiredChecks",
       type: "string[]",
       description:
-        "CI check names ready and merge wait for until they report: a check named here and not on the commit yet counts as pending, so a quick check settling first can't read as the whole run. For a check that gathers the others and starts late, or one the host's branch rules don't mark required. `*` matches any run of characters, case aside",
+        "CI check names ready and finish wait for until they report: a check named here and not on the commit yet counts as pending, so a quick check settling first can't read as the whole run. For a check that gathers the others and starts late, or one the host's branch rules don't mark required. `*` matches any run of characters, case aside",
       example: ["tests-passed"],
     },
     {
@@ -379,14 +379,14 @@ export const ready: SectionSpec = {
       key: "settleGrace",
       type: "number",
       description:
-        "Seconds the set of CI checks and their states must hold still, once none is pending, before ready and merge take the run as settled, so a check that registers a moment after the others finish isn't missed (default 0: settled as soon as none is pending)",
+        "Seconds the set of CI checks and their states must hold still, once none is pending, before ready and finish take the run as settled, so a check that registers a moment after the others finish isn't missed (default 0: settled as soon as none is pending)",
       example: 20,
     },
     {
       key: "requireChecks",
       type: "boolean",
       description:
-        "Never take a commit with no CI checks (or only ignored or optional ones) as having no CI: ready and merge wait until one reports, and a pass with none times out instead of passing (default false: none within 3 minutes reads as no CI)",
+        "Never take a commit with no CI checks (or only ignored or optional ones) as having no CI: ready and finish wait until one reports, and a pass with none times out instead of passing (default false: none within 3 minutes reads as no CI)",
       example: true,
     },
     {

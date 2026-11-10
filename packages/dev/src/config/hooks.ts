@@ -204,17 +204,17 @@ export const HOOK_POINTS: HookPoint[] = [
     ],
   },
   {
-    id: "merge.before",
-    flow: "merge",
-    when: "After merge's pre-flight gates pass, before it syncs, waits for CI, or merges anything",
+    id: "finish.before",
+    flow: "finish",
+    when: "After finish's pre-flight gates pass, before it syncs, waits for CI, or merges anything",
     effects: NO_SHARED_EFFECTS,
     failure: "stop",
     example: [{ name: "changelog", run: "./scripts/check-changelog.sh" }],
   },
   {
-    id: "merge.beforeCi",
-    flow: "merge",
-    when: "After merge has synced the branch and marked its pull request ready, before it waits for CI on the commit that lands: for a commit that must land with the merge (a changelog entry), which the hook makes and pushes, so CI runs on it",
+    id: "finish.beforeCi",
+    flow: "finish",
+    when: "After finish has synced the branch and marked its pull request ready, before it waits for CI on the commit that lands: for a commit that must land with the merge (a changelog entry), which the hook makes and pushes, so CI runs on it",
     effects:
       "Commands may change and push the branch, but not deploy, publish, migrate, or write to any other shared service",
     failure: "stop",
@@ -227,9 +227,9 @@ export const HOOK_POINTS: HookPoint[] = [
     ],
   },
   {
-    id: "merge.after",
-    flow: "merge",
-    when: "At the end of merge, merged or stopped, just before its report: teardown the repo does itself (a preview server, a database it manages). `on: merged` runs a hook whenever the pull request merged, even when what came after it (the deploy watch) failed",
+    id: "finish.after",
+    flow: "finish",
+    when: "At the end of finish, merged or stopped, just before its report: teardown the repo does itself (a preview server, a database it manages). `on: merged` runs a hook whenever the pull request merged, even when what came after it (the deploy watch) failed",
     effects:
       "Commands may have side effects outside the checkout: that's what teardown is",
     failure: "report",
@@ -244,9 +244,9 @@ export const HOOK_POINTS: HookPoint[] = [
     ],
   },
   {
-    id: "close.before",
-    flow: "close",
-    when: "After close's survey and gates, before it closes the pull request or deletes anything: a check that must pass before the branch's work is thrown away",
+    id: "cancel.before",
+    flow: "cancel",
+    when: "After cancel's survey and gates, before it closes the pull request or deletes anything: a check that must pass before the branch's work is thrown away",
     effects: NO_SHARED_EFFECTS,
     failure: "stop",
     example: [
@@ -254,9 +254,9 @@ export const HOOK_POINTS: HookPoint[] = [
     ],
   },
   {
-    id: "close.after",
-    flow: "close",
-    when: "At the end of close, finished or stopped, just before its report: teardown of what the repo set up for the branch itself (a database branch, dev servers, a marker that it's closed)",
+    id: "cancel.after",
+    flow: "cancel",
+    when: "At the end of cancel, finished or stopped, just before its report: teardown of what the repo set up for the branch itself (a database branch, dev servers, a marker that it's closed)",
     effects:
       "Commands may have side effects outside the checkout: that's what teardown is",
     failure: "report",
@@ -273,10 +273,10 @@ export const HOOK_POINTS: HookPoint[] = [
 
 /** The flows the general points run around: every flow but configure. */
 export const HOOK_FLOWS = [
-  "close",
+  "cancel",
   "create-tickets",
   "evaluate",
-  "merge",
+  "finish",
   "ready",
   "start-work",
   "sync",
@@ -288,10 +288,10 @@ export const HOOK_FLOWS = [
  * general point with `flows`.
  */
 export const FLOW_MODES: Record<string, string[]> = {
-  close: ["default", "force"],
+  cancel: ["default", "force"],
   "create-tickets": ["default", "match"],
   evaluate: ["default"],
-  merge: ["default"],
+  finish: ["default"],
   ready: ["default", "loop", "draft"],
   "start-work": ["default"],
   sync: ["default", "local", "remote"],
@@ -447,7 +447,7 @@ export function checkHooks(
         issues.push(`${at}.on must be ${HOOK_ON.join(", ")}`)
       } else if (entry.on === "merged" && point && !point.merged) {
         issues.push(
-          `${at}.on: merged is only for merge.after and hooks.after, which know whether the pull request merged`,
+          `${at}.on: merged is only for finish.after and hooks.after, which know whether the pull request merged`,
         )
       }
     }

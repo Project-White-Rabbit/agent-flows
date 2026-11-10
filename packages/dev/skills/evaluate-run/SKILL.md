@@ -283,9 +283,9 @@ Verdicts:
 - **Address first**: at least one high risk, or a cluster of mediums that together threaten shippability. List the must-fix items.
 - **Rethink**: the change as designed has a structural issue (wrong layer, wrong primitive, wrong rollout) that no incremental fix resolves. Be specific about what to rethink.
 
-The verdict is the user's call. Phrase it as a recommendation, not a gate: they may know context the diff doesn't show (a coordinated launch, an accepted risk, a planned follow-up). The one gate is the repo's: with `merge.requireEvaluation`, merge reads the recorded verdict.
+The verdict is the user's call. Phrase it as a recommendation, not a gate: they may know context the diff doesn't show (a coordinated launch, an accepted risk, a planned follow-up). The one gate is the repo's: with `finish.requireEvaluation`, finish reads the recorded verdict.
 
-With `<stopOn>` `high`, a confirmed HIGH risk, or a confirmed scan finding whose first word is `STOP`, is recorded as `stop`, which merge never lets through; at `rethink`, only Rethink is.
+With `<stopOn>` `high`, a confirmed HIGH risk, or a confirmed scan finding whose first word is `STOP`, is recorded as `stop`, which finish never lets through; at `rethink`, only Rethink is.
 
 When the scope step had `<scan findings>`, list them under the risks as `Scan`: each confirmed one is a risk above, and each set aside gets one line saying why.
 

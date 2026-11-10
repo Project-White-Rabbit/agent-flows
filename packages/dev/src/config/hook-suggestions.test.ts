@@ -92,7 +92,7 @@ describe("suggestHooks", () => {
       }),
     )
     expect(suggestion).toMatchObject({
-      point: "merge.after",
+      point: "finish.after",
       hook: { name: "server-down", on: "success", run: "pnpm run server:down" },
     })
   })
@@ -109,8 +109,8 @@ describe("suggestHooks", () => {
       ).map((s) => [s.point, s.hook.run]),
     ).toEqual([
       ["ready.before", "bash scripts/check-version-bump.sh"],
-      ["merge.after", "node scripts/server-down.ts"],
-      ["close.after", "node scripts/server-down.ts"],
+      ["finish.after", "node scripts/server-down.ts"],
+      ["cancel.after", "node scripts/server-down.ts"],
     ])
   })
 

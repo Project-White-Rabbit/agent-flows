@@ -3,9 +3,9 @@ description: Abandon the current branch's work: close its pull request, delete i
 argument-hint: "[force|help]"
 ---
 
-# /dev-flows:close
+# /dev-flows:cancel
 
-Winds down a branch whose work is being abandoned: the destructive sibling of `/dev-flows:sync`. It closes the pull request, deletes the remote branch, cancels the issue, and runs the repo's own teardown (`close.after` hooks: a database branch, dev servers, a marker a worktree setup script reads). Every vendor-specific action goes through the repo's configured integrations (`/dev-flows:configure`). The local branch and working tree are left alone, for the person (or their workspace app's teardown) to remove.
+Winds down a branch whose work is being abandoned: the destructive sibling of `/dev-flows:sync`. It closes the pull request, deletes the remote branch, cancels the issue, and runs the repo's own teardown (`cancel.after` hooks: a database branch, dev servers, a marker a worktree setup script reads). Every vendor-specific action goes through the repo's configured integrations (`/dev-flows:configure`). The local branch and working tree are left alone, for the person (or their workspace app's teardown) to remove.
 
 **CLI commands** available via Bash (paths relative to `${CLAUDE_PLUGIN_ROOT}/src/commands/`):
 
@@ -23,7 +23,7 @@ Winds down a branch whose work is being abandoned: the destructive sibling of `/
 - **A failed read is not an absence.** A lookup that errors (sign-in, rate limit, network) stops the command before any write: mistaking it for "no pull request" could delete a branch out from under an open one.
 - **Never touch the local branch or working tree:** no `git branch -D`, no switching branches, no reset or stash. Only what's remote, and what the repo's own hooks tear down.
 - **Change only the issue the branch names,** or one the person picks. An issue another pull request is attached to (open or merged) stays open, and one found only by its `> Branch:` line or a search is asked about, never changed in `force` mode.
-- **Run the repo's hooks around this command.** Skip this when the mode is `help`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run before --flow close --mode <mode>`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run close.after after --flow close --mode <mode> --branch <branch> --pr <N> --outcome <success, when it did its job, else failure>`, leaving out a flag whose value isn't known yet. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest (with `agent.recheck`, that first runs the hook's check again, and it fails like any check when the task didn't satisfy it); a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). `running`: a hook was still running when `--max-wait` ran out, and goes on running: run the same command again with `--wait <running.resume>` in place of any `--after`, until the status is another one, relaying `running.name` and how long it has run. When the host limits how long one command runs, add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`. An exit of 2 means bad arguments or an invalid config: relay its message and stop. At the end, a `stop` can't happen: report the `failures`. Say in the report which hooks ran at each point, what any task for you changed, and what failed.
+- **Run the repo's hooks around this command.** Skip this when the mode is `help`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run before --flow cancel --mode <mode>`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run cancel.after after --flow cancel --mode <mode> --branch <branch> --pr <N> --outcome <success, when it did its job, else failure>`, leaving out a flag whose value isn't known yet. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest (with `agent.recheck`, that first runs the hook's check again, and it fails like any check when the task didn't satisfy it); a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). `running`: a hook was still running when `--max-wait` ran out, and goes on running: run the same command again with `--wait <running.resume>` in place of any `--after`, until the status is another one, relaying `running.name` and how long it has run. When the host limits how long one command runs, add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`. An exit of 2 means bad arguments or an invalid config: relay its message and stop. At the end, a `stop` can't happen: report the `failures`. Say in the report which hooks ran at each point, what any task for you changed, and what failed.
 
 ## Modes
 
@@ -37,7 +37,7 @@ Read `$ARGUMENTS` first. If its first token is exactly one of the mode names bel
 
 ## Dispatch
 
-- Mode `default` or `force`: invoke the `close-run` skill with the current mode (`default` or `force`), forwarding `$ARGUMENTS` minus the leading mode keyword (if the user typed one).
+- Mode `default` or `force`: invoke the `cancel-run` skill with the current mode (`default` or `force`), forwarding `$ARGUMENTS` minus the leading mode keyword (if the user typed one).
 
 ## 0. Help shortcut
 
@@ -45,7 +45,7 @@ Read `$ARGUMENTS` first. If its first token is exactly one of the mode names bel
 
 If mode is `help`, print the block below verbatim and exit. No reads, no writes.
 
-> `/dev-flows:close` winds down a branch whose work is being abandoned. Invoking it is the confirmation.
+> `/dev-flows:cancel` winds down a branch whose work is being abandoned. Invoking it is the confirmation.
 >
 > Modes:
 >   - (no arg) -- close what applies, below
@@ -57,6 +57,6 @@ If mode is `help`, print the block below verbatim and exit. No reads, no writes.
 >   - deletes the remote branch
 >   - cancels the issue the branch names (left open when another pull request, open or merged, is attached to it)
 >   - when the branch names no issue, looks for one (a `> Branch:` line naming the branch, then a search and create-tickets' ranking of recent issues) and asks which, if any, to cancel or mark done; `force` changes none of them
->   - runs the repo's teardown (`close.after` hooks)
+>   - runs the repo's teardown (`cancel.after` hooks)
 >
 > It never deletes the local branch, switches branches, or touches the working tree. It refuses on the base branch (and the config's `repo.protectedBranches`), on a branch other branches are stacked on, and on a pull request that merged.

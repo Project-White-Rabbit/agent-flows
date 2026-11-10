@@ -747,7 +747,7 @@ const HELP = `Usage: configure.ts <command>
                   formatted (it's outside the repo).
                   --replace makes the override the whole config, ignoring
                   ${CONFIG_PATH}; switching to it starts from the config as it
-                  reads now. --merge goes back to layering it over the
+                  reads now. --finish goes back to layering it over the
                   committed file. Either one persists in the file ("override")
                   and takes an empty patch to just switch.
 `

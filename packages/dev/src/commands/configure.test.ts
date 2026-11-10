@@ -255,7 +255,7 @@ describe("configure.ts (as a script)", () => {
         version: 2,
         repo: { baseBranch: "main" },
         ready: { before: [{ name: "bump", run: "x", on: "success" }] },
-        merge: { after: "./teardown.sh" },
+        finish: { after: "./teardown.sh" },
       }),
     )
     const partial = run(
@@ -267,7 +267,7 @@ describe("configure.ts (as a script)", () => {
     expect(partial.status).toBe(1)
     expect(json(partial)).toMatchObject({
       written: false,
-      issues: ["merge.after must be a list of hooks"],
+      issues: ["finish.after must be a list of hooks"],
     })
 
     const fixed = run(
@@ -275,13 +275,13 @@ describe("configure.ts (as a script)", () => {
       JSON.stringify({
         sections: {
           ready: { before: [{ name: "bump", run: "x" }] },
-          merge: { after: [{ name: "down", run: "./teardown.sh" }] },
+          finish: { after: [{ name: "down", run: "./teardown.sh" }] },
         },
       }),
     )
     expect(fixed.status).toBe(0)
     expect(json(fixed).written).toBe(true)
-    expect(run(["get", "merge.after"]).status).toBe(0)
+    expect(run(["get", "finish.after"]).status).toBe(0)
 
     fs.writeFileSync(configFile(), "{ not json")
     const unreadable = run(
@@ -417,7 +417,7 @@ describe("configure.ts (as a script)", () => {
       }),
     )
     expect(JSON.parse(fs.readFileSync(configFile(), "utf8"))).toEqual({
-      version: 3,
+      version: 4,
       repo: { baseBranch: "main" },
       integrations: {
         github: { owner: "acme", repo: "web" },
@@ -840,7 +840,7 @@ describe("configure.ts (as a script)", () => {
     expect(switched.status).toBe(0)
     const file = JSON.parse(fs.readFileSync(localFile, "utf8"))
     expect(file).toMatchObject({
-      version: 3,
+      version: 4,
       override: "replace",
       repo: { baseBranch: "develop" },
       integrations: { github: { owner: "acme", repo: "web" } },

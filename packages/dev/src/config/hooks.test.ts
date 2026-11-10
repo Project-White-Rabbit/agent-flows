@@ -108,16 +108,16 @@ describe("checkHooks", () => {
         [
           { name: "a", run: "x", flows: ["configure"] },
           { name: "b", run: "x", flows: [] },
-          { name: "c", run: "x", flows: ["merge"], modes: ["loop"] },
+          { name: "c", run: "x", flows: ["finish"], modes: ["loop"] },
           { name: "d", run: "x", flows: ["nope"], modes: ["loop"] },
         ],
         "hooks.before",
       ).issues,
     ).toEqual([
-      "hooks.before[a].flows must list flows of close, create-tickets, evaluate, merge, ready, start-work, sync, tickets-to-work",
-      "hooks.before[b].flows must list flows of close, create-tickets, evaluate, merge, ready, start-work, sync, tickets-to-work",
-      "hooks.before[c].modes must list modes of merge: default",
-      "hooks.before[d].flows must list flows of close, create-tickets, evaluate, merge, ready, start-work, sync, tickets-to-work",
+      "hooks.before[a].flows must list flows of cancel, create-tickets, evaluate, finish, ready, start-work, sync, tickets-to-work",
+      "hooks.before[b].flows must list flows of cancel, create-tickets, evaluate, finish, ready, start-work, sync, tickets-to-work",
+      "hooks.before[c].modes must list modes of finish: default",
+      "hooks.before[d].flows must list flows of cancel, create-tickets, evaluate, finish, ready, start-work, sync, tickets-to-work",
     ])
     expect(check([{ name: "a", run: "x", flows: ["ready"] }]).issues).toEqual([
       "ready.before[a].flows is only for a general point: this one runs only in ready",
@@ -129,20 +129,20 @@ describe("checkHooks", () => {
       "ready.before[a].on is only for an after point, which knows the outcome",
     ])
     expect(
-      check([{ name: "a", run: "x", on: "maybe" }], "merge.after").issues,
-    ).toEqual(["merge.after[a].on must be success, failure, merged"])
+      check([{ name: "a", run: "x", on: "maybe" }], "finish.after").issues,
+    ).toEqual(["finish.after[a].on must be success, failure, merged"])
     expect(
       check([{ name: "a", run: "x", on: "failure" }], "hooks.after").issues,
     ).toEqual([])
-    for (const where of ["merge.after", "hooks.after"]) {
+    for (const where of ["finish.after", "hooks.after"]) {
       expect(
         check([{ name: "a", run: "x", on: "merged" }], where).issues,
       ).toEqual([])
     }
     expect(
-      check([{ name: "a", run: "x", on: "merged" }], "close.after").issues,
+      check([{ name: "a", run: "x", on: "merged" }], "cancel.after").issues,
     ).toEqual([
-      "close.after[a].on: merged is only for merge.after and hooks.after, which know whether the pull request merged",
+      "cancel.after[a].on: merged is only for finish.after and hooks.after, which know whether the pull request merged",
     ])
   })
 
@@ -227,12 +227,12 @@ describe("hook points", () => {
         ...base,
         hooks: { before: [{ name: "env", run: "x" }] },
         ready: { beforePublish: [{ name: "a", run: "x" }] },
-        merge: { after: [{ name: "b", on: "success", prompt: "y" }] },
+        finish: { after: [{ name: "b", on: "success", prompt: "y" }] },
       }),
     ).toEqual({ issues: [], warnings: [] })
     expect(
-      checkConfig({ ...base, merge: { after: "./teardown.sh" } }).issues,
-    ).toEqual(["merge.after must be a list of hooks"])
+      checkConfig({ ...base, finish: { after: "./teardown.sh" } }).issues,
+    ).toEqual(["finish.after must be a list of hooks"])
     expect(getAt({ hooks: { before: [] } }, "hooks.before")).toEqual([])
   })
 
