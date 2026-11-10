@@ -203,7 +203,7 @@ export const tickets: SectionSpec = {
     {
       key: "timezone",
       description:
-        'IANA time zone for what "today" is when create-tickets checks due dates and dates planning sections (default: this machine\'s)',
+        "IANA time zone the team plans in, for what \"today\" is when create-tickets checks due dates and dates planning sections (default: this machine's). Set it only for a team that works in one zone, never from your own machine's",
       example: "America/Los_Angeles",
       check: timeZoneProblem,
     },

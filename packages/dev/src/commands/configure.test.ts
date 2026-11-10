@@ -417,7 +417,7 @@ describe("configure.ts (as a script)", () => {
       }),
     )
     expect(JSON.parse(fs.readFileSync(configFile(), "utf8"))).toEqual({
-      version: 4,
+      version: CONFIG_VERSION,
       repo: { baseBranch: "main" },
       integrations: {
         github: { owner: "acme", repo: "web" },
@@ -840,7 +840,7 @@ describe("configure.ts (as a script)", () => {
     expect(switched.status).toBe(0)
     const file = JSON.parse(fs.readFileSync(localFile, "utf8"))
     expect(file).toMatchObject({
-      version: 4,
+      version: CONFIG_VERSION,
       override: "replace",
       repo: { baseBranch: "develop" },
       integrations: { github: { owner: "acme", repo: "web" } },

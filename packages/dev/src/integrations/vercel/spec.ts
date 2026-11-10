@@ -14,7 +14,7 @@ export const vercel: IntegrationSpec = {
   fields: [
     {
       key: "team",
-      description: "Team id or slug",
+      description: "Team id or slug (never a personal account's id)",
       example: "team_abc123",
       pattern: SLUG,
     },
@@ -60,6 +60,15 @@ export const vercel: IntegrationSpec = {
         continue
       }
       evidence.unshift(`${file} (linked with vercel link)`)
+      // Linked under a personal account, the org id is that person's user id:
+      // teammates can't reach a Hobby project, so it's worth saying.
+      const personal =
+        typeof project.orgId === "string" && !project.orgId.startsWith("team_")
+      if (personal) {
+        evidence.push(
+          `${file} is linked under a personal Vercel account, not a team: teammates can't reach it, so link it under the team's scope (\`vercel link --scope <team>\`) or keep this entry in this machine's override (\`configure local\`)`,
+        )
+      }
       // Named after the project, else its app directory; the full path
       // breaks ties (apps/web vs packages/web).
       names.push({
@@ -72,7 +81,9 @@ export const vercel: IntegrationSpec = {
         fallback: dir === "" ? "root" : dir,
       })
       instances.push({
-        ...(typeof project.orgId === "string" ? { team: project.orgId } : {}),
+        ...(typeof project.orgId === "string" && !personal
+          ? { team: project.orgId }
+          : {}),
         ...(typeof project.projectId === "string"
           ? { project: project.projectId }
           : {}),

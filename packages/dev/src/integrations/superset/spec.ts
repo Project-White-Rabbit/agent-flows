@@ -1,4 +1,15 @@
-import type { IntegrationSpec } from "../../config/types.ts"
+import type {
+  IntegrationSpec,
+  MachineValues,
+  SessionContext,
+} from "../../config/types.ts"
+import {
+  type Checkout,
+  checkoutOf,
+  pickEntry,
+  remoteKey,
+  where,
+} from "../local-repo.ts"
 import { SLUG } from "../patterns.ts"
 
 /**
@@ -34,6 +45,84 @@ export function hasWorktree(stdout: string, root: string): boolean {
   }
 }
 
+type SupersetProject = {
+  id?: unknown
+  name?: unknown
+  path?: unknown
+  repo?: unknown
+}
+
+const text = (value: unknown): string | undefined =>
+  typeof value === "string" && value !== "" ? value : undefined
+
+/**
+ * This repository's project in `superset projects list --local --json`
+ * output, or why there's none.
+ */
+export function supersetProjectIn(
+  stdout: string,
+  checkout: Checkout,
+): MachineValues {
+  let projects: SupersetProject[]
+  try {
+    const parsed: unknown = JSON.parse(stdout)
+    const list = Array.isArray(parsed)
+      ? parsed
+      : (parsed as { projects?: unknown })?.projects
+    projects = Array.isArray(list) ? (list as SupersetProject[]) : []
+  } catch {
+    return {
+      problem:
+        "`superset projects list --local --json` printed something other than JSON.",
+    }
+  }
+  const found = pickEntry(
+    // Ids land in shell commands: only ones a config field would allow.
+    projects.filter((p) => SLUG.regex.test(text(p.id) ?? "")),
+    checkout,
+    {
+      pathOf: (p) => text(p.path),
+      keysOf: (p) => [remoteKey(text(p.repo))],
+    },
+  )
+  if ("entry" in found) {
+    return { values: { project: text(found.entry.id) as string } }
+  }
+  const at = where(checkout)
+  if ("ambiguous" in found) {
+    const listed = found.ambiguous
+      .map((p) => `${text(p.name) ?? text(p.id)} (${text(p.path)})`)
+      .join(", ")
+    return {
+      problem: `Superset has several projects on this machine for this repository's origin, none at ${at}: ${listed}. Remove the extra ones, or set this checkout up with \`superset projects setup <project id> --local --import ${at}\`.`,
+    }
+  }
+  return {
+    problem: `Superset has no project for this repository (${at}) on this machine. Adopt your team's with \`superset projects setup <project id> --local --import ${at}\`, or add one with \`superset projects create --local --import ${at}\` (or from Superset's app), then run this again.`,
+  }
+}
+
+/**
+ * Which Superset project this checkout is, on this machine: the one whose
+ * `path` is the main checkout, else the one whose `repo` is origin. Never
+ * sets one up.
+ */
+export async function supersetProject(
+  session: SessionContext,
+): Promise<MachineValues> {
+  const checkout = await checkoutOf(session)
+  const out = await session.run(
+    ["superset", "projects", "list", "--local", "--json"],
+    session.root,
+  )
+  return out === undefined
+    ? {
+        problem:
+          "Couldn't list Superset's projects (`superset projects list --local --json` failed). Superset must be running and signed in: check `superset auth whoami`.",
+      }
+    : supersetProjectIn(out, checkout)
+}
+
 export const superset: IntegrationSpec = {
   path: "integrations.superset",
   name: "Superset",
@@ -41,22 +130,20 @@ export const superset: IntegrationSpec = {
     "Local workspaces, each a worktree with a coding agent working in it",
   fields: [
     {
-      key: "project",
-      description: "Superset project id for this repository",
-      example: "a10b8f37-f18e-4605-b7d5-764e5d661184",
-      required: true,
-      pattern: SLUG,
-    },
-    {
       key: "agent",
-      description: "Agent preset new workspaces start (claude, codex, …)",
+      description:
+        "Agent preset new workspaces start (claude, codex, …): the team's default, only when the team agreed on one. Each person's own choice goes in this machine's override (`configure local`)",
       example: "claude",
       pattern: SLUG,
     },
   ],
+  // A Superset project belongs to one Superset organization, and each machine
+  // sets it up at its own path, so the id isn't the team's: flows find it
+  // where they run (`{project}`) rather than the config holding one person's.
   lookup:
-    "`superset projects list --local --json`: the project whose `repo` is this repository's origin, or whose `path` is its main checkout",
+    "Nothing to record: flows find this repository's Superset project on each machine. Check `superset projects list --local --json` has a project whose `path` is this repository's main checkout or whose `repo` is its origin; when none has, say Superset has no project for it here and suggest `superset projects setup <project id> --local --import <main checkout>` (or `superset projects create --local --import <main checkout>`) (never set one up yourself)",
   access: { cli: { bin: "superset", auth: ["superset", "auth", "whoami"] } },
+  machine: { keys: ["project"], resolve: supersetProject },
   session: {
     env: [SUPERSET_ENV],
     check: {

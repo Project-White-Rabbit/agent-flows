@@ -38,9 +38,11 @@ import { INSTANCE_NAME } from "../config/instances.ts"
 import {
   coverage,
   findCapability,
+  machineValues,
   providersOf,
   resolveCapability,
   runningIn,
+  type SessionContext,
 } from "../config/integrations.ts"
 import {
   checkSource,
@@ -338,7 +340,7 @@ async function integrations(root: string, args: string[]): Promise<void> {
     systemProbe(),
     readLocal(root).tokens,
   )
-  const here = await runningIn(configured, {
+  const session: SessionContext = {
     env: process.env,
     root,
     run: (command, cwd) =>
@@ -351,7 +353,11 @@ async function integrations(root: string, args: string[]): Promise<void> {
           (error, stdout) => resolve(error ? undefined : stdout),
         )
       }),
-  })
+  }
+  const [here, machine] = await Promise.all([
+    runningIn(configured, session),
+    machineValues(config, configured, session),
+  ])
   const scripts: Record<string, Record<string, LoadedAdapter>> = {}
   const adapterIssues: string[] = []
   for (const spec of configured) {
@@ -363,7 +369,15 @@ async function integrations(root: string, args: string[]): Promise<void> {
     (id) =>
       [
         id,
-        resolveCapability(config, id, INTEGRATIONS, access, scripts, here),
+        resolveCapability(
+          config,
+          id,
+          INTEGRATIONS,
+          access,
+          scripts,
+          here,
+          machine,
+        ),
       ] as const,
   )
   const missing = resolved.filter(([, r]) => r.configured.length === 0)
@@ -740,7 +754,8 @@ const HELP = `Usage: configure.ts <command>
                   With --local, patches this machine's override instead, in
                   the repo's git dir (shared by its worktrees, never
                   committed): for a repo whose config isn't yours to change.
-                  Each section it sets replaces the committed one, its skip
+                  Each section it sets is laid over the committed one field
+                  by field (a list of instances is replaced whole), its skip
                   list drops committed ones, and null removes a section from
                   the override so the committed one applies again. The
                   override must make a valid config once applied, and isn't

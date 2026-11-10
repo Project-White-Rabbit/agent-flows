@@ -12,6 +12,7 @@
 // Runtime code: Node built-ins only.
 
 import { INSTANCE_NAME } from "./instances.ts"
+import { homePathWarning } from "./personal.ts"
 import { type FieldSpec, HOOK_KEYS, type Hook } from "./types.ts"
 
 /**
@@ -252,7 +253,7 @@ export const HOOK_POINTS: HookPoint[] = [
   {
     id: "preview.afterOpen",
     flow: "preview",
-    when: "Once preview has opened the page, before its report: for getting the person onto it (signing in as a test user, picking an account, setting the state it shows). `{url}` is the page it opened. A prompt is a task in the browser that opened it, done only when this session can drive that browser; else preview tells the person what it asked",
+    when: "Once preview has opened the page, before its report: for getting the person onto it (signing in as a test user, picking an account, setting the state it shows). The config is the team's: a test user every teammate can use, with any secret it needs read from the environment, never one person's own login. `{url}` is the page it opened. A prompt is a task in the browser that opened it, done only when this session can drive that browser; else preview tells the person what it asked",
     effects:
       "Commands may change the local dev server's own data (a test session, seeded rows), but not the checkout, since preview never edits it, and not deploy, publish, migrate, or write to a shared service or database",
     failure: "report",
@@ -402,6 +403,11 @@ export function checkHooks(
     for (const key of ["run", "fix", "prompt"] as const) {
       if (entry[key] !== undefined && !nonEmpty(entry[key])) {
         issues.push(`${at}.${key} must be a non-empty string`)
+        continue
+      }
+      const personal = entry[key] && homePathWarning(entry[key])
+      if (personal) {
+        warnings.push(`${at}.${key} ${personal}`)
       }
     }
     if ((entry.run === undefined) === (entry.prompt === undefined)) {
