@@ -176,12 +176,13 @@ An integration can be reached in up to three ways: its **MCP server**, its **CLI
 
 **A local override** is for a repo whose config isn't yours to change (someone else's), or settings only you want: \`{{cmd}}configure local\` (with a mode or sections as usual) writes to this machine's override instead of \`{{configPath}}\`. It lives in the repo's git dir, so the repo's worktrees share it and it can never be committed. It's the same format, and applies one of two ways, recorded in the file as \`"override"\`:
 
-- **Merge** (the default): each section it sets replaces the committed one, and each it skips is dropped; the rest follows the committed file as the team changes it. A repo with no config at all can be configured entirely this way.
+- **Merge** (the default): each section it sets is laid over the committed one field by field, so it can hold just one personal field (an integration's \`agent\`) and keep the team's others (a section configured as a list is replaced whole), and each it skips is dropped; the rest follows the committed file as the team changes it. A repo with no config at all can be configured entirely this way.
 - **Replace** (\`{{cmd}}configure replace\`): the override is the whole config and the committed file is ignored. Switching to it starts from the config as it reads now, so nothing is lost, but later changes to the committed file no longer reach this machine.
 
 Re-running is safe: values already in the file are kept, skipped sections stay skipped (until a manual run or naming them brings them back), and when nothing new turns up the command says so and changes nothing.`,
   invariants: [
     "Never write a token, key, password, or connection string into the config, and never read a real `.env` file to find one. If the user pastes a secret, don't save it, and tell them it doesn't belong in this file.",
+    "The committed file is the team's, so it holds only what's the same for everyone on it: never a value that's only true for you or this machine (an absolute path, a local port, your own user or account id, an id a local app made when you added the repo to it). Such a value goes in the local override (`{{cmd}}configure local`), or is left out for flows to work out where they run.",
     "Never call a service in a way that changes it. Lookups are read-only, and that includes local setup: don't run a CLI command that initializes or configures the tool in this repo (some do on first use), even to read a value. Read its files instead, or ask.",
     "Only change the config through `write`; never edit the file by hand to get past the validator.",
   ],

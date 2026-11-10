@@ -52,8 +52,10 @@ describe("section registry", () => {
     (_path, spec) => {
       const keys = spec.fields.map((f) => f.key)
       expect(new Set(keys).size).toBe(keys.length)
-      // Settings that all have defaults (sync's format) may leave every field out.
-      if ("provides" in spec || spec.required) {
+      // Settings that all have defaults (sync's format) may leave every field
+      // out, and so may an integration whose values each machine works out.
+      const machine = "provides" in spec && "machine" in spec
+      if (("provides" in spec && !machine) || spec.required) {
         expect(spec.fields.some((f) => f.required)).toBe(true)
       }
       for (const field of spec.fields) {

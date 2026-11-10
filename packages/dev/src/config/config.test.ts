@@ -243,7 +243,7 @@ describe("migrate", () => {
       }),
     ).toEqual({
       config: {
-        version: 4,
+        version: 5,
         repo: { baseBranch: "main" },
         integrations: { github: { owner: "acme", repo: "web" } },
         skipped: ["integrations.sentry"],
@@ -260,13 +260,13 @@ describe("migrate", () => {
         skipped: ["merge.closeIssue"],
       }).config
     expect(merged(true)).toEqual({
-      version: 4,
+      version: 5,
       finish: { after: [], issueOnMerge: "close" },
       skipped: ["finish.issueOnMerge"],
     })
     expect(merged(false)?.finish).toEqual({ after: [], issueOnMerge: "leave" })
     expect(migrate({ version: 2, merge: {} }).config).toEqual({
-      version: 4,
+      version: 5,
       finish: {},
     })
   })
@@ -286,7 +286,7 @@ describe("migrate", () => {
         skipped: ["close", "merge.watchDeploy", "integrations.sentry"],
       }).config,
     ).toEqual({
-      version: 4,
+      version: 5,
       finish: { ciTimeout: 45, after: [{ name: "down", run: "./down.sh" }] },
       cancel: { after: [{ name: "db", run: "./db.sh delete {branch}" }] },
       hooks: {
@@ -307,9 +307,32 @@ describe("migrate", () => {
         finish: { ciTimeout: 10 },
       }).config,
     ).toEqual({
-      version: 4,
+      version: 5,
       merge: { ciTimeout: 45 },
       finish: { ciTimeout: 10 },
+    })
+  })
+
+  it("drops v4's machine-local Orca repo and Superset project ids", () => {
+    expect(
+      migrate({
+        version: 4,
+        integrations: {
+          orca: {
+            repo: "66ee3232-21c9-46d7-bd8e-0adf8e9bed5c",
+            agent: "codex",
+          },
+          superset: { project: "a10b8f37-f18e-4605-b7d5-764e5d661184" },
+          github: { owner: "acme", repo: "web" },
+        },
+      }).config,
+    ).toEqual({
+      version: 5,
+      integrations: {
+        orca: { agent: "codex" },
+        superset: {},
+        github: { owner: "acme", repo: "web" },
+      },
     })
   })
 

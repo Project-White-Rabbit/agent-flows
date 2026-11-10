@@ -7,13 +7,19 @@ export const slack: IntegrationSpec = {
   fields: [
     {
       key: "channel",
-      description: "Channel name or id",
+      description: "The team's channel: a name or channel id, never a DM",
       example: "#eng",
       required: true,
+      // A DM or a person's id posts somewhere only one teammate reads.
+      warn: (value) =>
+        /^@|^[DUW][A-Z0-9]{8,}$/.test(String(value))
+          ? "is a direct message or a person, not a channel the team reads: use a channel's name or id (`#eng`, `C…`)"
+          : undefined,
     },
   ],
   multiple: true,
-  lookup: "Slack MCP (search channels), or ask",
+  lookup:
+    "Slack MCP (search channels), or ask: a channel the team reads, never a DM or a person",
   access: {
     mcp: { server: "Slack" },
     api: {

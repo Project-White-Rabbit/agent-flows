@@ -74,7 +74,7 @@ export const sync: SectionSpec = {
     {
       key: "timezone",
       description:
-        "IANA time zone for the last-synced line's time (default `UTC`), shown by its short name (`PT` for `America/Los_Angeles`)",
+        "IANA time zone the team reads the last-synced line's time in (default `UTC`), shown by its short name (`PT` for `America/Los_Angeles`). The team's zone, never just your machine's",
       example: "America/Los_Angeles",
       check: timeZoneProblem,
     },

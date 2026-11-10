@@ -28,7 +28,7 @@ import { checkUse, USE_KEY, usesOf } from "./use.ts"
 export const CONFIG_PATH = ".agent-flows/config.json"
 
 export { INSTANCE_KEY }
-export const CONFIG_VERSION = 4
+export const CONFIG_VERSION = 5
 
 /** Upgrades from each older version. */
 export const MIGRATIONS: Migration[] = [
@@ -107,7 +107,30 @@ export const MIGRATIONS: Migration[] = [
       return config
     },
   },
+  {
+    // Orca's repo id and Superset's project id are made by each machine's app
+    // (Superset's by one organization's), so the committed one only worked for
+    // whoever ran configure. Flows now find them where they run.
+    from: 4,
+    migrate(config) {
+      const integrations = config.integrations
+      if (isRecord(integrations)) {
+        for (const [id, key] of MACHINE_FIELDS) {
+          for (const entry of instancesOf(integrations[id])) {
+            delete entry[key]
+          }
+        }
+      }
+      return config
+    },
+  },
 ]
+
+/** Fields format 5 dropped: values each machine works out for itself. */
+const MACHINE_FIELDS = [
+  ["orca", "repo"],
+  ["superset", "project"],
+] as const
 
 /** Flows renamed in format 4, by their old names. */
 const FLOW_RENAMES = { merge: "finish", close: "cancel" } as const
@@ -294,6 +317,11 @@ function checkEntry(
       checkWhole(field, fieldValue as FieldValue, `${where}.${key}`)
     if (problem) {
       issues.push(problem)
+      continue
+    }
+    const personal = field.warn?.(fieldValue as FieldValue)
+    if (personal) {
+      warnings.push(`${where}.${key} ${personal}`)
     }
   }
   for (const field of spec.fields) {
@@ -647,8 +675,11 @@ export function joinOverride(mode: OverrideMode, own: RawConfig): RawConfig {
 
 /**
  * The config with this machine's override applied. Merged, each section the
- * override sets replaces the committed entry, and each it skips is dropped;
- * `overridden` lists those paths. Replaced, the override is the whole config.
+ * override sets is laid over the committed entry field by field (so it can set
+ * just a personal `agent` and keep following the team's other fields), a
+ * section configured as a list is replaced whole, and each it skips is
+ * dropped; `overridden` lists those paths. Replaced, the override is the
+ * whole config.
  */
 export function overlay(
   shared: RawConfig | undefined,
@@ -668,9 +699,15 @@ export function overlay(
   const sections: Record<string, SectionEntry> = {}
   for (const spec of registry) {
     const value = getAt(own, spec.path)
-    if (value !== undefined) {
-      sections[spec.path] = value as SectionEntry
+    if (value === undefined) {
+      continue
     }
+    const committed = shared ? getAt(shared, spec.path) : undefined
+    sections[spec.path] = (
+      isRecord(value) && isRecord(committed)
+        ? { ...committed, ...value }
+        : value
+    ) as SectionEntry
   }
   const skip = (Array.isArray(own.skipped) ? own.skipped : []).filter(
     (p): p is string => registry.some((s) => s.path === p),

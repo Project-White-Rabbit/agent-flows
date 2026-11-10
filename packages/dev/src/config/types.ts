@@ -110,6 +110,12 @@ export type FieldSpec = {
   pattern?: FieldPattern
   /** A rule the value as a whole must meet, past its type and pattern: what's wrong, or undefined. */
   check?(value: FieldValue): string | undefined
+  /**
+   * Why a valid value looks true only for one person or machine (a path in
+   * someone's home folder, a Slack DM): a warning, not an error, since the
+   * committed config is the team's and the value may still be meant.
+   */
+  warn?(value: FieldValue): string | undefined
 }
 
 export type SectionValues = Record<string, FieldValue>
@@ -286,6 +292,23 @@ export type IntegrationSpec = SectionSpec & {
    * repo opened from two apps acts through whichever one it's in. Never by
    * where the checkout is: these apps let people put worktrees anywhere.
    */
+  /**
+   * Values that differ on every machine, such as a local app's own id for this
+   * repository (made when someone adds the folder to it), so they never go in
+   * the committed config. Worked out when flows ask for the integration; each
+   * fills its `{field}` in the ops like a configured value. When they can't
+   * be, the resolved entry carries the `problem` and its ops keep the
+   * placeholders.
+   */
+  machine?: {
+    /** The `{field}`s it supplies, never config fields. */
+    keys: string[]
+    /** `values` is the entry as configured, for a hint the team recorded. */
+    resolve(
+      session: SessionContext,
+      values: SectionValues,
+    ): Promise<MachineValues>
+  }
   session?: {
     /** Variables the app sets in its terminals; any one set settles it. */
     env: string[]
@@ -301,6 +324,22 @@ export type IntegrationSpec = SectionSpec & {
     }
   }
 }
+
+/** Where this session runs: its environment, its checkout, and a way to ask. */
+export type SessionContext = {
+  env: Record<string, string | undefined>
+  root: string
+  /** `command`'s stdout when it exits 0 in `cwd`, else undefined. */
+  run(command: string[], cwd: string): Promise<string | undefined>
+}
+
+/**
+ * Values only this machine knows, worked out where the flow runs: what fills
+ * their `{field}` placeholders, or why they can't be (and how to fix it).
+ */
+export type MachineValues =
+  | { values: Record<string, string> }
+  | { problem: string }
 
 /** What an adapter gets: the entry's values, its arguments, and its access. */
 export type AdapterInput = {

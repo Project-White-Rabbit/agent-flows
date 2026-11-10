@@ -67,7 +67,7 @@ export const preview: SectionSpec = {
     {
       key: "url",
       description:
-        "Where the dev server serves, when it's always the same. Leave it unset when each worktree gets its own port: preview reads the URL the server prints, or the port this checkout's server listens on. When it's set and another checkout's server holds it, preview says so rather than open the other checkout's work",
+        "Where the dev server serves, when it's always the same for everyone (the port the repo's dev script fixes, not one you picked on your machine). Leave it unset when each worktree gets its own port: preview reads the URL the server prints, or the port this checkout's server listens on. When it's set and another checkout's server holds it, preview says so rather than open the other checkout's work",
       example: "http://localhost:3000",
       pattern: LOCAL_URL,
     },

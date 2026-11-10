@@ -5,6 +5,7 @@ import type {
 } from "../../config/types.ts"
 import { parseGithubRemote } from "../github/spec.ts"
 import { BOT_LOGIN, MENTION, SLUG, WORKFLOW_FILE } from "../patterns.ts"
+import { teamRemote } from "../remote.ts"
 import {
   DEFAULT_BOT,
   DEFAULT_MENTION,
@@ -34,8 +35,7 @@ export function claudeWorkflow(
 }
 
 function detect(ctx: DetectContext): Detection | undefined {
-  const remote = ctx.git(["remote", "get-url", "origin"])
-  const repo = remote ? parseGithubRemote(remote) : undefined
+  const repo = teamRemote(ctx, parseGithubRemote)?.parsed
   if (!repo) {
     return undefined
   }
@@ -107,7 +107,7 @@ export const claude: IntegrationSpec = {
     },
   ],
   lookup:
-    "The repository from `gh repo view --json owner,name`; the workflow is the file in `.github/workflows` that uses `anthropics/claude-code-action` on `issue_comment`",
+    "The repository from `gh repo view --json owner,name,isFork,parent` (when `isFork`, the `parent`, not a person's fork); the workflow is the file in `.github/workflows` that uses `anthropics/claude-code-action` on `issue_comment`",
   access: {
     cli: { bin: "gh", auth: ["gh", "auth", "status"] },
   },

@@ -1,6 +1,7 @@
 import { projectsField } from "../../config/projects.ts"
 import type { IntegrationSpec } from "../../config/types.ts"
 import { SLUG, WORKFLOW_FILE } from "../patterns.ts"
+import { remoteEvidence, teamRemote } from "../remote.ts"
 import { checks, codeScanningAlerts, deployment } from "./adapter.ts"
 import { stackAdapters } from "./stack-adapter.ts"
 
@@ -123,7 +124,7 @@ export const github: IntegrationSpec = {
   ],
   multiple: true,
   lookup:
-    "`gh repo view --json owner,name`, or the GitHub MCP's repository search",
+    "`gh repo view --json owner,name,isFork,parent` (when `isFork`, the `parent`: the team's repository, not a person's fork), or the GitHub MCP's repository search",
   access: {
     mcp: { server: "GitHub" },
     cli: { bin: "gh", auth: ["gh", "auth", "status"] },
@@ -341,10 +342,9 @@ export const github: IntegrationSpec = {
   optIn: ["issueTracker", "deployments", "stacking"],
   adapters: { checks, codeScanningAlerts, deployment, ...stackAdapters },
   detect(ctx) {
-    const remote = ctx.git(["remote", "get-url", "origin"])
-    const parsed = remote ? parseGithubRemote(remote) : undefined
-    return parsed
-      ? { values: parsed, evidence: [`origin remote ${remote}`] }
+    const found = teamRemote(ctx, parseGithubRemote)
+    return found
+      ? { values: found.parsed, evidence: [remoteEvidence(found)] }
       : undefined
   },
 }
