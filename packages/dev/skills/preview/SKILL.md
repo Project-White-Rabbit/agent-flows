@@ -76,7 +76,7 @@ Work out `<target>`, the full URL to open, on the server's `<url>`:
 
 A route with dynamic segments (`[id]`, `:slug`) needs real values: take them from the session's work, the repo's seed data or fixtures, or a link on the parent page that already answers. When none turns up, use the nearest page without one, and say so. With no page in the change (a back-end change, a config change), `<target>` is `<url>`, and say which change it serves.
 
-Check it before opening: `curl -s -o /dev/null -w '%{http_code}' <target>`. A 404 means the route was read wrong: look again, once. A 5xx is the page failing: open it anyway (its error is worth seeing), and give the server's log or output in the report. A redirect to a sign-in page is fine: say the person may need to sign in.
+Check it before opening: `curl -s -o /dev/null -w '%{http_code}' <target>`. A 404 means the route was read wrong: look again, once. A 5xx is the page failing: open it anyway (its error is worth seeing), and give the server's log or output in the report. A redirect to a sign-in page is fine: a `preview.afterOpen` hook may get past it (step 4); else say the person may need to sign in.
 
 Keep the other pages the change touches, their URLs, for the report.
 
@@ -90,10 +90,17 @@ Open `<target>` in the first of these that works, saying in the report which:
 
 When none works, give the person `<target>` to open themselves.
 
-## 4. Report
+## 4. The repo's steps on the page
+
+Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run preview.afterOpen --flow preview --mode <mode> --url <target>`: the repo's own steps for getting the person onto the page (signing in as a test user, picking an account). It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest (with `agent.recheck`, that first runs the hook's check again, and it fails like any check when the task didn't satisfy it); a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). `running`: a hook was still running when `--max-wait` ran out, and goes on running: run the same command again with `--wait <running.resume>` in place of any `--after`, until the status is another one, relaying `running.name` and how long it has run. When the host limits how long one command runs, add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`. An exit of 2 means bad arguments or an invalid config: relay its message and stop. A failure here doesn't stop preview: the page is open, so name it in the report.
+
+A task a hook hands you is about the page, so do it in the browser that opened `<target>`, and only when this session can drive that one: with this session's browser tools when the page opened there, or with the tools this session has for the workspace app's browser pane (its CLI, or a skill for it) when it opened there. Never open another browser to do it: the person sees the one that opened. When nothing here drives that browser (the system's browser, or none opened), don't do the task: put what it asks in the report for the person to do, and go on with `--after <agent.resume>`. A secret the task needs (a test user's password) comes from where the task says (an env file, a variable): type it into the page, never print or echo it, and never make one up.
+
+## 5. Report
 
 A few lines:
 
 - **Opened:** `<target>`, and where (the workspace app's browser, this session's browser tools, the system's browser, or not opened), with why it's the page: the change it shows. Any trouble `curl` found (a 5xx and the log lines behind it, a sign-in).
+- **On the page:** each `preview.afterOpen` hook and what it did (signed in as whom), or what it asks the person to do when this session couldn't drive the browser, and any that failed.
 - **Server:** started now (`pid`, `log`) or already running (whose: preview's, or one started by hand), and its `url`. When preview started it: `/dev-flows:preview stop` stops it. When the command came from the repo rather than the config: `/dev-flows:configure preview` saves it.
 - **Also changed:** the other pages the change touches, as URLs, when there are any.

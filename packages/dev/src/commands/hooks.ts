@@ -135,6 +135,8 @@ export type HookRequest = {
   since?: string
   /** How much evaluate reviews: full, delta, or carry. */
   scope?: string
+  /** The page preview opened. */
+  url?: string
   /** The `<point>/<name>` a previous call stopped at. */
   after?: string
   /** The `<point>/<name>` a previous call left running, to wait on. */
@@ -420,6 +422,7 @@ export function runHooks(
         merge: request.mergeCommit,
         since: request.since,
         scope: request.scope,
+        url: request.url,
       }
       if (hook.prompt !== undefined) {
         report.status = "agent"
@@ -448,6 +451,7 @@ export function runHooks(
         AGENT_FLOWS_MERGE_COMMIT: request.mergeCommit ?? "",
         AGENT_FLOWS_SINCE: request.since ?? "",
         AGENT_FLOWS_SCOPE: request.scope ?? "",
+        AGENT_FLOWS_URL: request.url ?? "",
         AGENT_FLOWS_CHANGED_FILES: changedFile,
       }
       const timeout = hook.timeout ?? DEFAULT_TIMEOUT
@@ -728,10 +732,25 @@ function request(
       mergeCommit: args.flags.get("merge-commit"),
       since: args.flags.get("since"),
       scope: args.flags.get("scope"),
+      url: args.flags.get("url"),
       after: args.flags.get("after"),
       wait: args.flags.get("wait"),
       maxWait: maxWait === undefined ? undefined : Number(maxWait),
     },
+  }
+}
+
+/** Refuse a point whose commands can't be tried before they're written. */
+function untriable(point: HookPoint): void {
+  if (point.after) {
+    throw new UsageError(
+      `${point.id} runs after the work and may have side effects, so it isn't tried: read the command instead`,
+    )
+  }
+  if (point.untried) {
+    throw new UsageError(
+      `${point.id} isn't tried, since ${point.untried}: read the command instead`,
+    )
   }
 }
 
@@ -748,11 +767,7 @@ export function tryHook(
   hook: Hook,
   rest: Omit<HookRequest, "points" | "noFix">,
 ): HookReport & { fix?: string } {
-  if (point.after) {
-    throw new UsageError(
-      `${point.id} runs after the work and may have side effects, so it isn't tried: read the command instead`,
-    )
-  }
+  untriable(point)
   const warnings: string[] = []
   const issues = checkHooks([hook], point.id, warnings)
   if (issues.length > 0) {
@@ -790,7 +805,7 @@ const USAGE = `Usage: hooks.ts run <point>... --flow <flow> [flags]
 
   try <point>     Try one hook that isn't configured yet, given as JSON, at
       a point before the work (not an after point: those can have side
-      effects). Ignores its paths, flows, modes, and on, and doesn't run its
+      effects; nor preview.afterOpen: it needs the page open). Ignores its paths, flows, modes, and on, and doesn't run its
       fix. Prints the same JSON as run, plus \`fix\` when a fix wasn't run.
 
 Flags:
@@ -810,6 +825,7 @@ Flags:
   --merge-commit <sha>   The commit the merge landed, for {merge}
   --since <sha>          The previous recorded evaluation's commit, for {since}
   --scope <scope>        What evaluate reviews (${EVALUATE_SCOPES.join(", ")}), for {scope}
+  --url <url>            The page preview opened, for {url}
   --after <point>/<name> Go on after this hook, where a call stopped
   --wait <point>/<name>  Wait on this hook, where a call left it running
   --max-wait <seconds>   Stop waiting after this long, leaving the hook
@@ -836,11 +852,7 @@ export function main(argv: string[]): void {
         if (!point) {
           throw new UsageError(`no hook point \`${name}\``)
         }
-        if (point.after) {
-          throw new UsageError(
-            `${point.id} runs after the work and may have side effects, so it isn't tried: read the command instead`,
-          )
-        }
+        untriable(point)
         const text = requiredFlag(args.flags, "hook")
         let hook: Hook
         try {

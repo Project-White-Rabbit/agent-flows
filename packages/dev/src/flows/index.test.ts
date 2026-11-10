@@ -754,6 +754,18 @@ describe("dev flows", () => {
     expect(run).toContain("one that exits 2 is a `stop`, not a task")
   })
 
+  it("runs preview's afterOpen hooks on the page it opened, in a browser it can drive", () => {
+    const skill =
+      files.find((f) => f.path === "skills/preview/SKILL.md")?.content ?? ""
+    expect(skill).toContain(
+      "run preview.afterOpen --flow preview --mode <mode> --url <target>`",
+    )
+    expect(skill).toContain("Never open another browser to do it")
+    expect(skill.indexOf("## 4. The repo's steps on the page")).toBeGreaterThan(
+      skill.indexOf("## 3. Open it"),
+    )
+  })
+
   it("routes configure through confirm before writing", () => {
     expect(devKit.describeFlow(configureFlow)).toMatchInlineSnapshot(`
       "Flow: configure ({{cmd}}configure)

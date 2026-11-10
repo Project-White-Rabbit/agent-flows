@@ -286,6 +286,48 @@ describe("runHooks", () => {
     )
   })
 
+  it("gives preview's afterOpen hooks the page it opened, and hands a prompt over with it", () => {
+    const root = repo()
+    const hooks = config({
+      preview: {
+        afterOpen: [
+          { name: "vars", run: 'echo "$AGENT_FLOWS_URL {url}" > out.txt' },
+          { name: "sign-in", prompt: "If {url} asks, sign in" },
+        ],
+      },
+    })
+    const url = "http://localhost:3000/settings"
+    const report = runHooks(
+      root,
+      hooks,
+      request(["preview.afterOpen"], "preview", { url }),
+    )
+    expect(fs.readFileSync(path.join(root, "out.txt"), "utf8")).toBe(
+      `${url} ${url}\n`,
+    )
+    expect(report.status).toBe("agent")
+    expect(report.agent?.task).toBe(`If ${url} asks, sign in`)
+  })
+
+  it("reports a failed afterOpen hook rather than stopping preview", () => {
+    const root = repo()
+    const report = runHooks(
+      root,
+      config({
+        preview: {
+          afterOpen: [
+            { name: "broken", run: "exit 1" },
+            { name: "next", run: "true" },
+          ],
+        },
+      }),
+      request(["preview.afterOpen"], "preview"),
+    )
+    expect(report.status).toBe("done")
+    expect(report.failures.map((f) => f.name)).toEqual(["broken"])
+    expect(report.ran.map((r) => r.result)).toEqual(["failed", "passed"])
+  })
+
   it("runs a general hook only around its flows, and in their modes", () => {
     const root = repo()
     const hooks = config({
@@ -516,7 +558,7 @@ describe("tryHook", () => {
     expect(fs.existsSync(path.join(root, "bumped"))).toBe(false)
   })
 
-  it("refuses an after point and a hook that isn't valid", () => {
+  it("refuses an after point, preview.afterOpen, and a hook that isn't valid", () => {
     const root = repo()
     const [after] = parsePoints(["finish.after"], "finish")
     const [before] = parsePoints(["ready.before"], "ready")
@@ -529,6 +571,16 @@ describe("tryHook", () => {
         { flow: "finish" },
       ),
     ).toThrow("isn't tried")
+    const [afterOpen] = parsePoints(["preview.afterOpen"], "preview")
+    expect(() =>
+      tryHook(
+        root,
+        config({}),
+        afterOpen as HookPoint,
+        { name: "x", run: "true" },
+        { flow: "preview" },
+      ),
+    ).toThrow("it needs the dev server running and the page open")
     expect(() =>
       tryHook(
         root,

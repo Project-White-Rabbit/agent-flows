@@ -1,3 +1,4 @@
+import { hookField } from "../hooks.ts"
 import {
   packageScripts,
   resolveScript,
@@ -77,8 +78,9 @@ export const preview: SectionSpec = {
         "Seconds preview waits for a server it started to answer (default 120). It goes on running past that",
       example: 180,
     },
+    hookField("preview.afterOpen"),
   ],
   detect: detectPreview,
   lookup:
-    "Leave it out when the repo has no web app to preview. Detection proposes `command` from a root `dev` (else `start:dev`, `serve`, or a `start` that isn't a production server) script. Set it by hand for a monorepo whose app has its own (`bun run --cwd apps/web dev`), and set `url` when the server always serves the same address and prints none",
+    "Leave it out when the repo has no web app to preview. Detection proposes `command` from a root `dev` (else `start:dev`, `serve`, or a `start` that isn't a production server) script. Set it by hand for a monorepo whose app has its own (`bun run --cwd apps/web dev`), and set `url` when the server always serves the same address and prints none. Set `afterOpen` when a page needs a step before the person can see it, such as signing in as a test user",
 }
