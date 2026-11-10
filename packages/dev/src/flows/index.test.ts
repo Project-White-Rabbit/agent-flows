@@ -23,6 +23,7 @@ describe("dev flows", () => {
       "skills/evaluate-run/SKILL.md",
       "skills/merge/SKILL.md",
       "skills/merge-run/SKILL.md",
+      "skills/preview/SKILL.md",
       "skills/ready/SKILL.md",
       "skills/ready-run/SKILL.md",
       "skills/start-work/SKILL.md",
@@ -109,6 +110,7 @@ describe("dev flows", () => {
         "workspaces",
         "codeReview",
         "deployments",
+        "browser",
       ].flatMap((id) => Object.keys(findCapability(id)?.ops ?? {})),
     )
     const flows = files.filter((f) => !f.path.includes("configure"))
@@ -136,6 +138,7 @@ describe("dev flows", () => {
         "reviewResult",
         "mergeCommit",
         "deployment",
+        "openUrl",
       ]),
     )
     for (const op of named) {

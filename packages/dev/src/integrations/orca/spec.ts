@@ -65,7 +65,11 @@ export const orca: IntegrationSpec = {
     },
   },
   provides: {
-    browser: {},
+    browser: {
+      openUrl: {
+        cli: "`orca tab list --worktree id:<workspace> --json`: when an entry of `result.tabs` has a `url` starting with <origin>, `orca goto --worktree id:<workspace> --page <its browserPageId> --url <url> --json`, then `orca tab switch --worktree id:<workspace> --page <its browserPageId> --focus --json`; when none does, `orca tab create --worktree id:<workspace> --url <url> --json`. The tab's id is its `browserPageId`",
+      },
+    },
     workspaces: {
       workspaces: {
         cli: "`orca worktree list --json --repo id:{repo} --limit 1000` (with <repository>, `id:<that repo's id>`, as for `createWorkspace`), keeping the entries of `result.worktrees` whose `isArchived` is false. Each one's id is its `id` (the whole `<repo id>::<path>` value), its name its `displayName`, its branch its `branch` without `refs/heads/`, and it has no section. This session runs in the one whose `id` is `$ORCA_WORKTREE_ID`, or, with that unset, whose `path` is `git rev-parse --show-toplevel`",

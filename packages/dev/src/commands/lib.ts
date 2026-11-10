@@ -5,6 +5,7 @@
 
 import { spawnSync } from "node:child_process"
 import { readFileSync, realpathSync } from "node:fs"
+import path from "node:path"
 
 export type RunResult = {
   status: number | null
@@ -23,6 +24,43 @@ export function run(command: string, args: string[], cwd?: string): RunResult {
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
   }
+}
+
+/** A path `git rev-parse` gives, made absolute, or undefined outside a repo. */
+export function gitPath(
+  flag: "--show-toplevel" | "--absolute-git-dir" | "--git-common-dir",
+  cwd?: string,
+): string | undefined {
+  const result = run("git", ["rev-parse", "--path-format=absolute", flag], cwd)
+  return result.status === 0 ? result.stdout.trim() || undefined : undefined
+}
+
+/** `gitPath`, failing outside a repo. */
+export function requireGitPath(
+  flag: Parameters<typeof gitPath>[0],
+  cwd?: string,
+): string {
+  const found = gitPath(flag, cwd)
+  if (!found) {
+    throw new Error("not inside a git repository")
+  }
+  return found
+}
+
+/**
+ * Where a command keeps its files, `<git dir>/agent-flows/<name>`: never in
+ * the tree. The worktree's own git dir, so each worktree has its own, or with
+ * `shared`, the repo's common one, shared by all its worktrees.
+ */
+export function stateDir(
+  name: string,
+  options: { cwd?: string; shared?: boolean } = {},
+): string {
+  const dir = requireGitPath(
+    options.shared ? "--git-common-dir" : "--absolute-git-dir",
+    options.cwd,
+  )
+  return path.join(dir, "agent-flows", name)
 }
 
 export function printJson(value: unknown): void {

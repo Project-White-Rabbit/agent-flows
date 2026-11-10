@@ -114,10 +114,10 @@ describe("checkHooks", () => {
         "hooks.before",
       ).issues,
     ).toEqual([
-      "hooks.before[a].flows must list flows of close, create-tickets, evaluate, merge, ready, start-work, sync, tickets-to-work",
-      "hooks.before[b].flows must list flows of close, create-tickets, evaluate, merge, ready, start-work, sync, tickets-to-work",
+      "hooks.before[a].flows must list flows of close, create-tickets, evaluate, merge, preview, ready, start-work, sync, tickets-to-work",
+      "hooks.before[b].flows must list flows of close, create-tickets, evaluate, merge, preview, ready, start-work, sync, tickets-to-work",
       "hooks.before[c].modes must list modes of merge: default",
-      "hooks.before[d].flows must list flows of close, create-tickets, evaluate, merge, ready, start-work, sync, tickets-to-work",
+      "hooks.before[d].flows must list flows of close, create-tickets, evaluate, merge, preview, ready, start-work, sync, tickets-to-work",
     ])
     expect(check([{ name: "a", run: "x", flows: ["ready"] }]).issues).toEqual([
       "ready.before[a].flows is only for a general point: this one runs only in ready",
