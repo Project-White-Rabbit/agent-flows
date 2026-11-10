@@ -20,6 +20,7 @@ import {
   requiredFlag,
   runMain,
   runSubcommand,
+  stateDir,
   UsageError,
 } from "./lib.ts"
 import { fillCommand, shellQuote } from "./ready.ts"
@@ -105,15 +106,7 @@ export function settings(config: Record<string, unknown>): Settings {
 }
 
 export function recordDir(root: string): string {
-  const common = git(root, [
-    "rev-parse",
-    "--path-format=absolute",
-    "--git-common-dir",
-  ])
-  if (!common) {
-    throw new UsageError("not inside a git repository")
-  }
-  return path.join(common.trim(), "agent-flows", "evaluate")
+  return stateDir("evaluate", { cwd: root, shared: true })
 }
 
 function currentBranch(root: string): string {
@@ -652,11 +645,7 @@ export function runTests(
         "evaluate.tests names {files}, and none of the changed files match",
     }
   }
-  const gitDir = git(root, ["rev-parse", "--absolute-git-dir"])?.trim()
-  if (!gitDir) {
-    throw new UsageError("not inside a git repository")
-  }
-  const dir = path.join(gitDir, "agent-flows", "evaluate")
+  const dir = stateDir("evaluate", { cwd: root })
   fs.mkdirSync(dir, { recursive: true })
   const log = path.join(dir, "tests.log")
   const started = Date.now()

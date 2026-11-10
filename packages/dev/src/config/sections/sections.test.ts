@@ -4,6 +4,7 @@ import { checkConfig, exampleConfig } from "../config.ts"
 import { toInstanceName, uniqueInstanceNames } from "../instances.ts"
 import type { DetectContext, FieldSpec } from "../types.ts"
 import { SECTIONS } from "./index.ts"
+import { detectPreview } from "./preview.ts"
 import { detectPythonReady, detectReady, ready } from "./ready.ts"
 import { BITFAB_DEV_FORMAT, sync } from "./sync.ts"
 import { ranksFromDoc, ranksProblem, tickets } from "./tickets.ts"
@@ -948,5 +949,39 @@ describe("ticket ranks", () => {
     ).toEqual([
       "tickets.ranks must name 5 ranks, one each for urgent, high, medium, low, none (got 2)",
     ])
+  })
+})
+
+describe("preview detection", () => {
+  it("proposes the root dev script, through the repo's runner", () => {
+    expect(
+      detectPreview(
+        checkout({
+          "package.json": { scripts: { dev: "next dev", start: "next start" } },
+          "pnpm-lock.yaml": "",
+        }),
+      )?.values,
+    ).toEqual({ command: "pnpm run dev" })
+  })
+
+  it("skips a production start and a script that deploys", () => {
+    expect(
+      detectPreview(
+        checkout({
+          "package.json": {
+            scripts: { serve: "vercel deploy", start: "next start" },
+          },
+        }),
+      ),
+    ).toBeUndefined()
+    expect(
+      detectPreview(
+        checkout({ "package.json": { scripts: { start: "vite" } } }),
+      )?.values,
+    ).toEqual({ command: "npm run start" })
+  })
+
+  it("proposes nothing without a manifest", () => {
+    expect(detectPreview(checkout({ "README.md": "" }))).toBeUndefined()
   })
 })

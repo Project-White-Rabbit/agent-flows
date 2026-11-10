@@ -20,7 +20,16 @@ import { BITFAB_DEV_FORMAT } from "../config/sections/sync.ts"
 import { usesOf } from "../config/use.ts"
 import { INTEGRATIONS } from "../integrations/index.ts"
 import { loadConfig } from "./configure.ts"
-import { isMain, printJson, run, runMain, runSubcommand } from "./lib.ts"
+import {
+  gitPath,
+  isMain,
+  printJson,
+  requireGitPath,
+  run,
+  runMain,
+  runSubcommand,
+  stateDir,
+} from "./lib.ts"
 
 export const MODES = ["default", "local", "remote"] as const
 export type Mode = (typeof MODES)[number]
@@ -545,19 +554,11 @@ export function routedProjects(
   return out
 }
 
-function gitPath(flag: string): string {
-  const dir = git(["rev-parse", "--path-format=absolute", flag])
-  if (!dir) {
-    throw new Error("not inside a git repository")
-  }
-  return dir
-}
-
 /** Where each branch's state lives, shared by the repo's worktrees. */
-function stateDir(): string {
-  const dir = path.join(gitPath("--git-common-dir"), "agent-flows", "sync")
+function syncDir(): string {
+  const dir = stateDir("sync", { shared: true })
   migrateState(
-    path.join(gitPath("--absolute-git-dir"), "agent-flows", "sync.json"),
+    path.join(requireGitPath("--absolute-git-dir"), "agent-flows", "sync.json"),
     dir,
   )
   return dir
@@ -902,7 +903,7 @@ function survey(args: Args): void {
       ? count(`origin/${branch}..HEAD`)
       : undefined
 
-  const dir = stateDir()
+  const dir = syncDir()
   let stored = readBranchState(dir, branch)
   let changed = false
   // A branch an earlier sync tool synced keeps its issue and error refs. Read
@@ -985,7 +986,7 @@ function facts(args: Args): void {
   const baseRef = fetchedBaseRef(base)
   const head = git(["rev-parse", "HEAD"]) ?? "none"
   const ahead = count(`${baseRef}..HEAD`)
-  const stored = readBranchState(stateDir(), branch)
+  const stored = readBranchState(syncDir(), branch)
   const full = stored?.remote?.head !== head
   const section = syncSection()
   printJson({
@@ -1059,12 +1060,8 @@ function legacyOf(branch: string): LegacyState | undefined {
     files: Array.isArray(adopt)
       ? adopt.filter((f): f is string => typeof f === "string")
       : [],
-    gitDir: git(["rev-parse", "--absolute-git-dir"]),
-    gitCommonDir: git([
-      "rev-parse",
-      "--path-format=absolute",
-      "--git-common-dir",
-    ]),
+    gitDir: gitPath("--absolute-git-dir"),
+    gitCommonDir: gitPath("--git-common-dir"),
   })
 }
 
@@ -1096,7 +1093,7 @@ function finish(args: Args): void {
   const branch = currentBranch()
   const baseRef = baseRefOf(base)
   const head = git(["rev-parse", "HEAD"]) ?? "none"
-  const dir = stateDir()
+  const dir = syncDir()
   const entry: BranchState = { ...readBranchState(dir, branch) }
   entry.last = {
     head,
@@ -1183,7 +1180,7 @@ survey and facts stop when origin/<base> is missing after the fetch.`
  */
 function issue(_args: Args): void {
   const branch = currentBranch()
-  const stored = readBranchState(stateDir(), branch)
+  const stored = readBranchState(syncDir(), branch)
   const legacy =
     stored?.issue || stored?.legacyRead ? undefined : legacyOf(branch)
   printJson({ branch, issue: stored?.issue ?? legacy?.issue ?? null })

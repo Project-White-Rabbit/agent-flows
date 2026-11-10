@@ -40,6 +40,7 @@ import {
   run,
   runMain,
   runSubcommand,
+  stateDir,
   UsageError,
 } from "./lib.ts"
 
@@ -350,11 +351,7 @@ export function runHooks(
     request.maxWait === undefined
       ? Number.POSITIVE_INFINITY
       : began + request.maxWait * 1000
-  const hooksDir = path.join(
-    git(root, ["rev-parse", "--absolute-git-dir"]) ?? path.join(root, ".git"),
-    "agent-flows",
-    "hooks",
-  )
+  const hooksDir = stateDir("hooks", { cwd: root })
   const logDir = path.join(hooksDir, "logs")
   const runningDir = path.join(hooksDir, "running")
   let resolved:
