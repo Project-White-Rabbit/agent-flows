@@ -22,6 +22,7 @@ import {
   slugify,
   type Ticket,
   type Workspace,
+  workspaceName,
 } from "./work.ts"
 
 const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
@@ -54,8 +55,59 @@ describe("planStart", () => {
       move: true,
     })
     expect(describeStart(start, "/p/ENG-12.md")).toBe(
-      'START ENG-12 "Fix the login redirect" branch=eng-12-fix-the-login-redirect exact=no section=none state=move prompt=/p/ENG-12.md',
+      'START ENG-12 "Fix the login redirect" name="ENG-12: Fix the login redirect" branch=eng-12-fix-the-login-redirect exact=no section=none state=move prompt=/p/ENG-12.md',
     )
+  })
+
+  it("names the workspace by the configured template", () => {
+    expect(workspaceName(ticket())).toBe("ENG-12: Fix the login redirect")
+    expect(workspaceName(ticket(), "[{id}] {title}")).toBe(
+      "[ENG-12] Fix the login redirect",
+    )
+    expect(workspaceName(ticket(), "{title}")).toBe("Fix the login redirect")
+    expect(workspaceName(ticket(), "{id}")).toBe("ENG-12")
+    const ranks = ["Urgent", "P0", "P1", "P2", "Audit"]
+    const template = "{priority}/{category}: {title}"
+    expect(workspaceName(ticket({ category: "Bug" }), template, ranks)).toBe(
+      "P0/Bug: Fix the login redirect",
+    )
+    expect(workspaceName(ticket(), template, ranks)).toBe(
+      "P0: Fix the login redirect",
+    )
+    expect(
+      workspaceName(ticket({ priority: "none", category: "Bug" }), template),
+    ).toBe("Bug: Fix the login redirect")
+    expect(workspaceName(ticket({ priority: "none" }), template)).toBe(
+      "Fix the login redirect",
+    )
+    expect(
+      workspaceName(ticket({ priority: "none" }), "[{priority}] {id} {title}"),
+    ).toBe("ENG-12 Fix the login redirect")
+    expect(
+      workspaceName(
+        ticket({ category: "Feature" }),
+        "{id:short} {category:4}: {title:16}",
+      ),
+    ).toBe("12 Feat: Fix the login")
+    expect(workspaceName(ticket({ id: "#7" }), "#{id:short} {title}")).toBe(
+      "#7 Fix the login redirect",
+    )
+    expect(workspaceName(ticket(), "{id} {title:3}")).toBe("ENG-12 Fix")
+    expect(
+      workspaceName(ticket({ title: "Supercalifragilistic" }), "{title:5}"),
+    ).toBe("Super")
+    expect(workspaceName(ticket(), "{category:3}/{id:short}: {title}")).toBe(
+      "12: Fix the login redirect",
+    )
+    expect(workspaceName(ticket(), "{id} ({category}) {title}")).toBe(
+      "ENG-12 Fix the login redirect",
+    )
+    expect(
+      planStart(ticket(), [], { workspaceName: "{title} ({id})" }),
+    ).toMatchObject({ name: "Fix the login redirect (ENG-12)" })
+    expect(
+      planReuse(ticket(), [], "sam/a", { workspaceName: "{id} {title}" }),
+    ).toMatchObject({ name: "ENG-12 Fix the login redirect" })
   })
 
   it("keeps a branch the ticket already names, exactly", () => {
