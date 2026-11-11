@@ -243,7 +243,7 @@ describe("migrate", () => {
       }),
     ).toEqual({
       config: {
-        version: 5,
+        version: CONFIG_VERSION,
         repo: { baseBranch: "main" },
         integrations: { github: { owner: "acme", repo: "web" } },
         skipped: ["integrations.sentry"],
@@ -260,13 +260,13 @@ describe("migrate", () => {
         skipped: ["merge.closeIssue"],
       }).config
     expect(merged(true)).toEqual({
-      version: 5,
+      version: CONFIG_VERSION,
       finish: { after: [], issueOnMerge: "close" },
       skipped: ["finish.issueOnMerge"],
     })
     expect(merged(false)?.finish).toEqual({ after: [], issueOnMerge: "leave" })
     expect(migrate({ version: 2, merge: {} }).config).toEqual({
-      version: 5,
+      version: CONFIG_VERSION,
       finish: {},
     })
   })
@@ -286,7 +286,7 @@ describe("migrate", () => {
         skipped: ["close", "merge.watchDeploy", "integrations.sentry"],
       }).config,
     ).toEqual({
-      version: 5,
+      version: CONFIG_VERSION,
       finish: { ciTimeout: 45, after: [{ name: "down", run: "./down.sh" }] },
       cancel: { after: [{ name: "db", run: "./db.sh delete {branch}" }] },
       hooks: {
@@ -307,7 +307,7 @@ describe("migrate", () => {
         finish: { ciTimeout: 10 },
       }).config,
     ).toEqual({
-      version: 5,
+      version: CONFIG_VERSION,
       merge: { ciTimeout: 45 },
       finish: { ciTimeout: 10 },
     })
@@ -327,12 +327,47 @@ describe("migrate", () => {
         },
       }).config,
     ).toEqual({
-      version: 5,
+      version: CONFIG_VERSION,
       integrations: {
         orca: { agent: "codex" },
         superset: {},
         github: { owner: "acme", repo: "web" },
       },
+    })
+  })
+
+  it("moves v5 preview's dev server fields to the server section", () => {
+    expect(
+      migrate({
+        version: 5,
+        preview: {
+          command: "bun run dev",
+          url: "http://localhost:3000",
+          timeout: 180,
+          afterOpen: [{ name: "sign-in", prompt: "Sign in" }],
+        },
+        skipped: ["preview.url", "repo.protectedBranches"],
+      }).config,
+    ).toEqual({
+      version: CONFIG_VERSION,
+      server: {
+        command: "bun run dev",
+        url: "http://localhost:3000",
+        timeout: 180,
+      },
+      preview: { afterOpen: [{ name: "sign-in", prompt: "Sign in" }] },
+      skipped: ["server.url", "repo.protectedBranches"],
+    })
+    expect(
+      migrate({
+        version: 5,
+        preview: { command: "bun run dev" },
+        skipped: ["preview"],
+      }).config,
+    ).toEqual({
+      version: CONFIG_VERSION,
+      server: { command: "bun run dev" },
+      skipped: ["preview", "server"],
     })
   })
 

@@ -15,17 +15,12 @@ export const previewFlow: Flow = devKit.defineFlow({
   title: "{{cmd}}preview",
   frontmatter: {
     description:
-      "Start the repo's dev server when it isn't running and open the page the current work changed in a browser: the workspace app's own, else this session's browser tools, else the system's. Also stops the server it started.",
-    argumentHint: "[<page path, URL, or description> | stop | help]",
+      "Open the page the current work changed in a browser, on this worktree's dev server (starting it when it isn't running): the workspace app's browser, else this session's browser tools, else the system's.",
+    argumentHint: "[<page path, URL, or description> | help]",
   },
   commands: DEV_COMMANDS.defineCommands({
     hooks: HOOKS_COMMAND,
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
-    preview: {
-      description:
-        "`server [--command <cmd>] [--url <url>] [--check]` finds the dev server this checkout runs, or starts one in the background and waits until it answers, and prints its `status` and `url`; `stop` stops the server preview started in this worktree",
-      args: "<subcommand>",
-    },
   }),
   tools: {},
   compile: { mode: { default: "monolith" }, inlinePhases: [] },
@@ -36,11 +31,11 @@ export const previewFlow: Flow = devKit.defineFlow({
       "Make sure the dev server runs, then open the page the work changed.",
     help: "Show usage and exit.",
   },
-  intro: `Shows the person what this branch's work looks like, running: it makes sure this checkout's dev server is up (starting it in the background when it isn't, with \`preview.command\` from the config), works out which page the work changed, and opens it. It opens in the browser of the workspace app this session runs in, beside the agent, when the repo configured one (\`{{cmd}}configure browser\`); else with this session's own browser tools; else in the system's default browser.
+  intro: `Shows the person what this branch's work looks like, running: it gets this checkout's dev server from \`{{cmd}}server\` (which starts it in the background when it isn't running), works out which page the work changed, and opens it. It opens in the browser of the workspace app this session runs in, beside the agent, when the repo configured one (\`{{cmd}}configure browser\`); else with this session's own browser tools; else in the system's default browser.
 
-It never edits the working tree, commits, or pushes. The server it starts goes on running after it ends, for the person to keep using: \`{{cmd}}preview stop\` stops it.`,
+It never edits the working tree, commits, or pushes. The server is \`{{cmd}}server\`'s: it stays up for the person to keep using, \`{{cmd}}server stop\` stops it, and a watchdog stops it once its worktree is deleted or nobody uses it.`,
   invariants: [
-    "**Only this checkout's server.** Open a page only from a server this checkout runs. Never stop or restart a server preview didn't start without the person's say-so, and never one of another checkout.",
+    "**Only this checkout's server.** Open a page only from a server this checkout runs. Starting, stopping, and restarting it is `{{cmd}}server`'s: never do any of it here.",
     hooksInvariant("preview"),
   ],
   phases: [
@@ -57,17 +52,17 @@ It never edits the working tree, commits, or pushes. The server it starts goes o
           body: `If the argument is \`help\`, print the block below verbatim and stop.
 
 \`\`\`
-{{cmd}}preview  [<page> | stop | help]
+{{cmd}}preview  [<page> | help]
 
-Starts this checkout's dev server when it isn't running (preview.command,
-in the background, its output in a log in the git dir), then opens the
-page the current work changed: in the workspace app's browser beside this
-session, else with this session's browser tools, else in the system's
-default browser.
+Opens the page the current work changed on this checkout's dev server
+(started by {{cmd}}server when it isn't running): in the workspace app's
+browser beside this session, else with this session's browser tools, else
+in the system's default browser.
 
 <page>: what to open instead of the page the work changed: a path
   (/settings/billing), a full URL, or words (the billing settings page)
-stop: stops the dev server preview started in this worktree
+
+{{cmd}}server stop stops the dev server; {{cmd}}server list lists them.
 \`\`\``,
           next: "main/server",
         },
@@ -75,19 +70,9 @@ stop: stops the dev server preview started in this worktree
           id: "server",
           kind: "action",
           title: "The dev server",
-          commandCalls: ["preview"],
-          body: `**\`stop\`:** when the argument is \`stop\`, run \`{{command:preview}} stop\`. It prints \`stopped\` (with the \`pid\` it stopped) or a \`reason\` none was: say which, and end here. It stops only a server preview started; for one the person started by hand, say so, and leave it.
+          body: `The argument, if any, is \`<page>\`.
 
-Otherwise, the argument, if any, is \`<page>\`.
-
-Run \`{{command:preview}} server\`. It reads \`preview.command\`, \`preview.url\`, and \`preview.timeout\` from the config itself, and works on a repo that isn't configured too. It prints JSON with a \`status\` and a \`url\`, \`servers\` (the processes of this checkout listening for connections, each with its \`pid\`, \`port\`, and \`command\`), and \`ours\` (whether preview started the server):
-
-- \`running\`: a server of this checkout's answers at \`url\`. Go on. With \`url\` \`null\`, it runs several: the one serving the app's pages is \`<url>\` (\`http://localhost:<its port>\`), by its \`command\` (the web app's dev server, not an API, a worker, a database, or a component explorer). When none clearly is, ask the person which, {{askUser}}listing them.
-- \`started\`: it started \`command\` now (\`pid\`, its output in \`log\`), and it answers at \`url\`. Go on.
-- \`unconfigured\`: nothing runs, and the config sets no \`preview.command\`. Find how this repo starts its dev server: a \`dev\` script in its package manifest (at the root, or in the app the branch changes, in a monorepo), its README, \`CLAUDE.md\` or \`AGENTS.md\`, a \`Procfile\`, a \`Makefile\`, or a compose file. When one command clearly does it, run \`{{command:preview}} server --command '<it>'\`, and say in the report that \`{{cmd}}configure preview\` saves it. When it isn't clear, ask the person. When the repo has no web app to show (a library, a CLI), say so and end here.
-- \`elsewhere\`: the configured \`url\` answers, but another checkout's server serves it (\`owner\`: its \`pid\`, \`cwd\`, and \`command\`), so it shows that checkout's work, not this one's. Ask the person, {{askUser}}naming \`owner.cwd\`: stop that server (\`kill <owner.pid>\`, then run \`{{command:preview}} server\` again to start this checkout's), open it anyway (knowing it isn't this branch's work), or stop here.
-- \`failed\`: the command exited before it answered (\`exitCode\`, its last lines in \`tail\`, all of it in \`log\`). Show the person \`tail\` and \`log\`, and end here. When the failure comes from this branch's own change (a compile error in a file it touched), say so, and which file; fix nothing.
-- \`timeout\`: it still hadn't answered after \`preview.timeout\` seconds, and goes on running. Show \`tail\` and \`log\`; when the output shows it's still building, run the same command once more (it finds the server it started and waits again), else end here.`,
+Run the \`{{cmd}}server\` skill with no arguments: invoke it, don't redo its steps. It finds this checkout's dev server, or starts one, and may ask the person something on the way (which of several servers, whether to restart one started by hand under its watchdog). It ends with the server's \`<url>\` and how it got there (started now, already running, restarted), for the report. When it ends without a \`<url>\` (the server failed, timed out, or the repo has no dev server), stop here and pass on what it said.`,
           next: "main/page",
         },
         {
@@ -140,7 +125,7 @@ A task a hook hands you is about the page, so do it in the browser that opened \
 
 - **Opened:** \`<target>\`, and where (the workspace app's browser, this session's browser tools, the system's browser, or not opened), with why it's the page: the change it shows. Any trouble \`curl\` found (a 5xx and the log lines behind it, a sign-in).
 - **On the page:** each \`preview.afterOpen\` hook and what it did (signed in as whom), or what it asks the person to do when this session couldn't drive the browser, and any that failed.
-- **Server:** started now (\`pid\`, \`log\`) or already running (whose: preview's, or one started by hand), and its \`url\`. When preview started it: \`{{cmd}}preview stop\` stops it. When the command came from the repo rather than the config: \`{{cmd}}configure preview\` saves it.
+- **Server:** what \`{{cmd}}server\` said: its \`<url>\`, started now or already running, whether its watchdog watches it, any servers it reaped, and \`{{cmd}}configure server\` when the command came from the repo rather than the config.
 - **Also changed:** the other pages the change touches, as URLs, when there are any.`,
           next: null,
         },

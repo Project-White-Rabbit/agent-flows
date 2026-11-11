@@ -10,6 +10,7 @@ import {
   REQUIRE_CONFIG,
   USE_INTEGRATIONS,
 } from "./kit.ts"
+import { SERVER_STOP_COMMAND } from "./server.ts"
 
 export const cancelFlow: Flow = devKit.defineFlow({
   schemaVersion: 1,
@@ -28,6 +29,7 @@ export const cancelFlow: Flow = devKit.defineFlow({
         "`issue` prints the issue a sync recorded for the current branch, reading only",
       args: "<subcommand>",
     },
+    server: SERVER_STOP_COMMAND,
     tickets: {
       description:
         "`match` ranks the tracker's recent issues against the branch's work, as create-tickets does, writing only its plan file",
@@ -55,7 +57,7 @@ export const cancelFlow: Flow = devKit.defineFlow({
     help: "Show usage and exit without closing anything.",
   },
   intro:
-    "Winds down a branch whose work is being abandoned: the destructive sibling of `{{cmd}}sync`. It closes the pull request, deletes the remote branch, cancels the issue, and runs the repo's own teardown (`cancel.after` hooks: a database branch, dev servers, a marker a worktree setup script reads). Every vendor-specific action goes through the repo's configured integrations (`{{cmd}}configure`). The local branch and working tree are left alone, for the person (or their workspace app's teardown) to remove.",
+    "Winds down a branch whose work is being abandoned: the destructive sibling of `{{cmd}}sync`. It closes the pull request, deletes the remote branch, cancels the issue, stops the dev server `{{cmd}}server` started in this worktree, and runs the repo's own teardown (`cancel.after` hooks: a database branch, dev servers, a marker a worktree setup script reads). Every vendor-specific action goes through the repo's configured integrations (`{{cmd}}configure`). The local branch and working tree are left alone, for the person (or their workspace app's teardown) to remove.",
   invariants: [
     "**Invoking this command is the authorization for the cleanup.** Don't ask for a second confirmation. The one question it asks is which issue, if any, belongs to the branch when the branch never named one, and in `force` mode it asks nothing.",
     "**Act through the integrations' ops.** Pull requests and issues are reached only through the ops `configure.ts integrations` returns, run as given. Plain `git` is fine for the remote branch and everything local.",
@@ -92,6 +94,7 @@ export const cancelFlow: Flow = devKit.defineFlow({
 >   - deletes the remote branch
 >   - cancels the issue the branch names (left open when another pull request, open or merged, is attached to it)
 >   - when the branch names no issue, looks for one (a \`> Branch:\` line naming the branch, then a search and create-tickets' ranking of recent issues) and asks which, if any, to cancel or mark done; \`force\` changes none of them
+>   - stops the dev server \`{{cmd}}server\` started in this worktree
 >   - runs the repo's teardown (\`cancel.after\` hooks)
 >
 > It never deletes the local branch, switches branches, or touches the working tree. It refuses on the base branch (and the config's \`repo.protectedBranches\`), on a branch other branches are stacked on, and on a pull request that merged.`,
@@ -168,6 +171,7 @@ A close whose only action is deleting an orphaned remote branch is still a close
 - \`Close pull request #<N> ("<title>")\`
 - \`Delete remote branch origin/<branch>\`
 - \`Cancel issue <ID> ("<title>")\`
+- \`Stop the dev server {{cmd}}server started here\`, when one runs
 - \`Run the repo's teardown: <the cancel.after hooks' names>\`
 
 **Warnings**, below them, the first one first:
@@ -196,11 +200,14 @@ Only with \`<candidates>\`. Invoking cancel doesn't authorize changing an issue 
           kind: "action",
           title: "Writes",
           refName: "writes",
+          commandCalls: ["server"],
           body: `Each is independent: one that fails (someone closed the pull request in the meantime) is noted and the rest still run.
 
 1. **Close the pull request:** the source-control entry's \`prClose\` op with \`<N>\`. It deletes no branch, local or remote.
 2. **Delete the remote branch:** \`git push origin --delete <branch>\`. One that says the remote ref doesn't exist was already gone, which counts as done. The local branch and its unpushed commits stay.
 3. **The issue:** for \`<issue>\` (when the gates left it) its entry's \`updateIssue\` op with only \`<state>\` \`canceled\`; for the issue the person picked, \`canceled\` or \`done\` as they said. Leave the title, description, and fields out. Only in an entry at \`track\`.
+
+4. **Stop the dev server:** \`{{command:server}} stop\`. It stops only a dev server \`{{cmd}}server\` started in this worktree (and any it started for worktrees that are gone, as \`reaped\`), never one the person started by hand, and stopping none is fine. Keep what it prints for the report.
 
 Never delete the local branch, switch branches, or touch the working tree: that's the person's, or their workspace app's teardown.`,
           next: "run/report",
@@ -217,6 +224,7 @@ Lead with anything that needs attention: a failed write, a failed teardown hook,
 - **Pull request:** closed, already closed, none, or failed (and why).
 - **Remote branch:** deleted, already gone, none, or failed.
 - **Issue:** canceled or marked done (as a link), already done or canceled, left open (other pull requests attached, or a tracker at \`link\`), no issue changed (with the candidates' links when the person picked none, or \`force\` mode skipped the question), or none found.
+- **Dev server:** the dev server \`{{cmd}}server\` had started here, stopped (its \`pid\` and \`command\`), with any \`reaped\` ones; leave the line out when it stopped none.
 - **Teardown:** each \`cancel.after\` hook and how it went.
 - **Local:** \`<branch>\` and its working tree are still here; deleting them is the person's call.`,
           next: null,
