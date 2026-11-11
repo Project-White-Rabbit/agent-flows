@@ -1,7 +1,7 @@
 {
   "name": "dev-flows",
   "description": "Dev workflow commands for any repository: configure the repo's integrations, file issues from planning notes, evaluate a branch or PR for shippability, sync a branch with its PR and issue, take a finished branch to a ready, green PR, land it, preview a branch's work in a browser, and start work on issues in workspaces with a coding agent on each.",
-  "version": "0.28.1",
+  "version": "0.29.0",
   "author": {
     "name": "Bitfab"
   },

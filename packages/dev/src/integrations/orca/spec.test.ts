@@ -204,7 +204,7 @@ describe("orca's repo on this machine", () => {
   })
 
   it("keeps no repo id in the config, and fills its ops with this machine's", () => {
-    expect(orca.fields.map((f) => f.key)).toEqual(["agent"])
+    expect(orca.fields.map((f) => f.key)).toEqual(["agent", "browser"])
     const ops = Object.values(orca.provides.workspaces)
       .map((op) => (op as { cli: string }).cli)
       .join("\n")

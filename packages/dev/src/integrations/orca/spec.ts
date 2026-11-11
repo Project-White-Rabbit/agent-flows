@@ -11,7 +11,7 @@ import {
   samePath,
   where,
 } from "../local-repo.ts"
-import { SLUG } from "../patterns.ts"
+import { BROWSER_PLACEMENT, SLUG } from "../patterns.ts"
 
 /**
  * Where Orca checks out its worktrees by default (`~/orca/workspaces/<repo>/`).
@@ -157,6 +157,13 @@ export const orca: IntegrationSpec = {
       example: "claude",
       pattern: SLUG,
     },
+    {
+      key: "browser",
+      description:
+        "Where preview opens a page in Orca's browser: `tab` (a browser tab of its own, the default), or `right`, `left`, `down`, or `up` (split beside the agent's pane, on that side). A browser it reuses stays where it is. The team's default, only when the team agreed on one; each person's own choice goes in this machine's override (`configure local`)",
+      example: "right",
+      pattern: BROWSER_PLACEMENT,
+    },
   ],
   // Orca's id for the repo is made by each machine's app, so flows find it
   // where they run (`{repo}`, an `id:` selector) rather than the config
@@ -176,7 +183,7 @@ export const orca: IntegrationSpec = {
   provides: {
     browser: {
       openUrl: {
-        cli: "`orca tab list --worktree id:<workspace> --json`: when an entry of `result.tabs` has a `url` starting with <origin>, `orca goto --worktree id:<workspace> --page <its browserPageId> --url <url> --json`, then `orca tab switch --worktree id:<workspace> --page <its browserPageId> --focus --json`; when none does, `orca tab create --worktree id:<workspace> --url <url> --json`. The tab's id is its `browserPageId`",
+        cli: "Placement `{browser|tab}`. `orca tab list --worktree id:<workspace> --json`: when an entry of `result.tabs` has a `url` starting with <origin>, `orca goto --worktree id:<workspace> --page <its browserPageId> --url <url> --json`, then `orca tab switch --worktree id:<workspace> --page <its browserPageId> --focus --json`; when none does, `orca tab create --worktree id:<workspace> --url <url> --json`, and for `right`, `left`, `down`, or `up` with `--split {browser|tab}` added, so it opens beside the agent's pane. A tab it reuses stays where it is. The tab's id is its `browserPageId`",
       },
     },
     workspaces: {
