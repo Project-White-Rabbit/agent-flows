@@ -295,7 +295,8 @@ The optional `tickets` section holds how the team files and ranks work, for crea
   "parentFollowsSubIssues": true,
   "estimateScale": [1, 2, 4, 8],
   "assignOnSync": true,
-  "timezone": "America/Los_Angeles"
+  "timezone": "America/Los_Angeles",
+  "workspaceName": "{priority}/{category}: {title}"
 }
 ```
 
@@ -306,6 +307,7 @@ The optional `tickets` section holds how the team files and ranks work, for crea
 - `parentFollowsSubIssues`: a parent takes its most urgent open sub-issue's priority, and with no cycle, its earliest sub-issue's cycle; a new sub-issue moves a parent outside the plan up too, and so does one sync files under a parent (`tickets.ts follow` says what the parent takes).
 - `assignOnSync`: sync assigns the branch's issue to the person running it on every remote pass, not only when it files the issue. Without it, sync never reassigns an issue.
 - `timezone`: the IANA time zone "today" is in for create-tickets' due-date checks and the planning document's dates. Unset, the machine's.
+- `workspaceName`: how start-work names the workspace it opens on an issue, and the one `--reuse` renames (default `{id}: {title}`). `{id}` is the issue's id, `{title}` its title, `{priority}` its priority by the team's name for it in `ranks` (`P0`), and `{category}` its label by the kind of work, from the set in the agent instructions or the tracker's `values.labels` (with no set, its only label). A priority or category the issue doesn't have drops out with the separator beside it, and so do brackets it leaves empty: `{priority}/{category}: {title}` reads `P0/Bug: Fix the login redirect`, `P0: Fix the login redirect` with no category, and `Fix the login redirect` with neither. Shorter forms: `{id:short}` is the id's number alone (`12` for `ENG-12` or `#12`), and `{title:N}` and `{category:N}` cut to at most N characters, at a word when one ends in reach (`{title:40}`, `{category:4}` reads `Feat` for `Feature`). It needs `{id}` or `{title}` in some form, and no other placeholder. `--no-ticket` work is still named after its title.
 - `estimateScale`: the estimates the team sizes work in, smallest first (bitfab-dev's 1, 2, 4, 8). sync and create-tickets estimate every issue on it, and create-tickets refuses an estimate off it. Without it, they estimate only when the agent instructions or the tracker's `values.estimate` ask, on the agent instructions' scale.
 
 `tickets.ts check` and `work.ts` read the section themselves; sync reads `dueDateRequired`, `estimateScale`, `blockerMark`, `parentFollowsSubIssues`, `planningDoc`, and `assignOnSync` with `configure get`.

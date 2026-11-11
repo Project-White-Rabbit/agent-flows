@@ -7,7 +7,12 @@ import { SECTIONS } from "./index.ts"
 import { detectPreview } from "./preview.ts"
 import { detectPythonReady, detectReady, ready } from "./ready.ts"
 import { BITFAB_DEV_FORMAT, sync } from "./sync.ts"
-import { ranksFromDoc, ranksProblem, tickets } from "./tickets.ts"
+import {
+  ranksFromDoc,
+  ranksProblem,
+  tickets,
+  workspaceNameProblem,
+} from "./tickets.ts"
 
 function typeOf(value: FieldSpec["example"]): string {
   if (Array.isArray(value)) {
@@ -950,6 +955,46 @@ describe("ticket ranks", () => {
       }).issues,
     ).toEqual([
       "tickets.ranks must name 5 ranks, one each for urgent, high, medium, low, none (got 2)",
+    ])
+  })
+})
+
+describe("workspace name template", () => {
+  it("names the issue with {id} or {title} and no other placeholder", () => {
+    expect(workspaceNameProblem("{id}: {title}")).toBe(undefined)
+    expect(workspaceNameProblem("{title}")).toBe(undefined)
+    expect(workspaceNameProblem("{priority}/{category}: {title}")).toBe(
+      undefined,
+    )
+    expect(workspaceNameProblem("{id:short} {category:4}: {title:40}")).toBe(
+      undefined,
+    )
+    expect(workspaceNameProblem("{title:short}")).toBe(
+      "has an unknown placeholder `{title:short}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, where N is a length)",
+    )
+    expect(workspaceNameProblem("{id:0} {title}")).toMatch(
+      /^has an unknown placeholder `\{id:0\}`/,
+    )
+    expect(workspaceNameProblem("{category:4}")).toBe(
+      "must name the issue with `{id}` or `{title}`",
+    )
+    expect(workspaceNameProblem("{priority}/{category}")).toBe(
+      "must name the issue with `{id}` or `{title}`",
+    )
+    expect(workspaceNameProblem("Work")).toBe(
+      "must name the issue with `{id}` or `{title}`",
+    )
+    expect(workspaceNameProblem("{id} {name}")).toBe(
+      "has an unknown placeholder `{name}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, where N is a length)",
+    )
+    expect(
+      checkConfig({
+        version: 2,
+        repo: { baseBranch: "main" },
+        tickets: { workspaceName: "{key}" },
+      }).issues,
+    ).toEqual([
+      "tickets.workspaceName has an unknown placeholder `{key}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, where N is a length)",
     ])
   })
 })
