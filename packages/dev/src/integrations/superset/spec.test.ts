@@ -76,7 +76,7 @@ describe("superset's project on this machine", () => {
   })
 
   it("keeps no project id in the config", () => {
-    expect(superset.fields.map((f) => f.key)).toEqual(["agent"])
+    expect(superset.fields.map((f) => f.key)).toEqual(["agent", "browser"])
     expect(superset.machine?.keys).toEqual(["project"])
   })
 })

@@ -184,7 +184,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
       "A browser built into the workspace app, for opening a branch's preview next to its agent (preview)",
     ops: {
       openUrl:
-        "Show <url> in the app's browser beside workspace <workspace> (the id the `workspaces` op gives the one this session runs in), and bring it into view: in the tab already showing <origin> there when there is one, else in a new one. Prints the tab's id",
+        "Show <url> in the app's browser beside workspace <workspace> (the id the `workspaces` op gives the one this session runs in), and bring it into view: in the tab already showing <origin> there when there is one, else in a new one, placed where the integration's `browser` field says (a tab of its own when unset). Prints the tab's id",
     },
   },
   {
