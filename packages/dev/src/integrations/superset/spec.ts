@@ -10,7 +10,7 @@ import {
   remoteKey,
   where,
 } from "../local-repo.ts"
-import { SLUG } from "../patterns.ts"
+import { SLUG, SUPERSET_BROWSER_PLACEMENT } from "../patterns.ts"
 
 /**
  * Where Superset checks out its workspaces by default: `~/.superset/worktrees/`,
@@ -136,6 +136,13 @@ export const superset: IntegrationSpec = {
       example: "claude",
       pattern: SLUG,
     },
+    {
+      key: "browser",
+      description:
+        "Where preview opens a page in Superset's browser: `tab` (a tab of its own in the main area, the default), `right`, `left`, `down`, or `up` (split beside the agent's pane, on that side), or `sidebar` (the right sidebar, where Superset puts a new browser). A browser it reuses stays where it is. The team's default, only when the team agreed on one; each person's own choice goes in this machine's override (`configure local`)",
+      example: "right",
+      pattern: SUPERSET_BROWSER_PLACEMENT,
+    },
   ],
   // A Superset project belongs to one Superset organization, and each machine
   // sets it up at its own path, so the id isn't the team's: flows find it
@@ -154,7 +161,7 @@ export const superset: IntegrationSpec = {
   provides: {
     browser: {
       openUrl: {
-        cli: "`superset browser open --workspace <workspace> --url <url> --show --json`: it opens <url> in the workspace's browser pane (making one when there's none) and shows the workspace. It prints the pane's id",
+        cli: "Placement `{browser|tab}`. First `superset panes list --workspace <workspace> --json`: the agent's pane is the one in `tabs` whose `terminalId` is `$SUPERSET_TERMINAL_ID`, and note whether any pane, in `tabs` or in `sidebar.tabs`, has `kind` `browser`. Then `superset browser open --workspace <workspace> --url <url> --show --json`: it opens <url> in the workspace's browser pane, wherever it is, and shows the workspace; with none, it makes one in the right sidebar. It prints the pane's `paneId`. When the list had no browser pane, place the new one: for `tab`, `superset panes move --workspace <workspace> --pane <its paneId> --main --json` (a tab of its own in the main area; the move gives the pane a new id, the browser pane `superset panes list` now shows); for `right`, `left`, `down`, or `up`, `superset panes move --workspace <workspace> --pane <its paneId> --to <the agent's pane id> --direction {browser|tab} --json`, so it opens beside the agent's pane; for `sidebar`, leave it there. A browser pane it reuses stays where it is",
       },
     },
     workspaces: {

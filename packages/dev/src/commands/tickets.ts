@@ -32,6 +32,7 @@ import {
   DEFAULT_RANKS,
   ISSUE_PRIORITIES,
   ranksProblem,
+  workspaceNameProblem,
 } from "../config/sections/tickets.ts"
 import { loadConfig, repoRoot } from "./configure.ts"
 import {
@@ -187,6 +188,8 @@ export type Rules = {
   ranks?: string[]
   /** The IANA time zone "today" is in, for due dates and planning sections. */
   timezone?: string
+  /** How start-work names a workspace on an issue (`{id}: {title}`). */
+  workspaceName?: string
 }
 
 export type Action = "file" | "update" | "unchanged"
@@ -1198,6 +1201,10 @@ export function readRules(root: string): Rules {
       ? { ranks: s.ranks as string[] }
       : {}),
     ...(typeof s.timezone === "string" ? { timezone: s.timezone } : {}),
+    ...(typeof s.workspaceName === "string" &&
+    !workspaceNameProblem(s.workspaceName)
+      ? { workspaceName: s.workspaceName }
+      : {}),
   }
 }
 

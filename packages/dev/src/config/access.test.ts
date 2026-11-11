@@ -4,6 +4,8 @@ import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { github } from "../integrations/github/spec.ts"
 import { findIssue } from "../integrations/linear/adapter.ts"
+import { orca } from "../integrations/orca/spec.ts"
+import { superset } from "../integrations/superset/spec.ts"
 import { type Probe, probeAccess, systemProbe } from "./access.ts"
 import { fillOps, resolveCapability } from "./integrations.ts"
 
@@ -111,6 +113,23 @@ describe("fillOps", () => {
     })
     expect(ops.prRef).toBe(
       "A bare number, or `https://github.com/acme/web/pull/<N>`",
+    )
+  })
+  it("fills where a workspace app opens the browser, a tab by default", () => {
+    const openUrl = (spec: typeof orca, values: Record<string, string>) => {
+      const ops = spec.provides?.browser
+      if (!ops) {
+        throw new Error(`${spec.name} provides no browser`)
+      }
+      return fillOps(ops, values).openUrl as { cli: string }
+    }
+    expect(openUrl(orca, {}).cli).toContain("Placement `tab`.")
+    expect(openUrl(orca, { browser: "right" }).cli).toContain(
+      "`--split right` added",
+    )
+    expect(openUrl(superset, {}).cli).toContain("Placement `tab`.")
+    expect(openUrl(superset, { browser: "down" }).cli).toContain(
+      "--direction down --json",
     )
   })
 })

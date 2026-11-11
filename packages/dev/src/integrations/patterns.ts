@@ -58,3 +58,15 @@ export const PATH: FieldPattern = {
   regex: /^[A-Za-z0-9._~/-]+$/,
   hint: "letters, digits, `.`, `_`, `~`, `/`, or `-` (`../worktrees`)",
 }
+
+/** Where a workspace app opens a page: its own tab, or a split beside the agent. */
+export const BROWSER_PLACEMENT: FieldPattern = {
+  regex: /^(tab|right|left|down|up)$/,
+  hint: "`tab`, `right`, `left`, `down`, or `up`",
+}
+
+/** The same, plus Superset's right sidebar. */
+export const SUPERSET_BROWSER_PLACEMENT: FieldPattern = {
+  regex: /^(tab|right|left|down|up|sidebar)$/,
+  hint: "`tab`, `right`, `left`, `down`, `up`, or `sidebar`",
+}

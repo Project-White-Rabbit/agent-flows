@@ -104,7 +104,7 @@ integration (a workspace app, or plain git worktrees); set it up with
    ```json
    {
      "tickets": [
-       { "id": "<ID>", "title": "...", "url": "...", "description": "...", "stage": "todo", "priority": "high", "branchName": "<suggested branch, or null>" },
+       { "id": "<ID>", "title": "...", "url": "...", "description": "...", "stage": "todo", "priority": "high", "category": "<its label by the kind of work, or null>", "branchName": "<suggested branch, or null>" },
        { "id": "<ID>", "missing": true }
      ],
      "workspaces": [
@@ -113,7 +113,7 @@ integration (a workspace app, or plain git worktrees); set it up with
    }
    ```
 
-   `stage` is its workflow state as one of `todo` (triage, backlog, and not started count), `in progress`, `in review`, `done`, or `canceled`; `priority` is `urgent`, `high`, `medium`, `low`, or `none`; `branchName` is the branch the tracker suggests for it, or `null`. An issue `getIssue` doesn't find is `"missing": true`. A workspace's `section` is `null` when it has none, and `current` is true for the one this session runs in. When no variant of a `workspaces` op works here, leave its workspaces out and say so: `work.ts` still checks this repo's git worktrees.
+   `stage` is its workflow state as one of `todo` (triage, backlog, and not started count), `in progress`, `in review`, `done`, or `canceled`; `priority` is `urgent`, `high`, `medium`, `low`, or `none`; `category` is the one of its labels in the set the agent instructions or the tracker entry's `values.labels` give (with no set, its only label), else `null`; `branchName` is the branch the tracker suggests for it, or `null`. An issue `getIssue` doesn't find is `"missing": true`. A workspace's `section` is `null` when it has none, and `current` is true for the one this session runs in. When no variant of a `workspaces` op works here, leave its workspaces out and say so: `work.ts` still checks this repo's git worktrees.
 2. **Decide.** Run it with the section flag when one was given:
 
    ```bash
@@ -121,7 +121,7 @@ integration (a workspace app, or plain git worktrees); set it up with
    ```
 
    It reads the config's `tickets.ranks` itself, the team's names for the priorities (P0, P1, …). Pass `--ranks` only when the config has none and the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they point to for ranking work) name the priorities their own way: their names for `urgent`, `high`, `medium`, `low`, and no priority, in that order (`--ranks Urgent,P0,P1,P2,Audit`), and say once that `/dev-flows:configure tickets` can record them. Pass `--workspaces-repository` with `--workspaces-repository <name>`: without a section flag, a workspace in another repository then goes in no section, since this one's sections aren't that repository's. It writes nothing to any tracker. Exit code 2 is bad input: fix `start.json` and run it again. It prints one line per issue:
-   - `START`: a new workspace on `branch` (`exact=yes` when the issue's own `> Branch:` line named it; `no` lets the integration put it under its prefix), in `section`, with the agent's prompt in `prompt`. `state=move` means the issue hasn't started yet, so it moves to in progress.
+   - `START`: a new workspace named `name` (the config's `tickets.workspaceName` filled in) on `branch` (`exact=yes` when the issue's own `> Branch:` line named it; `no` lets the integration put it under its prefix), in `section`, with the agent's prompt in `prompt`. `state=move` means the issue hasn't started yet, so it moves to in progress.
    - `EXISTS`: a workspace is already on the issue's branch. `branch-line=add` means the issue has no `> Branch:` line yet, and `state=move` that it moves to in progress.
    - `SKIP`: done, canceled, or not found.
    **With `--reuse`,** run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/work.ts" reuse --input <dir>/start.json [--section "<name>" | --section-by-rank | --no-section] [--ranks <names>]` instead, with the one issue. **With `--no-ticket`,** read only the workspaces (for the one this session runs in) and run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/work.ts" reuse --title "<title>" [--section "<name>" | --no-section]`. Neither changes anything yet. Each prints a `REUSE` line: this workspace's branch now and the one it becomes (`->`), its new `name`, its `section` (`keep` without a section flag), and for an issue, `branch-line` and `state` as for `EXISTS`. An issue may instead print `EXISTS` (another workspace is already on it: report it and stop) or `SKIP`.
@@ -131,7 +131,7 @@ integration (a workspace app, or plain git worktrees); set it up with
 
 Go through the lines in order, without asking (with `--confirm`, after the yes). When an op fails, note it and carry on with the next issue.
 
-1. **`START`:** the chosen `workspaces` entry's `createWorkspace` op, with `<name>` `<ID>: <title>`, `<branch>` and `<exact>` from the line, `<base>` the configured `repo.baseBranch` (with `--workspaces-repository`, `<repository>` its name and `<base>` that repository's default branch, as the op says), `<section>` the line's (leave it out for `none`), and `<prompt-file>` the line's `prompt`. Note the branch it prints: that's the issue's branch from now on, prefix and all. When it prints a command that starts the agent instead of starting one, keep that command for the report.
+1. **`START`:** the chosen `workspaces` entry's `createWorkspace` op, with `<name>`, `<branch>`, and `<exact>` from the line, `<base>` the configured `repo.baseBranch` (with `--workspaces-repository`, `<repository>` its name and `<base>` that repository's default branch, as the op says), `<section>` the line's (leave it out for `none`), and `<prompt-file>` the line's `prompt`. Note the branch it prints: that's the issue's branch from now on, prefix and all. When it prints a command that starts the agent instead of starting one, keep that command for the report.
 2. **The issue** (a `START` that opened, or an `EXISTS` with `branch-line=add` or `state=move`), when its tracker entry is at `track`: write the description `getIssue` returned to `<dir>/<ID>.md`, then
 
    ```bash
