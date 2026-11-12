@@ -24,6 +24,7 @@ export const DEV_COMMANDS = defineCommandCatalog({
   evaluate: { file: "evaluate.ts" },
   hooks: { file: "hooks.ts" },
   preview: { file: "preview.ts" },
+  prototype: { file: "prototype.ts" },
   ready: { file: "ready.ts" },
   sync: { file: "sync.ts" },
   tickets: { file: "tickets.ts" },

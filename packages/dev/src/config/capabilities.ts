@@ -181,10 +181,34 @@ export const CAPABILITIES: CapabilitySpec[] = [
     id: "browser",
     name: "Browser",
     purpose:
-      "A browser built into the workspace app, for opening a branch's preview next to its agent (preview)",
+      "A browser built into the workspace app, for opening a branch's preview or a mockup next to its agent (preview, prototype)",
     ops: {
       openUrl:
         "Show <url> in the app's browser beside workspace <workspace> (the id the `workspaces` op gives the one this session runs in), and bring it into view: in the tab already showing <origin> there when there is one, else in a new one. Prints the tab's id",
+    },
+  },
+  {
+    id: "design",
+    name: "Design",
+    purpose:
+      "Where the team's designs live: the look prototype's mockups take, and where it puts them for the team",
+    levels: [
+      {
+        id: "read",
+        description:
+          "Read the design system, so mockups take its look (prototype)",
+      },
+      {
+        id: "write",
+        description: "Also put mockups in it for the team (prototype)",
+      },
+    ],
+    defaultLevel: "read",
+    ops: {
+      styleGuide:
+        "The team's design system, from the design <link> when one is given, else the integration's own: its colors (as hex, with their names), text styles (font, size, weight, line height), radii, spacing, and the names of its main components, as a short list. Prints nothing found when there's no design system to read",
+      showMockup:
+        "Put the mockup page in the file <file> (one self-contained HTML page) in the design tool as editable designs titled <title>, one per screen or state it shows: in place of the ones at <link> when given, else as new ones beside what's already there, so nothing overlaps. Prints a link that opens them",
     },
   },
   {

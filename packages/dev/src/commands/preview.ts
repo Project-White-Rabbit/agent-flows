@@ -190,7 +190,7 @@ function onPort(url: string | null, port: number): string {
 }
 
 /** Whether anything answers at `url`, whatever the status. */
-async function answers(url: string): Promise<boolean> {
+export async function answers(url: string): Promise<boolean> {
   try {
     await fetch(url, {
       redirect: "manual",
@@ -202,7 +202,7 @@ async function answers(url: string): Promise<boolean> {
   }
 }
 
-function alive(pid: number): boolean {
+export function alive(pid: number): boolean {
   try {
     process.kill(pid, 0)
     return true
@@ -293,7 +293,7 @@ function tail(file: string, lines = 30): string {
   }
 }
 
-function readState(dir: string): ServerState | undefined {
+export function readState(dir: string): ServerState | undefined {
   try {
     return JSON.parse(fs.readFileSync(path.join(dir, "server.json"), "utf8"))
   } catch {
@@ -312,7 +312,7 @@ function writeState(dir: string, state: ServerState): void {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** Start `settings.command` in the background and wait until it answers. */
-async function start(
+export async function start(
   root: string,
   dir: string,
   settings: Settings & { command: string },
@@ -385,13 +385,15 @@ async function start(
   }
 }
 
-async function stop(
+/** Stop the server recorded in `dir`, which `flow` started. */
+export async function stop(
   dir: string,
+  flow = "preview",
 ): Promise<{ stopped: boolean; pid?: number; reason?: string }> {
   const state = readState(dir)
   if (!state || !alive(state.pid)) {
     fs.rmSync(path.join(dir, "server.json"), { force: true })
-    return { stopped: false, reason: "no server preview started is running" }
+    return { stopped: false, reason: `no server ${flow} started is running` }
   }
   const signal = (sig: NodeJS.Signals) => {
     try {
