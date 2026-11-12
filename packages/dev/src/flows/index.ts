@@ -7,6 +7,7 @@ import { finishFlow } from "./finish.ts"
 import { type DevTargetName, devKit } from "./kit.ts"
 import { previewFlow } from "./preview.ts"
 import { readyFlow } from "./ready.ts"
+import { serverFlow } from "./server.ts"
 import { startWorkFlow } from "./start-work.ts"
 import { syncFlow } from "./sync.ts"
 import { ticketsToWorkFlow } from "./tickets-to-work.ts"
@@ -19,6 +20,7 @@ export const DEV_FLOWS = [
   finishFlow,
   previewFlow,
   readyFlow,
+  serverFlow,
   startWorkFlow,
   syncFlow,
   ticketsToWorkFlow,

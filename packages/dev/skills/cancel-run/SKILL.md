@@ -66,6 +66,7 @@ Show what will run, then go on without asking, except about a searched issue.
 - `Close pull request #<N> ("<title>")`
 - `Delete remote branch origin/<branch>`
 - `Cancel issue <ID> ("<title>")`
+- `Stop the dev server /dev-flows:server started here`, when one runs
 - `Run the repo's teardown: <the cancel.after hooks' names>`
 
 **Warnings**, below them, the first one first:
@@ -96,6 +97,8 @@ Each is independent: one that fails (someone closed the pull request in the mean
 2. **Delete the remote branch:** `git push origin --delete <branch>`. One that says the remote ref doesn't exist was already gone, which counts as done. The local branch and its unpushed commits stay.
 3. **The issue:** for `<issue>` (when the gates left it) its entry's `updateIssue` op with only `<state>` `canceled`; for the issue the person picked, `canceled` or `done` as they said. Leave the title, description, and fields out. Only in an entry at `track`.
 
+4. **Stop the dev server:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" stop`. It stops only a dev server `/dev-flows:server` started in this worktree (and any it started for worktrees that are gone, as `reaped`), never one the person started by hand, and stopping none is fine. Keep what it prints for the report.
+
 Never delete the local branch, switch branches, or touch the working tree: that's the person's, or their workspace app's teardown.
 
 ## 4. Report
@@ -107,5 +110,6 @@ Lead with anything that needs attention: a failed write, a failed teardown hook,
 - **Pull request:** closed, already closed, none, or failed (and why).
 - **Remote branch:** deleted, already gone, none, or failed.
 - **Issue:** canceled or marked done (as a link), already done or canceled, left open (other pull requests attached, or a tracker at `link`), no issue changed (with the candidates' links when the person picked none, or `force` mode skipped the question), or none found.
+- **Dev server:** the dev server `/dev-flows:server` had started here, stopped (its `pid` and `command`), with any `reaped` ones; leave the line out when it stopped none.
 - **Teardown:** each `cancel.after` hook and how it went.
 - **Local:** `<branch>` and its working tree are still here; deleting them is the person's call.

@@ -1,13 +1,13 @@
 ---
-description: Start the repo's dev server when it isn't running and open the page the current work changed in a browser: the workspace app's own, else this session's browser tools, else the system's. Also stops the server it started.
-argument-hint: "[<page path, URL, or description> | stop | help]"
+description: Open the page the current work changed in a browser, on this worktree's dev server (starting it when it isn't running): the workspace app's browser, else this session's browser tools, else the system's.
+argument-hint: "[<page path, URL, or description> | help]"
 ---
 
 # /dev-flows:preview
 
-Shows the person what this branch's work looks like, running: it makes sure this checkout's dev server is up (starting it in the background when it isn't, with `preview.command` from the config), works out which page the work changed, and opens it. It opens in the browser of the workspace app this session runs in, beside the agent, when the repo configured one (`/dev-flows:configure browser`); else with this session's own browser tools; else in the system's default browser.
+Shows the person what this branch's work looks like, running: it gets this checkout's dev server from `/dev-flows:server` (which starts it in the background when it isn't running), works out which page the work changed, and opens it. It opens in the browser of the workspace app this session runs in, beside the agent, when the repo configured one (`/dev-flows:configure browser`); else with this session's own browser tools; else in the system's default browser.
 
-It never edits the working tree, commits, or pushes. The server it starts goes on running after it ends, for the person to keep using: `/dev-flows:preview stop` stops it.
+It never edits the working tree, commits, or pushes. The server is `/dev-flows:server`'s: it stays up for the person to keep using, `/dev-flows:server stop` stops it, and a watchdog stops it once its worktree is deleted or nobody uses it.
 
 **CLI commands** available via Bash (paths relative to `${CLAUDE_PLUGIN_ROOT}/src/commands/`):
 
@@ -15,11 +15,10 @@ It never edits the working tree, commits, or pushes. The server it starts goes o
 |---------|-------------|
 | `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), a failure that stops the command (`stop`), or a hook still running (`running`) |
 | `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
-| `preview.ts <subcommand>` | `server [--command <cmd>] [--url <url>] [--check]` finds the dev server this checkout runs, or starts one in the background and waits until it answers, and prints its `status` and `url`; `stop` stops the server preview started in this worktree |
 
 ## Invariants
 
-- **Only this checkout's server.** Open a page only from a server this checkout runs. Never stop or restart a server preview didn't start without the person's say-so, and never one of another checkout.
+- **Only this checkout's server.** Open a page only from a server this checkout runs. Starting, stopping, and restarting it is `/dev-flows:server`'s: never do any of it here.
 - **Run the repo's hooks around this command.** Skip this when the mode is `help`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run before --flow preview --mode <mode>`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run after --flow preview --mode <mode> --outcome <success, when it did its job, else failure>`, leaving out a flag whose value isn't known yet. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest (with `agent.recheck`, that first runs the hook's check again, and it fails like any check when the task didn't satisfy it); a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). `running`: a hook was still running when `--max-wait` ran out, and goes on running: run the same command again with `--wait <running.resume>` in place of any `--after`, until the status is another one, relaying `running.name` and how long it has run. When the host limits how long one command runs, add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`. An exit of 2 means bad arguments or an invalid config: relay its message and stop. At the end, a `stop` can't happen: report the `failures`. Say in the report which hooks ran at each point, what any task for you changed, and what failed.
 
 ## Modes
@@ -38,33 +37,24 @@ Read `$ARGUMENTS` first. If its first token is exactly one of the mode names bel
 If the argument is `help`, print the block below verbatim and stop.
 
 ```
-/dev-flows:preview  [<page> | stop | help]
+/dev-flows:preview  [<page> | help]
 
-Starts this checkout's dev server when it isn't running (preview.command,
-in the background, its output in a log in the git dir), then opens the
-page the current work changed: in the workspace app's browser beside this
-session, else with this session's browser tools, else in the system's
-default browser.
+Opens the page the current work changed on this checkout's dev server
+(started by /dev-flows:server when it isn't running): in the workspace app's
+browser beside this session, else with this session's browser tools, else
+in the system's default browser.
 
 <page>: what to open instead of the page the work changed: a path
   (/settings/billing), a full URL, or words (the billing settings page)
-stop: stops the dev server preview started in this worktree
+
+/dev-flows:server stop stops the dev server; /dev-flows:server list lists them.
 ```
 
 ## 1. The dev server
 
-**`stop`:** when the argument is `stop`, run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/preview.ts" stop`. It prints `stopped` (with the `pid` it stopped) or a `reason` none was: say which, and end here. It stops only a server preview started; for one the person started by hand, say so, and leave it.
+The argument, if any, is `<page>`.
 
-Otherwise, the argument, if any, is `<page>`.
-
-Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/preview.ts" server`. It reads `preview.command`, `preview.url`, and `preview.timeout` from the config itself, and works on a repo that isn't configured too. It prints JSON with a `status` and a `url`, `servers` (the processes of this checkout listening for connections, each with its `pid`, `port`, and `command`), and `ours` (whether preview started the server):
-
-- `running`: a server of this checkout's answers at `url`. Go on. With `url` `null`, it runs several: the one serving the app's pages is `<url>` (`http://localhost:<its port>`), by its `command` (the web app's dev server, not an API, a worker, a database, or a component explorer). When none clearly is, ask the person which, with `AskUserQuestion` listing them.
-- `started`: it started `command` now (`pid`, its output in `log`), and it answers at `url`. Go on.
-- `unconfigured`: nothing runs, and the config sets no `preview.command`. Find how this repo starts its dev server: a `dev` script in its package manifest (at the root, or in the app the branch changes, in a monorepo), its README, `CLAUDE.md` or `AGENTS.md`, a `Procfile`, a `Makefile`, or a compose file. When one command clearly does it, run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/preview.ts" server --command '<it>'`, and say in the report that `/dev-flows:configure preview` saves it. When it isn't clear, ask the person. When the repo has no web app to show (a library, a CLI), say so and end here.
-- `elsewhere`: the configured `url` answers, but another checkout's server serves it (`owner`: its `pid`, `cwd`, and `command`), so it shows that checkout's work, not this one's. Ask the person, with `AskUserQuestion` naming `owner.cwd`: stop that server (`kill <owner.pid>`, then run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/preview.ts" server` again to start this checkout's), open it anyway (knowing it isn't this branch's work), or stop here.
-- `failed`: the command exited before it answered (`exitCode`, its last lines in `tail`, all of it in `log`). Show the person `tail` and `log`, and end here. When the failure comes from this branch's own change (a compile error in a file it touched), say so, and which file; fix nothing.
-- `timeout`: it still hadn't answered after `preview.timeout` seconds, and goes on running. Show `tail` and `log`; when the output shows it's still building, run the same command once more (it finds the server it started and waits again), else end here.
+Run the `/dev-flows:server` skill with no arguments: invoke it, don't redo its steps. It finds this checkout's dev server, or starts one, and may ask the person something on the way (which of several servers, whether to restart one started by hand under its watchdog). It ends with the server's `<url>` and how it got there (started now, already running, restarted), for the report. When it ends without a `<url>` (the server failed, timed out, or the repo has no dev server), stop here and pass on what it said.
 
 ## 2. The page
 
@@ -102,5 +92,5 @@ A few lines:
 
 - **Opened:** `<target>`, and where (the workspace app's browser, this session's browser tools, the system's browser, or not opened), with why it's the page: the change it shows. Any trouble `curl` found (a 5xx and the log lines behind it, a sign-in).
 - **On the page:** each `preview.afterOpen` hook and what it did (signed in as whom), or what it asks the person to do when this session couldn't drive the browser, and any that failed.
-- **Server:** started now (`pid`, `log`) or already running (whose: preview's, or one started by hand), and its `url`. When preview started it: `/dev-flows:preview stop` stops it. When the command came from the repo rather than the config: `/dev-flows:configure preview` saves it.
+- **Server:** what `/dev-flows:server` said: its `<url>`, started now or already running, whether its watchdog watches it, any servers it reaped, and `/dev-flows:configure server` when the command came from the repo rather than the config.
 - **Also changed:** the other pages the change touches, as URLs, when there are any.

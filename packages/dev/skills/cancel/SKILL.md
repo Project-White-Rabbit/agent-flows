@@ -5,7 +5,7 @@ argument-hint: "[force|help]"
 
 # /dev-flows:cancel
 
-Winds down a branch whose work is being abandoned: the destructive sibling of `/dev-flows:sync`. It closes the pull request, deletes the remote branch, cancels the issue, and runs the repo's own teardown (`cancel.after` hooks: a database branch, dev servers, a marker a worktree setup script reads). Every vendor-specific action goes through the repo's configured integrations (`/dev-flows:configure`). The local branch and working tree are left alone, for the person (or their workspace app's teardown) to remove.
+Winds down a branch whose work is being abandoned: the destructive sibling of `/dev-flows:sync`. It closes the pull request, deletes the remote branch, cancels the issue, stops the dev server `/dev-flows:server` started in this worktree, and runs the repo's own teardown (`cancel.after` hooks: a database branch, dev servers, a marker a worktree setup script reads). Every vendor-specific action goes through the repo's configured integrations (`/dev-flows:configure`). The local branch and working tree are left alone, for the person (or their workspace app's teardown) to remove.
 
 **CLI commands** available via Bash (paths relative to `${CLAUDE_PLUGIN_ROOT}/src/commands/`):
 
@@ -14,6 +14,7 @@ Winds down a branch whose work is being abandoned: the destructive sibling of `/
 | `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), a failure that stops the command (`stop`), or a hook still running (`running`) |
 | `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
 | `sync.ts <subcommand>` | `issue` prints the issue a sync recorded for the current branch, reading only |
+| `server.ts <subcommand>` | `stop` stops the dev server dev-flows started in this worktree, if any, and prints what it stopped |
 | `tickets.ts <subcommand>` | `match` ranks the tracker's recent issues against the branch's work, as create-tickets does, writing only its plan file |
 
 ## Invariants
@@ -57,6 +58,7 @@ If mode is `help`, print the block below verbatim and exit. No reads, no writes.
 >   - deletes the remote branch
 >   - cancels the issue the branch names (left open when another pull request, open or merged, is attached to it)
 >   - when the branch names no issue, looks for one (a `> Branch:` line naming the branch, then a search and create-tickets' ranking of recent issues) and asks which, if any, to cancel or mark done; `force` changes none of them
+>   - stops the dev server `/dev-flows:server` started in this worktree
 >   - runs the repo's teardown (`cancel.after` hooks)
 >
 > It never deletes the local branch, switches branches, or touches the working tree. It refuses on the base branch (and the config's `repo.protectedBranches`), on a branch other branches are stacked on, and on a pull request that merged.

@@ -26,6 +26,7 @@ describe("dev flows", () => {
       "skills/preview/SKILL.md",
       "skills/ready/SKILL.md",
       "skills/ready-run/SKILL.md",
+      "skills/server/SKILL.md",
       "skills/start-work/SKILL.md",
       "skills/sync/SKILL.md",
       "skills/sync-local/SKILL.md",

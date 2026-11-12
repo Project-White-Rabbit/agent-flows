@@ -28,7 +28,7 @@ import { checkUse, USE_KEY, usesOf } from "./use.ts"
 export const CONFIG_PATH = ".agent-flows/config.json"
 
 export { INSTANCE_KEY }
-export const CONFIG_VERSION = 5
+export const CONFIG_VERSION = 6
 
 /** Upgrades from each older version. */
 export const MIGRATIONS: Migration[] = [
@@ -124,7 +124,52 @@ export const MIGRATIONS: Migration[] = [
       return config
     },
   },
+  {
+    // The dev server got its own section when starting and stopping it moved
+    // out of preview into the server command, which finish and cancel use
+    // too. Preview keeps what it does on the page.
+    from: 5,
+    migrate(config) {
+      const preview = config.preview
+      if (isRecord(preview)) {
+        const moved = Object.fromEntries(
+          SERVER_FIELDS.filter((key) => key in preview).map((key) => [
+            key,
+            preview[key],
+          ]),
+        )
+        if (Object.keys(moved).length > 0) {
+          const server = isRecord(config.server) ? config.server : {}
+          config.server = { ...moved, ...server }
+          for (const key of SERVER_FIELDS) {
+            delete preview[key]
+          }
+          if (Object.keys(preview).length === 0) {
+            delete config.preview
+          }
+        }
+      }
+      if (Array.isArray(config.skipped)) {
+        config.skipped = config.skipped.flatMap((p: unknown) => {
+          if (p === "preview") {
+            // Skipping preview's section skipped its dev server too.
+            return ["preview", "server"]
+          }
+          const field =
+            typeof p === "string" ? /^preview\.(\w+)$/.exec(p) : null
+          return field &&
+            SERVER_FIELDS.includes(field[1] as (typeof SERVER_FIELDS)[number])
+            ? [`server.${field[1]}`]
+            : [p]
+        })
+      }
+      return config
+    },
+  },
 ]
+
+/** The fields format 6 moved from `preview` to `server`. */
+const SERVER_FIELDS = ["command", "url", "timeout", "idleTimeout"] as const
 
 /** Fields format 5 dropped: values each machine works out for itself. */
 const MACHINE_FIELDS = [
