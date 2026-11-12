@@ -152,6 +152,8 @@ export type PlanItem = {
   filed?: boolean
   /** A plan key, or an existing issue's id. */
   parent?: string
+  /** Matching chose `parent` (a larger open issue), not the notes. */
+  matchedParent?: boolean
   blockedBy?: string[]
   priority?: string
   cycle?: string
@@ -183,6 +185,8 @@ export type Rules = {
   /** The estimates the team sizes work in, smallest first. */
   estimateScale?: number[]
   parentFollowsSubIssues?: boolean
+  /** Filing under a parent matching found: `auto` (the default), `ask`, or `never`. */
+  subIssues?: SubIssueRule
   blockerMark?: string
   /** The team's names for the priorities, in PRIORITIES order. */
   ranks?: string[]
@@ -191,6 +195,9 @@ export type Rules = {
   /** How start-work names a workspace on an issue (`{id}: {title}`). */
   workspaceName?: string
 }
+
+export const SUB_ISSUE_RULES = ["auto", "ask", "never"] as const
+export type SubIssueRule = (typeof SUB_ISSUE_RULES)[number]
 
 export type Action = "file" | "update" | "unchanged"
 
@@ -784,6 +791,33 @@ function applyRules(
     }
   }
 
+  // A parent matching chose rather than the notes, under tickets.subIssues.
+  const rule = rules.subIssues ?? "auto"
+  for (const item of items) {
+    if (
+      rule === "auto" ||
+      !item.matchedParent ||
+      !item.parent ||
+      !reparentsOrNew(item)
+    ) {
+      continue
+    }
+    const parent = byKey.get(item.parent)
+    const title = parent
+      ? (parent.title ?? parent.existing?.title)
+      : plan.refs?.[item.parent]?.title
+    const named = title ? `${item.parent} (${title})` : item.parent
+    if (rule === "never") {
+      problems.push(
+        `${item.key}: matching put it under ${named}, and tickets.subIssues is never: leave "parent" and "matchedParent" out to file it on its own`,
+      )
+    } else {
+      checks.push(
+        `${item.key}: matching put it under ${named} (tickets.subIssues: ask): file it there (drop "matchedParent"), or on its own (leave "parent" and "matchedParent" out)`,
+      )
+    }
+  }
+
   for (const item of items) {
     checks.push(...dueChecks(item, today))
     if (isNew(item)) {
@@ -1193,6 +1227,9 @@ export function readRules(root: string): Rules {
       : {}),
     ...(s.parentFollowsSubIssues === true
       ? { parentFollowsSubIssues: true }
+      : {}),
+    ...(SUB_ISSUE_RULES.includes(s.subIssues as never)
+      ? { subIssues: s.subIssues as SubIssueRule }
       : {}),
     ...(typeof s.blockerMark === "string"
       ? { blockerMark: s.blockerMark }

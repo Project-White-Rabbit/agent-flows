@@ -367,6 +367,45 @@ describe("the team's rules", () => {
     ])
   })
 
+  it("files under a parent matching found, asks first, or refuses it, by tickets.subIssues", () => {
+    const under: Plan = {
+      items: [
+        { key: "piece", title: "Piece", parent: "ENG-9", matchedParent: true },
+        { key: "named", title: "Named", parent: "ENG-9" },
+        {
+          key: "moved",
+          match: "ENG-5",
+          parent: "ENG-9",
+          matchedParent: true,
+          existing: { title: "Moved", parent: null },
+        },
+        {
+          key: "stays",
+          match: "ENG-6",
+          parent: "ENG-9",
+          matchedParent: true,
+          existing: { title: "Stays", parent: "ENG-9" },
+        },
+      ],
+      refs: { "ENG-9": { found: true, title: "Epic" } },
+    }
+    for (const rules of [{}, { subIssues: "auto" as const }]) {
+      const checked = checkPlan(under, TODAY, rules)
+      expect(checked.problems).toEqual([])
+      expect(checked.checks).toEqual([])
+    }
+    const asked = checkPlan(under, TODAY, { subIssues: "ask" })
+    expect(asked.problems).toEqual([])
+    expect(asked.checks).toEqual([
+      'piece: matching put it under ENG-9 (Epic) (tickets.subIssues: ask): file it there (drop "matchedParent"), or on its own (leave "parent" and "matchedParent" out)',
+      'moved: matching put it under ENG-9 (Epic) (tickets.subIssues: ask): file it there (drop "matchedParent"), or on its own (leave "parent" and "matchedParent" out)',
+    ])
+    expect(checkPlan(under, TODAY, { subIssues: "never" }).problems).toEqual([
+      'piece: matching put it under ENG-9 (Epic), and tickets.subIssues is never: leave "parent" and "matchedParent" out to file it on its own',
+      'moved: matching put it under ENG-9 (Epic), and tickets.subIssues is never: leave "parent" and "matchedParent" out to file it on its own',
+    ])
+  })
+
   it("raises a parent outside the plan when the plan raises a sub-issue already under it", () => {
     const raised: Plan = {
       items: [

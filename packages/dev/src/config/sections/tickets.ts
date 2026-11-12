@@ -260,6 +260,16 @@ export const tickets: SectionSpec = {
       example: true,
     },
     {
+      key: "subIssues",
+      description:
+        "What create-tickets (and start-work, which files through it) does with an item that matching finds is part of a larger open issue: `auto` files it as a sub-issue of that issue (the default), `ask` asks at the confirmation, and `never` files it on its own. A parent the notes name is kept either way, and sync, which runs unattended, files under a larger issue unless this is `never`",
+      example: "never",
+      pattern: {
+        regex: /^(auto|ask|never)$/,
+        hint: "`auto`, `ask`, or `never`",
+      },
+    },
+    {
       key: "assignOnSync",
       type: "boolean",
       description:
@@ -275,6 +285,6 @@ export const tickets: SectionSpec = {
     },
   ],
   lookup:
-    "Leave it out unless the repo's agent instructions say how the team ranks and files work: a planning document per cycle, a mark for customer blockers, due dates required at some priorities, its own names for the priorities (P0, P1, …, read off the doc that maps them to the tracker's), parents ranked by their sub-issues, the estimates the team sizes work in",
+    "Leave it out unless the repo's agent instructions say how the team ranks and files work: a planning document per cycle, a mark for customer blockers, due dates required at some priorities, its own names for the priorities (P0, P1, …, read off the doc that maps them to the tracker's), parents ranked by their sub-issues, whether work goes under a larger issue, the estimates the team sizes work in",
   detect: detectTickets,
 }
