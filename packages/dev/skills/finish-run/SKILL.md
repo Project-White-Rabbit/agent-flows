@@ -92,6 +92,10 @@ Run the `/dev-flows:sync` skill with the argument `remote` (and `--leave-issue` 
 
 Only after the host said merged. When `above` is more than 0, keep it: the pull requests stacked on top target it until they're restacked; say so in the report. Otherwise `git push origin --delete <branch>`; one that says the remote ref doesn't exist was already deleted (the host may do it on merge), which counts as done. Never `git branch -D`, never switch branches, and never remove this worktree: the local branch stays for the user to clean up.
 
+### Stop the dev server
+
+Only after the host said merged: the work is done, so the dev server `/dev-flows:server` started for it isn't needed. `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" stop`. It stops only one `/dev-flows:server` started in this worktree (and any it started for worktrees that are gone, as `reaped`), never one the person started by hand, and stopping none is fine. Keep what it prints for the report.
+
 ### Watch the deployment
 
 **Only when `<watchDeploy>` is true.** With no deployments entry, say so in the report (`finish.watchDeploy is on, but no deployments integration is configured: run /dev-flows:configure deployments`) and skip this. Otherwise it watches `<landed>`, the merge commit read above; without one, skip this.
@@ -116,5 +120,6 @@ Lead with anything that needs the user's attention: a stop and its reason, a cha
 - **Close-out:** the issue and its state (or left to the tracker, or as it was, with `finish.issueOnMerge` `tracker` or `leave`), errors resolved, and any to resolve by hand, from the remote sync.
 - **Review threads:** with `finish.unresolvedThreads` or `finish.blockingReviewers` set, the unresolved threads it checked, and the ones still open that didn't block.
 - **Remote branch:** deleted, already gone, or kept (and why).
+- **Dev server:** the dev server `/dev-flows:server` had started here, stopped (its `pid` and `command`), with any `reaped` ones; leave the line out when it stopped none.
 - **Deployment:** with `finish.watchDeploy`, each entry's result for `<landed>` (short sha): `success`, `failed`, still `pending`, or nothing deployed, with its `url` and how long it took; its failed steps (each with its log tail, with `finish.deployLogLines`), then, apart, the steps it skipped, and the ones still pending when the watch timed out.
 - **Local:** still on `<branch>`; deleting it and its worktree is the user's call.

@@ -3,7 +3,12 @@ import type { AddressInfo } from "node:net"
 import os from "node:os"
 import path from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { indexPage, resolveRequest, serveStatic } from "./prototype.ts"
+import {
+  indexPage,
+  resolveRequest,
+  serveStatic,
+  urlFromLog,
+} from "./prototype.ts"
 
 describe("resolveRequest", () => {
   const dir = "/scratch/pages"
@@ -74,5 +79,18 @@ describe("serveStatic", () => {
     expect((await fetch(`${base}/demo.html`, { method: "POST" })).status).toBe(
       405,
     )
+  })
+})
+
+describe("urlFromLog", () => {
+  it("reads the URL the static server printed", () => {
+    expect(
+      urlFromLog("Serving /scratch/pages at http://localhost:51234/\n"),
+    ).toBe("http://localhost:51234/")
+  })
+
+  it("is undefined before the server has printed it", () => {
+    expect(urlFromLog("")).toBeUndefined()
+    expect(urlFromLog("Error: listen EADDRINUSE")).toBeUndefined()
   })
 })

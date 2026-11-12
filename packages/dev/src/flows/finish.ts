@@ -10,6 +10,7 @@ import {
   STACK_PARENT,
   USE_INTEGRATIONS,
 } from "./kit.ts"
+import { SERVER_STOP_COMMAND } from "./server.ts"
 
 // How long finish waits for CI on the commit it lands, in minutes, when
 // `finish.ciTimeout` doesn't say.
@@ -32,6 +33,7 @@ export const finishFlow: Flow = devKit.defineFlow({
         "`ci start` and `ci wait` track the CI pass on the commit about to land: settled, timed out, and what failed",
       args: "<subcommand>",
     },
+    server: SERVER_STOP_COMMAND,
     evaluate: {
       description:
         "`gate --base <ref>` says whether `finish.requireEvaluation` lets the branch's recorded evaluation through: `off`, `pass`, `ask`, or `stop` (with `rerun` when a fresh evaluation can settle it)",
@@ -151,7 +153,7 @@ When it stops (a conflict it needs you for), stop too and pass its message on; n
           kind: "action",
           title: "Merge",
           refName: "merge",
-          commandCalls: ["ready", "evaluate"],
+          commandCalls: ["ready", "evaluate", "server"],
           body: `The entries, \`<base>\`, \`<branch>\`, \`<N>\`, the chain, the scope, and the method are from {{skill-ref:main}}.
 
 ### Mark ready
@@ -225,6 +227,10 @@ Run the \`{{cmd}}sync\` skill with the argument \`remote\` (and \`--leave-issue\
 
 Only after the host said merged. When \`above\` is more than 0, keep it: the pull requests stacked on top target it until they're restacked; say so in the report. Otherwise \`git push origin --delete <branch>\`; one that says the remote ref doesn't exist was already deleted (the host may do it on merge), which counts as done. Never \`git branch -D\`, never switch branches, and never remove this worktree: the local branch stays for the user to clean up.
 
+### Stop the dev server
+
+Only after the host said merged: the work is done, so the dev server \`{{cmd}}server\` started for it isn't needed. \`{{command:server}} stop\`. It stops only one \`{{cmd}}server\` started in this worktree (and any it started for worktrees that are gone, as \`reaped\`), never one the person started by hand, and stopping none is fine. Keep what it prints for the report.
+
 ### Watch the deployment
 
 **Only when \`<watchDeploy>\` is true.** With no deployments entry, say so in the report (\`finish.watchDeploy is on, but no deployments integration is configured: run {{cmd}}configure deployments\`) and skip this. Otherwise it watches \`<landed>\`, the merge commit read above; without one, skip this.
@@ -253,6 +259,7 @@ A failed deployment doesn't undo the merge, and nothing here fixes it: never red
 - **Close-out:** the issue and its state (or left to the tracker, or as it was, with \`finish.issueOnMerge\` \`tracker\` or \`leave\`), errors resolved, and any to resolve by hand, from the remote sync.
 - **Review threads:** with \`finish.unresolvedThreads\` or \`finish.blockingReviewers\` set, the unresolved threads it checked, and the ones still open that didn't block.
 - **Remote branch:** deleted, already gone, or kept (and why).
+- **Dev server:** the dev server \`{{cmd}}server\` had started here, stopped (its \`pid\` and \`command\`), with any \`reaped\` ones; leave the line out when it stopped none.
 - **Deployment:** with \`finish.watchDeploy\`, each entry's result for \`<landed>\` (short sha): \`success\`, \`failed\`, still \`pending\`, or nothing deployed, with its \`url\` and how long it took; its failed steps (each with its log tail, with \`finish.deployLogLines\`), then, apart, the steps it skipped, and the ones still pending when the watch timed out.
 - **Local:** still on \`<branch>\`; deleting it and its worktree is the user's call.`,
           next: null,

@@ -12,6 +12,7 @@ import { preview } from "./preview.ts"
 import { prototype } from "./prototype.ts"
 import { ready } from "./ready.ts"
 import { repo } from "./repo.ts"
+import { server } from "./server.ts"
 import { sync } from "./sync.ts"
 import { tickets } from "./tickets.ts"
 
@@ -23,6 +24,7 @@ export const SECTIONS: SectionSpec[] = [
   evaluate,
   finish,
   cancel,
+  server,
   preview,
   prototype,
   hooks,

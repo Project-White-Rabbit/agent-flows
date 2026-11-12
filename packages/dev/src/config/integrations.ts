@@ -12,8 +12,10 @@ import { getAt, INSTANCE_KEY, instancesOf, type RawConfig } from "./config.ts"
 import type {
   CapabilitySpec,
   IntegrationSpec,
+  MachineValues,
   OpImpl,
   SectionValues,
+  SessionContext,
 } from "./types.ts"
 import { usesOf, withoutUse } from "./use.ts"
 
@@ -120,16 +122,48 @@ export type ResolvedIntegration = {
   access?: AccessReport
   /** This session runs inside it (see `IntegrationSpec.session`). */
   here?: true
+  /**
+   * Why values this machine supplies (`IntegrationSpec.machine`) couldn't be
+   * worked out: ops that need them keep their placeholders.
+   */
+  problem?: string
   ops: Record<string, OpImpl>
 }
 
-/** Where this session runs: its environment, its checkout, and a way to ask. */
-export type SessionContext = {
-  env: Record<string, string | undefined>
-  root: string
-  /** `command`'s stdout when it exits 0 in `cwd`, else undefined. */
-  run(command: string[], cwd: string): Promise<string | undefined>
+/**
+ * Each configured integration's machine values (`IntegrationSpec.machine`),
+ * by `accessKey(path, instance)`, for `resolveCapability`.
+ */
+export async function machineValues(
+  config: RawConfig,
+  specs: IntegrationSpec[],
+  session: SessionContext,
+): Promise<Record<string, MachineValues>> {
+  const out: Record<string, MachineValues> = {}
+  await Promise.all(
+    specs.map(async (spec) => {
+      const entry = getAt(config, spec.path)
+      if (!spec.machine || entry === undefined) {
+        return
+      }
+      const machine = spec.machine
+      await Promise.all(
+        instancesOf(entry).map(async (values) => {
+          const instance = Array.isArray(entry)
+            ? String(values[INSTANCE_KEY])
+            : undefined
+          out[accessKey(spec.path, instance)] = await machine.resolve(
+            session,
+            values,
+          )
+        }),
+      )
+    }),
+  )
+  return out
 }
+
+export type { SessionContext }
 
 /**
  * The paths of the integrations this session runs inside (see
@@ -200,6 +234,8 @@ export function resolveCapability(
   scripts: Record<string, Record<string, LoadedAdapter>> = {},
   /** Paths of the integrations this session runs inside (`runningIn`). */
   here: Set<string> = new Set(),
+  /** Values this machine supplies (`machineValues`). */
+  machine: Record<string, MachineValues> = {},
 ): CapabilityResolution {
   const skippedPaths = Array.isArray(config.skipped)
     ? (config.skipped as string[])
@@ -225,19 +261,23 @@ export function resolveCapability(
           : undefined
         const reach =
           access[accessKey(spec.path, instance)] ?? access[spec.path]
+        const local = machine[accessKey(spec.path, instance)]
+        const filled =
+          local && "values" in local ? { ...values, ...local.values } : values
         out.configured.push({
           integration: id,
           ...(instance ? { instance } : {}),
           name: spec.name,
           path: spec.path,
           ...(typeof level === "string" ? { level } : {}),
-          values: withoutUse(values),
+          values: withoutUse(filled),
           ...(reach ? { access: reach } : {}),
           ...(here.has(spec.path) ? { here: true as const } : {}),
+          ...(local && "problem" in local ? { problem: local.problem } : {}),
           ops: withScripts(
             fillOps(
               spec.provides[capability],
-              values,
+              filled,
               reach?.api?.expression ??
                 (spec.access.api ? `$${spec.access.api.token[0]}` : undefined),
             ),

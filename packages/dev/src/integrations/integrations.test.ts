@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { CAPABILITIES } from "../config/capabilities.ts"
 import {
+  machineValues,
   OP_PLACEHOLDER,
   providersOf,
   resolveCapability,
@@ -75,6 +76,12 @@ describe("integration registry", () => {
       function checkPlaceholders(how: string): void {
         for (const [, key, fallback] of how.matchAll(OP_PLACEHOLDER)) {
           if (key === "token") {
+            continue
+          }
+          // Worked out on each machine, never configured (its tests check
+          // what it lets through).
+          if (spec.machine?.keys.includes(key)) {
+            expect(fallback, `${path} {${key}}`).toBeUndefined()
             continue
           }
           const field = spec.fields.find((f) => f.key === key)
@@ -274,8 +281,8 @@ describe("parseSentryConfig", () => {
 describe("the workspace app this session runs in", () => {
   const config = {
     integrations: {
-      superset: { project: "a10b8f37" },
-      orca: { repo: "66ee3232" },
+      superset: {},
+      orca: {},
     },
   }
   const ROOT = "/Users/sam/anywhere/web-fix"
@@ -353,5 +360,53 @@ describe("the workspace app this session runs in", () => {
       ["superset", false],
       ["orca", false],
     ])
+  })
+  it("fills ops with this machine's values, or carries why it can't", () => {
+    const [found] = resolveCapability(
+      config,
+      "workspaces",
+      INTEGRATIONS,
+      {},
+      {},
+      new Set(),
+      { "integrations.orca": { values: { repo: "id:mine" } } },
+    ).configured.filter((r) => r.integration === "orca")
+    expect(found.values).toEqual({ repo: "id:mine" })
+    expect(found.problem).toBeUndefined()
+    expect((found.ops.workspaces as { cli: string }).cli).toContain(
+      "--repo id:mine ",
+    )
+
+    const [missing] = resolveCapability(
+      config,
+      "workspaces",
+      INTEGRATIONS,
+      {},
+      {},
+      new Set(),
+      { "integrations.orca": { problem: "Orca hasn't added this repository" } },
+    ).configured.filter((r) => r.integration === "orca")
+    expect(missing.problem).toBe("Orca hasn't added this repository")
+    expect((missing.ops.workspaces as { cli: string }).cli).toContain(
+      "--repo {repo} ",
+    )
+  })
+
+  it("works out machine values only for configured integrations", async () => {
+    const asked: string[] = []
+    const got = await machineValues(
+      { integrations: { orca: {} } },
+      INTEGRATIONS,
+      {
+        env: {},
+        root: ROOT,
+        run: async (command) => {
+          asked.push(command[0])
+          return undefined
+        },
+      },
+    )
+    expect(Object.keys(got)).toEqual(["integrations.orca"])
+    expect(asked).not.toContain("superset")
   })
 })

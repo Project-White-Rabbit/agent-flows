@@ -1,4 +1,6 @@
+import os from "node:os"
 import path from "node:path"
+import { homePathWarning } from "../../config/personal.ts"
 import type { IntegrationSpec } from "../../config/types.ts"
 import { CONDUCTOR_WORKSPACES } from "../conductor/spec.ts"
 import { ORCA_WORKSPACES } from "../orca/spec.ts"
@@ -14,11 +16,52 @@ export function worktreePaths(porcelain: string): string[] {
 }
 
 /**
- * Where the repo's own linked worktrees live, relative to the main checkout:
- * the directory most of them share, leaving out the ones a workspace app
+ * A worktree directory as every teammate can use it: relative to the main
+ * checkout when it's inside it or beside it (`../web-worktrees`), else from
+ * the home folder (`~/worktrees/web`), else none, since an absolute path
+ * elsewhere, or one climbing out past the checkout's own folder, depends on
+ * where this person keeps things.
+ */
+export function portableDirectory(
+  main: string,
+  dir: string,
+  home: string,
+): string | undefined {
+  const relative = path.relative(main, dir) || "."
+  const climbs = relative.split(path.sep).filter((part) => part === "..")
+  if (!path.isAbsolute(relative) && climbs.length <= 1) {
+    return relative
+  }
+  const fromHome = path.relative(home, dir)
+  return fromHome && !fromHome.startsWith("..") && !path.isAbsolute(fromHome)
+    ? `~/${fromHome}`
+    : undefined
+}
+
+/** Why a committed `directory` only works on one person's machine. */
+function directoryWarning(value: unknown): string | undefined {
+  const text = String(value)
+  const home = homePathWarning(text)
+  if (home) {
+    return home
+  }
+  if (path.isAbsolute(text)) {
+    return "is an absolute path, which may not exist on teammates' machines: use a path relative to the main checkout (`../web-worktrees`) or `~/…`, or put it in this machine's override (`configure local`)"
+  }
+  return text.split("/").filter((part) => part === "..").length > 1
+    ? "climbs out past the main checkout's own folder, so it depends on where each person cloned the repo: use `../<name>` or `~/…`, or put it in this machine's override (`configure local`)"
+    : undefined
+}
+
+/**
+ * Where the repo's own linked worktrees live, as `portableDirectory` gives
+ * it: the directory most of them share, leaving out the ones a workspace app
  * checked out.
  */
-export function worktreeDirectory(porcelain: string): string | undefined {
+export function worktreeDirectory(
+  porcelain: string,
+  home = os.homedir(),
+): string | undefined {
   const [main, ...linked] = worktreePaths(porcelain)
   const counts = new Map<string, number>()
   for (const worktree of linked) {
@@ -29,7 +72,7 @@ export function worktreeDirectory(porcelain: string): string | undefined {
     ) {
       continue
     }
-    const parent = path.relative(main, path.dirname(worktree)) || "."
+    const parent = path.dirname(worktree)
     counts.set(parent, (counts.get(parent) ?? 0) + 1)
   }
   let best: string | undefined
@@ -38,7 +81,8 @@ export function worktreeDirectory(porcelain: string): string | undefined {
       best = parent
     }
   }
-  return best && PATH.regex.test(best) ? best : undefined
+  const portable = best && portableDirectory(main, best, home)
+  return portable && PATH.regex.test(portable) ? portable : undefined
 }
 
 export const worktree: IntegrationSpec = {
@@ -50,21 +94,22 @@ export const worktree: IntegrationSpec = {
     {
       key: "directory",
       description:
-        "Where new worktrees go: a path relative to the main checkout, or absolute",
+        "Where new worktrees go: a path relative to the main checkout (beside it, like `../web-worktrees`, or inside it), or from the home folder (`~/worktrees/web`), so it works wherever each teammate cloned the repo",
       example: "../web-worktrees",
       required: true,
       pattern: PATH,
+      warn: directoryWarning,
     },
     {
       key: "agent",
       description:
-        "Command that starts a coding agent on a prompt given as its argument",
+        "Command that starts a coding agent on a prompt given as its argument: the team's default, only when the team agreed on one. Each person's own choice goes in this machine's override (`configure local`)",
       example: "claude",
       pattern: SLUG,
     },
   ],
   lookup:
-    "The directory the repo's linked worktrees share (`git worktree list`), else ask; `../<repo>-worktrees` keeps them out of the checkout",
+    "The directory the repo's linked worktrees share (`git worktree list`), as a path relative to the main checkout or from `~`, never one in a person's home folder by name; else ask. `../<repo>-worktrees` keeps them out of the checkout",
   access: { cli: { bin: "git" } },
   provides: {
     workspaces: {

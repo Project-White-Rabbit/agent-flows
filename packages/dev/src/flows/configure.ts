@@ -3,19 +3,32 @@ import { CAPABILITIES } from "../config/capabilities.ts"
 import { CONFIG_PATH, CONFIG_VERSION } from "../config/config.ts"
 import { providersOf } from "../config/integrations.ts"
 import { SECTIONS } from "../config/sections/index.ts"
-import type { AccessSpec, IntegrationSpec } from "../config/types.ts"
+import type { AccessSpec, Adapter, IntegrationSpec } from "../config/types.ts"
 import { optInOf } from "../config/use.ts"
 import { DEV_COMMANDS, devKit } from "./kit.ts"
 
 /** "MCP (`Linear`), API (`LINEAR_API_KEY`)": the ways to reach an integration. */
-function reachOf(access: AccessSpec, adapters: string[] = []): string {
+function reachOf(
+  access: AccessSpec,
+  adapters: Record<string, Adapter> = {},
+): string {
+  // Split by what each adapter runs through, so configure asks for a token
+  // only when an adapter needs one, never for one that runs on the CLI.
+  const through = (needs: Adapter["needs"]) =>
+    Object.entries(adapters)
+      .filter(([, adapter]) => adapter.needs === needs)
+      .map(([name]) => `\`${name}\``)
+  const cliAdapters = through("cli")
+  const apiAdapters = through("api")
+  const otherAdapters = through(undefined)
   return [
     access.mcp && `MCP (\`${access.mcp.server}\`)`,
     access.cli && `CLI (\`${access.cli.bin}\`)`,
     access.api &&
       `API (token in ${access.api.token.map((t) => `\`${t}\``).join(" or ")}, or where configure records it)`,
-    adapters.length > 0 &&
-      `adapters (${adapters.map((a) => `\`${a}\``).join(", ")})`,
+    cliAdapters.length > 0 && `CLI adapters (${cliAdapters.join(", ")})`,
+    apiAdapters.length > 0 && `API adapters (${apiAdapters.join(", ")})`,
+    otherAdapters.length > 0 && `adapters (${otherAdapters.join(", ")})`,
   ]
     .filter(Boolean)
     .join(", ")
@@ -47,10 +60,7 @@ const sectionRows = SECTIONS.map((spec) => ({
     lookup: spec.lookup ?? "ask",
     reach:
       "access" in spec
-        ? reachOf(
-            spec.access as AccessSpec,
-            Object.keys((spec as IntegrationSpec).adapters ?? {}),
-          )
+        ? reachOf(spec.access as AccessSpec, (spec as IntegrationSpec).adapters)
         : "",
   },
 }))
@@ -176,12 +186,13 @@ An integration can be reached in up to three ways: its **MCP server**, its **CLI
 
 **A local override** is for a repo whose config isn't yours to change (someone else's), or settings only you want: \`{{cmd}}configure local\` (with a mode or sections as usual) writes to this machine's override instead of \`{{configPath}}\`. It lives in the repo's git dir, so the repo's worktrees share it and it can never be committed. It's the same format, and applies one of two ways, recorded in the file as \`"override"\`:
 
-- **Merge** (the default): each section it sets replaces the committed one, and each it skips is dropped; the rest follows the committed file as the team changes it. A repo with no config at all can be configured entirely this way.
+- **Merge** (the default): each section it sets is laid over the committed one field by field, so it can hold just one personal field (an integration's \`agent\`) and keep the team's others (a section configured as a list is replaced whole), and each it skips is dropped; the rest follows the committed file as the team changes it. A repo with no config at all can be configured entirely this way.
 - **Replace** (\`{{cmd}}configure replace\`): the override is the whole config and the committed file is ignored. Switching to it starts from the config as it reads now, so nothing is lost, but later changes to the committed file no longer reach this machine.
 
 Re-running is safe: values already in the file are kept, skipped sections stay skipped (until a manual run or naming them brings them back), and when nothing new turns up the command says so and changes nothing.`,
   invariants: [
     "Never write a token, key, password, or connection string into the config, and never read a real `.env` file to find one. If the user pastes a secret, don't save it, and tell them it doesn't belong in this file.",
+    "The committed file is the team's, so it holds only what's the same for everyone on it: never a value that's only true for you or this machine (an absolute path, a local port, your own user or account id, an id a local app made when you added the repo to it). Such a value goes in the local override (`{{cmd}}configure local`), or is left out for flows to work out where they run.",
     "Never call a service in a way that changes it. Lookups are read-only, and that includes local setup: don't run a CLI command that initializes or configures the tool in this repo (some do on first use), even to read a value. Read its files instead, or ask.",
     "Only change the config through `write`; never edit the file by hand to get past the validator.",
   ],
@@ -293,12 +304,12 @@ The rest of this step applies to both modes, within those limits.
 
 **Ask what each is for.** For every integration being added, and every configured one \`plan.needs\` lists \`use\` for, {{askVerb}} what the team uses it for: one question per capability it provides, with that capability's levels from the table above plus "Not for this", and its default level recommended. For a capability the sections table marks \`(opt-in)\`, recommend "Not for this" unless the repo shows it uses the integration for it (no other integration covers the capability, and the agent instructions or recent PRs point to it), since without \`use\` flows leave it out. An opt-in \`stacking\` (stacks of plain pull requests, each based on the branch below it) is the exception worth raising: recommend it when no other stacking integration is configured or detected and the repo's open pull requests include ones whose base isn't the base branch (a read-only list of them, such as \`gh pr list --state open --json headRefName,baseRefName\`), and never next to another stacking integration, which is preferred when there is one: the config refuses two.A capability without levels is a yes or no. Several integrations can go in one call, up to its limit on questions. Record the answers as the entry's \`use\`, and leave out the capabilities answered "Not for this". If every capability is "Not for this", the integration isn't used: skip it instead.
 
-**Ask where each token is.** For every integration being added or already configured that has an API, ask where its API token is on this machine when \`access.api.configured\` is false and either the table lists adapters for it (they need the token) or neither its MCP server nor its CLI works here. Don't look for the token yourself (no searching the disk, no reading files or variables to see what's there); the user says where it is. {{askVerb}} with the options:
+**Ask where each token is.** For every integration being added or already configured that has an API, ask where its API token is on this machine only when \`access.api.configured\` is false, \`access.api.ready\` is false, and either the table lists API adapters for it (they need the token) or neither its MCP server nor its CLI works here. A signed-in CLI (\`access.cli.ready\`) or a connected MCP server is enough on its own: flows try those first and fall back to the API only when they fail, so don't ask for a token as a backup, and never for CLI adapters, which run through the CLI. Don't look for the token yourself (no searching the disk, no reading files or variables to see what's there); the user says where it is. {{askVerb}} with the options:
 
 - **An environment variable**: its name (the integration's usual ones, from the table, are a good default).
 - **A file**: the path of a file holding just the token.
 - **A command**: one that prints it, like a password manager's (\`op read op://<vault>/<item>/credential\`).
-- **None**: use its MCP server or CLI instead; adapters that need the token are skipped.
+- **None**: use its MCP server or CLI instead; API adapters are skipped.
 
 Record each answer: \`{{command:configure}} token <integration> --env <NAME>\` (or \`--file <path>\`, \`--command '<command>'\`; \`--clear\` forgets it). It saves where the token is, never the token, in the repo's git dir: per machine, shared by the repo's worktrees, never committed, and not part of the confirm table below. Never print a token, and never pass one to the command. An integration configured more than once on separate accounts (a second Linear workspace, searched read-only) needs a token per account: ask for each instance, and record it as \`token <integration>:<instance>\`; an instance without its own uses the integration's.
 

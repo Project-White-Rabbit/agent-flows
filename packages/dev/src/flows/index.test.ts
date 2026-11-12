@@ -27,6 +27,7 @@ describe("dev flows", () => {
       "skills/prototype/SKILL.md",
       "skills/ready/SKILL.md",
       "skills/ready-run/SKILL.md",
+      "skills/server/SKILL.md",
       "skills/start-work/SKILL.md",
       "skills/sync/SKILL.md",
       "skills/sync-local/SKILL.md",
@@ -49,6 +50,21 @@ describe("dev flows", () => {
         "whether the write landed anyway",
       )
     }
+  })
+
+  it("asks configure for a token only when an adapter needs the API, not for CLI adapters", () => {
+    const configure = files.find((f) => f.path === "skills/configure/SKILL.md")
+      ?.content as string
+    const row = (path: string) =>
+      configure.split("\n").find((line) => line.startsWith(`| \`${path}\``))
+    // GitHub's adapters all run through `gh`; Linear's call its API.
+    expect(row("integrations.github")).toContain("CLI adapters (`checks`")
+    expect(row("integrations.github")).not.toContain("API adapters")
+    expect(row("integrations.linear")).toContain("API adapters (`findIssue`")
+    expect(configure).toContain(
+      "either the table lists API adapters for it (they need the token)",
+    )
+    expect(configure).toContain("don't ask for a token as a backup")
   })
 
   it("runs commands from the installed plugin root", () => {

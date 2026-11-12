@@ -16,7 +16,12 @@ import {
   withoutLinkLines,
 } from "../config/branch-line.ts"
 import { plainDocumentLinks } from "../config/links.ts"
-import { DEFAULT_RANKS, ranksProblem } from "../config/sections/tickets.ts"
+import {
+  DEFAULT_RANKS,
+  DEFAULT_WORKSPACE_NAME,
+  ranksProblem,
+  WORKSPACE_NAME_PLACEHOLDER,
+} from "../config/sections/tickets.ts"
 import { worktreePaths } from "../integrations/worktree/spec.ts"
 import { repoRoot } from "./configure.ts"
 import {
@@ -54,6 +59,8 @@ export type Ticket = {
   priority?: Priority
   /** The branch name the tracker suggests for it. */
   branchName?: string | null
+  /** Its label by the kind of work, for `{category}` in a workspace name. */
+  category?: string | null
   /** `getIssue` found nothing. */
   missing?: boolean
 }
@@ -92,6 +99,8 @@ export type StartOptions = {
   otherRepository?: boolean
   byRank?: boolean
   ranks?: string[]
+  /** How a workspace on an issue is named (`tickets.workspaceName`). */
+  workspaceName?: string
 }
 
 export type Start =
@@ -109,6 +118,8 @@ export type Start =
       action: "start"
       id: string
       ticket: Ticket
+      /** The new workspace's name. */
+      name: string
       branch: string
       /** The branch came from the ticket's own `> Branch:` line. */
       exact: boolean
@@ -174,6 +185,74 @@ export function branchFor(ticket: Ticket): { branch: string; exact: boolean } {
   }
 }
 
+/** Characters that only separate a workspace name's parts. */
+const SEPARATORS = "[\\s/|:,.·_-]*"
+
+/** `text` cut to at most `limit` characters, at a word when one ends in reach. */
+export function cutAt(text: string, limit: number): string {
+  if (text.length <= limit) {
+    return text
+  }
+  // One character more, so a word that ends right at the limit stays whole.
+  const cut = text.slice(0, limit + 1)
+  const end = cut.lastIndexOf(" ")
+  const kept = end > 0 ? cut.slice(0, end) : text.slice(0, limit)
+  return kept.replace(/[\s/|:,.·_-]+$/, "")
+}
+
+/**
+ * A workspace's name for an issue: `template` with its id (`{id:short}`: its
+ * number), title, priority (the team's name for it, nothing for none), and
+ * category filled in, `{title:N}` and `{category:N}` cut to N characters. A
+ * part the issue doesn't have drops out with the separator before it, or the
+ * one after it when it comes first, and so do the brackets it leaves empty:
+ * `{priority}/{category}: {title}` with no category reads `P0: Fix it`.
+ */
+export function workspaceName(
+  ticket: Ticket,
+  template: string = DEFAULT_WORKSPACE_NAME,
+  ranks: string[] = DEFAULT_RANKS,
+): string {
+  const values: Record<string, string> = {
+    id: ticket.id,
+    title: ticket.title?.trim() ?? "",
+    priority:
+      ticket.priority && ticket.priority !== "none"
+        ? rankName(ticket.priority, ranks)
+        : "",
+    category: ticket.category?.trim() ?? "",
+  }
+  const fill = (key: string, form?: string): string => {
+    const value = values[key]
+    if (form === "short") {
+      return value.match(/(\d+)\D*$/)?.[1] ?? value
+    }
+    return form ? cutAt(value, Number(form)) : value
+  }
+  let name = template
+  for (const [token, key, form] of template.matchAll(
+    WORKSPACE_NAME_PLACEHOLDER,
+  )) {
+    const at = name.indexOf(token)
+    if (fill(key, form) || at < 0) {
+      continue
+    }
+    const first = /^[\s([]*$/.test(name.slice(0, at))
+    const part = token.replace(/[{}]/g, "\\$&")
+    name = name.replace(
+      new RegExp(first ? part + SEPARATORS : SEPARATORS + part),
+      "",
+    )
+  }
+  return name
+    .replace(WORKSPACE_NAME_PLACEHOLDER, (_, key: string, form?: string) =>
+      fill(key, form),
+    )
+    .replace(/\(\s*\)|\[\s*\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 export function rankName(
   priority: Priority | undefined,
   ranks: string[] = DEFAULT_RANKS,
@@ -219,6 +298,7 @@ export function planStart(
     action: "start",
     id: ticket.id,
     ticket,
+    name: workspaceName(ticket, options.workspaceName, options.ranks),
     ...branchFor(ticket),
     section,
     move: notStarted(ticket),
@@ -244,7 +324,7 @@ export function describeStart(start: Start, prompt?: string): string {
   }
   const section = start.section === null ? "none" : `"${start.section}"`
   const promptPart = prompt ? ` prompt=${prompt}` : ""
-  return `START ${start.id} "${start.ticket.title}" branch=${start.branch} exact=${start.exact ? "yes" : "no"} section=${section} state=${state}${promptPart}`
+  return `START ${start.id} "${start.ticket.title}" name="${start.name}" branch=${start.branch} exact=${start.exact ? "yes" : "no"} section=${section} state=${state}${promptPart}`
 }
 
 /** Work on an issue, or on untracked work, in this workspace instead of a new one. */
@@ -300,7 +380,7 @@ export function planReuse(
   return {
     action: "reuse",
     ticket,
-    name: `${ticket.id}: ${ticket.title}`,
+    name: start.name,
     from,
     branch: reuseBranch(ticket, from),
     section: options.byRank ? start.section : options.section,
@@ -525,6 +605,7 @@ function placement(args: Args): StartOptions {
     section: args.has("no-section") ? null : args.get("section"),
     byRank: args.has("section-by-rank"),
     ranks: ranksOf(args),
+    workspaceName: readRules(repoRoot()).workspaceName,
   }
 }
 
@@ -644,12 +725,17 @@ const USAGE = `Usage: work.ts <command>
                   Decide each ticket in <file> ({"tickets": [...], "workspaces":
                   [...]}) against the open workspaces and this repo's git
                   worktrees. Writes nothing to any tracker. Prints one line each:
-                    START <ID> "<title>" branch=<branch> exact=<yes|no>
+                    START <ID> "<title>" name="<name>" branch=<branch> exact=<yes|no>
                           section=<"name"|none> state=<move|keep> prompt=<file>
                     EXISTS <ID> workspace="<name>" branch=<branch>
                           branch-line=<add|keep> state=<move|keep>
                     SKIP <ID> <not found|done|canceled>
-                  and writes each START's agent prompt to <file>. Without a
+                  and writes each START's agent prompt to <file>. <name> is
+                  the config's tickets.workspaceName filled in (default
+                  "{id}: {title}"; also {priority}, {category} (a
+                  ticket's "category" in <file>), {id:short} (the id's
+                  number), and {title:N} and {category:N} (cut to N
+                  characters, at a word when one ends in reach)). Without a
                   placement flag, a workspace goes in the section of the one
                   this session runs in, or none; with --workspaces-repository (the
                   workspaces open in another repository), in none.

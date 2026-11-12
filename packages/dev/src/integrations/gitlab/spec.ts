@@ -1,5 +1,6 @@
 import type { IntegrationSpec } from "../../config/types.ts"
 import { HOST, SLUG_PATH } from "../patterns.ts"
+import { remoteEvidence, teamRemote } from "../remote.ts"
 import { checks } from "./adapter.ts"
 
 /**
@@ -101,7 +102,8 @@ export const gitlab: IntegrationSpec = {
     },
   ],
   multiple: true,
-  lookup: "`glab repo view`, or the GitLab MCP",
+  lookup:
+    "`glab repo view` (for a fork, the project it was forked from: the team's, not a person's fork), or the GitLab MCP",
   access: {
     mcp: { server: "GitLab" },
     cli: { bin: "glab", auth: ["glab", "auth", "status"] },
@@ -218,16 +220,15 @@ export const gitlab: IntegrationSpec = {
   },
   adapters: { checks },
   detect(ctx) {
-    const remote = ctx.git(["remote", "get-url", "origin"])
-    const parsed = remote ? parseGitlabRemote(remote) : undefined
-    if (!parsed) {
+    const found = teamRemote(ctx, parseGitlabRemote)
+    if (!found) {
       return undefined
     }
-    const { alias, ...values } = parsed
-    const evidence = [`origin remote ${remote}`]
+    const { alias, ...values } = found.parsed
+    const evidence = [remoteEvidence(found)]
     if (alias) {
       evidence.push(
-        `origin uses the SSH alias ${alias}: set host if it points at a self-managed GitLab`,
+        `${found.remote} uses the SSH alias ${alias}: set host if it points at a self-managed GitLab`,
       )
     }
     return { values, evidence }

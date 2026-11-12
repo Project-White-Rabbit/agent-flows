@@ -13,7 +13,8 @@ export const neon: IntegrationSpec = {
     },
     {
       key: "parentBranch",
-      description: "Branch new dev branches fork from",
+      description:
+        "Branch new dev branches fork from: the team's shared one, never a person's own dev branch",
       example: "main",
     },
     { key: "database", description: "Database name", example: "neondb" },

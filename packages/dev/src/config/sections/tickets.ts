@@ -42,6 +42,65 @@ export function ranksProblem(ranks: string[]): string | undefined {
     : undefined
 }
 
+/**
+ * The placeholders a `workspaceName` template fills in, and the forms each
+ * takes after a colon: `short` (the id's number), or a length to cut to.
+ */
+export const WORKSPACE_NAME_PLACEHOLDERS = {
+  id: ["short"],
+  title: ["N"],
+  priority: [],
+  category: ["N"],
+} as const satisfies Record<string, readonly ("short" | "N")[]>
+
+/** A placeholder in a `workspaceName` template: its name, then its form. */
+export const WORKSPACE_NAME_PLACEHOLDER =
+  /\{(id|title|priority|category)(?::(short|[1-9]\d*))?\}/g
+
+/** The placeholders as a list for messages: `{id}`, `{id:short}`, … */
+function placeholderList(): string {
+  return Object.entries(WORKSPACE_NAME_PLACEHOLDERS)
+    .flatMap(([name, forms]) => [
+      `\`{${name}}\``,
+      ...forms.map((f) => `\`{${name}:${f}}\``),
+    ])
+    .join(", ")
+}
+
+/** How start-work names a workspace when `tickets.workspaceName` doesn't say. */
+export const DEFAULT_WORKSPACE_NAME = "{id}: {title}"
+
+/**
+ * What's wrong with a workspace name template, or undefined: it names the
+ * issue with `{id}` or `{title}` and uses only the known placeholders.
+ */
+export function workspaceNameProblem(template: string): string | undefined {
+  const used = [...template.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1])
+  const known = (text: string) => {
+    const [name, form] = text.split(":", 2) as [string, string | undefined]
+    const forms: readonly string[] | undefined =
+      WORKSPACE_NAME_PLACEHOLDERS[
+        name as keyof typeof WORKSPACE_NAME_PLACEHOLDERS
+      ]
+    if (!forms) {
+      return false
+    }
+    return (
+      form === undefined ||
+      (form === "short" && forms.includes("short")) ||
+      (/^[1-9]\d*$/.test(form) && forms.includes("N"))
+    )
+  }
+  const unknown = used.find((text) => !known(text))
+  if (unknown !== undefined) {
+    return `has an unknown placeholder \`{${unknown}}\` (use ${placeholderList()}, where N is a length)`
+  }
+  const names = used.map((text) => text.split(":")[0])
+  return !names.includes("id") && !names.includes("title")
+    ? "must name the issue with `{id}` or `{title}`"
+    : undefined
+}
+
 /** A tracker's name for a priority (`High (2)`, `Highest`, `No priority`), on its scale. */
 function trackerPriority(
   text: string,
@@ -180,6 +239,13 @@ export const tickets: SectionSpec = {
       check: (value: FieldValue) => ranksProblem(value as string[]),
     },
     {
+      key: "workspaceName",
+      description:
+        "How start-work names the workspace it opens on an issue (and the one `--reuse` renames), with `{id}` for the issue's id (`{id:short}` its number alone), `{title}` for its title (`{title:40}` cut at a word to at most 40 characters; `{category:N}` likewise), `{priority}` for its priority by the team's name for it (`ranks`), and `{category}` for its label by the kind of work (from the tracker's `values.labels`); default `{id}: {title}`. A priority or category the issue doesn't have drops out with the separator beside it. Work with no issue is still named after its title",
+      example: "{priority}/{category}: {title}",
+      check: (value: FieldValue) => workspaceNameProblem(value as string),
+    },
+    {
       key: "estimateScale",
       type: "number[]",
       description:
@@ -194,6 +260,16 @@ export const tickets: SectionSpec = {
       example: true,
     },
     {
+      key: "subIssues",
+      description:
+        "What create-tickets (and start-work, which files through it) does with an item that matching finds is part of a larger open issue: `auto` files it as a sub-issue of that issue (the default), `ask` asks at the confirmation, and `never` files it on its own. A parent the notes name is kept either way, and sync, which runs unattended, files under a larger issue unless this is `never`",
+      example: "never",
+      pattern: {
+        regex: /^(auto|ask|never)$/,
+        hint: "`auto`, `ask`, or `never`",
+      },
+    },
+    {
       key: "assignOnSync",
       type: "boolean",
       description:
@@ -203,12 +279,12 @@ export const tickets: SectionSpec = {
     {
       key: "timezone",
       description:
-        'IANA time zone for what "today" is when create-tickets checks due dates and dates planning sections (default: this machine\'s)',
+        "IANA time zone the team plans in, for what \"today\" is when create-tickets checks due dates and dates planning sections (default: this machine's). Set it only for a team that works in one zone, never from your own machine's",
       example: "America/Los_Angeles",
       check: timeZoneProblem,
     },
   ],
   lookup:
-    "Leave it out unless the repo's agent instructions say how the team ranks and files work: a planning document per cycle, a mark for customer blockers, due dates required at some priorities, its own names for the priorities (P0, P1, …, read off the doc that maps them to the tracker's), parents ranked by their sub-issues, the estimates the team sizes work in",
+    "Leave it out unless the repo's agent instructions say how the team ranks and files work: a planning document per cycle, a mark for customer blockers, due dates required at some priorities, its own names for the priorities (P0, P1, …, read off the doc that maps them to the tracker's), parents ranked by their sub-issues, whether work goes under a larger issue, the estimates the team sizes work in",
   detect: detectTickets,
 }

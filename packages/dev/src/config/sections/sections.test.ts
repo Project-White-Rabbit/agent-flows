@@ -4,10 +4,15 @@ import { checkConfig, exampleConfig } from "../config.ts"
 import { toInstanceName, uniqueInstanceNames } from "../instances.ts"
 import type { DetectContext, FieldSpec } from "../types.ts"
 import { SECTIONS } from "./index.ts"
-import { detectPreview } from "./preview.ts"
 import { detectPythonReady, detectReady, ready } from "./ready.ts"
+import { detectServer } from "./server.ts"
 import { BITFAB_DEV_FORMAT, sync } from "./sync.ts"
-import { ranksFromDoc, ranksProblem, tickets } from "./tickets.ts"
+import {
+  ranksFromDoc,
+  ranksProblem,
+  tickets,
+  workspaceNameProblem,
+} from "./tickets.ts"
 
 function typeOf(value: FieldSpec["example"]): string {
   if (Array.isArray(value)) {
@@ -52,8 +57,10 @@ describe("section registry", () => {
     (_path, spec) => {
       const keys = spec.fields.map((f) => f.key)
       expect(new Set(keys).size).toBe(keys.length)
-      // Settings that all have defaults (sync's format) may leave every field out.
-      if ("provides" in spec || spec.required) {
+      // Settings that all have defaults (sync's format) may leave every field
+      // out, and so may an integration whose values each machine works out.
+      const machine = "provides" in spec && "machine" in spec
+      if (("provides" in spec && !machine) || spec.required) {
         expect(spec.fields.some((f) => f.required)).toBe(true)
       }
       for (const field of spec.fields) {
@@ -952,10 +959,50 @@ describe("ticket ranks", () => {
   })
 })
 
-describe("preview detection", () => {
+describe("workspace name template", () => {
+  it("names the issue with {id} or {title} and no other placeholder", () => {
+    expect(workspaceNameProblem("{id}: {title}")).toBe(undefined)
+    expect(workspaceNameProblem("{title}")).toBe(undefined)
+    expect(workspaceNameProblem("{priority}/{category}: {title}")).toBe(
+      undefined,
+    )
+    expect(workspaceNameProblem("{id:short} {category:4}: {title:40}")).toBe(
+      undefined,
+    )
+    expect(workspaceNameProblem("{title:short}")).toBe(
+      "has an unknown placeholder `{title:short}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, where N is a length)",
+    )
+    expect(workspaceNameProblem("{id:0} {title}")).toMatch(
+      /^has an unknown placeholder `\{id:0\}`/,
+    )
+    expect(workspaceNameProblem("{category:4}")).toBe(
+      "must name the issue with `{id}` or `{title}`",
+    )
+    expect(workspaceNameProblem("{priority}/{category}")).toBe(
+      "must name the issue with `{id}` or `{title}`",
+    )
+    expect(workspaceNameProblem("Work")).toBe(
+      "must name the issue with `{id}` or `{title}`",
+    )
+    expect(workspaceNameProblem("{id} {name}")).toBe(
+      "has an unknown placeholder `{name}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, where N is a length)",
+    )
+    expect(
+      checkConfig({
+        version: 2,
+        repo: { baseBranch: "main" },
+        tickets: { workspaceName: "{key}" },
+      }).issues,
+    ).toEqual([
+      "tickets.workspaceName has an unknown placeholder `{key}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, where N is a length)",
+    ])
+  })
+})
+
+describe("dev server detection", () => {
   it("proposes the root dev script, through the repo's runner", () => {
     expect(
-      detectPreview(
+      detectServer(
         checkout({
           "package.json": { scripts: { dev: "next dev", start: "next start" } },
           "pnpm-lock.yaml": "",
@@ -966,7 +1013,7 @@ describe("preview detection", () => {
 
   it("skips a production start and a script that deploys", () => {
     expect(
-      detectPreview(
+      detectServer(
         checkout({
           "package.json": {
             scripts: { serve: "vercel deploy", start: "next start" },
@@ -975,13 +1022,12 @@ describe("preview detection", () => {
       ),
     ).toBeUndefined()
     expect(
-      detectPreview(
-        checkout({ "package.json": { scripts: { start: "vite" } } }),
-      )?.values,
+      detectServer(checkout({ "package.json": { scripts: { start: "vite" } } }))
+        ?.values,
     ).toEqual({ command: "npm run start" })
   })
 
   it("proposes nothing without a manifest", () => {
-    expect(detectPreview(checkout({ "README.md": "" }))).toBeUndefined()
+    expect(detectServer(checkout({ "README.md": "" }))).toBeUndefined()
   })
 })
