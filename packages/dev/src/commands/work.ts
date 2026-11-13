@@ -74,6 +74,10 @@ export type Assigned = {
   description?: string | null
   priority?: Priority
   dueDate?: string | null
+  /** When it was filed: an ISO date or timestamp. */
+  createdAt?: string | null
+  /** Who filed it, by name. */
+  creator?: string | null
   openSubIssues?: boolean
   pullRequests?: string[]
   blocks?: boolean
@@ -565,7 +569,9 @@ export function describeTicket(
   const state = issue.state ? ` [${issue.state}]` : ""
   const blocker = isBlocker(issue, mark) ? " blocker" : ""
   const blocks = issue.blocks ? " blocks-other-work" : ""
-  return `TICKET ${issue.id} "${rankName(issue.priority, ranks)}" due=${issue.dueDate ?? "none"}${state}${blocker}${blocks} "${issue.title}" ${issue.url}`
+  const filed = issue.createdAt?.slice(0, 10) || "unknown"
+  const by = issue.creator ? ` by="${issue.creator}"` : ""
+  return `TICKET ${issue.id} "${rankName(issue.priority, ranks)}" due=${issue.dueDate ?? "none"} filed=${filed}${by}${state}${blocker}${blocks} "${issue.title}" ${issue.url}`
 }
 
 const SWITCHES = new Set([
@@ -763,8 +769,9 @@ const USAGE = `Usage: work.ts <command>
                   with no work started yet, in the order to pick them up
                   (by priority, then the config's tickets.blockerMark in the
                   title, then due date, then blocking other work):
-                    TICKET <ID> "<rank>" due=<date|none> [<state>] [blocker]
-                           [blocks-other-work] "<title>" <url>
+                    TICKET <ID> "<rank>" due=<date|none>
+                           filed=<date|unknown> [by="<name>"] [<state>]
+                           [blocker] [blocks-other-work] "<title>" <url>
                   then COUNT <n> (printed) and TOTAL <n> (before --priority
                   and --limit).
 

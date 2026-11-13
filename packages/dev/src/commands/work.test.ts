@@ -282,7 +282,28 @@ describe("queue", () => {
         ["Urgent", "P0", "P1", "P2", "Audit"],
       ),
     ).toBe(
-      'TICKET ENG-1 "Urgent" due=none [Todo] blocks-other-work "ENG-1" https://tracker/ENG-1',
+      'TICKET ENG-1 "Urgent" due=none filed=unknown [Todo] blocks-other-work "ENG-1" https://tracker/ENG-1',
+    )
+  })
+
+  it("says when a ticket was filed and who filed it", () => {
+    expect(
+      describeTicket(
+        assigned("ENG-1", {
+          createdAt: "2026-10-30T14:02:11.000Z",
+          creator: "Sam Lee",
+          dueDate: "2026-11-20",
+        }),
+      ),
+    ).toBe(
+      'TICKET ENG-1 "Medium" due=2026-11-20 filed=2026-10-30 by="Sam Lee" "ENG-1" https://tracker/ENG-1',
+    )
+    // A date with no author still shows; an author with no date does too.
+    expect(
+      describeTicket(assigned("ENG-1", { createdAt: "2026-10-30" })),
+    ).toContain(" filed=2026-10-30 ")
+    expect(describeTicket(assigned("ENG-1", { creator: "Sam" }))).toContain(
+      ' filed=unknown by="Sam" ',
     )
   })
 })
@@ -513,7 +534,7 @@ describe("work.ts", () => {
         { cwd: dir, encoding: "utf8" },
       )
     expect(cli(["list", "--input", "issues.json", "--priority", "p1"])).toBe(
-      'TICKET ENG-2 "P1" due=none "ENG-2" https://tracker/ENG-2\nCOUNT 1\nTOTAL 2\n',
+      'TICKET ENG-2 "P1" due=none filed=unknown "ENG-2" https://tracker/ENG-2\nCOUNT 1\nTOTAL 2\n',
     )
     expect(
       cli(["plan", "--input", "start.json", "--section-by-rank"]),

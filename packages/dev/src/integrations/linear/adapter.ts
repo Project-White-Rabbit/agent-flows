@@ -75,7 +75,9 @@ query AssignedIssues($filter: IssueFilter!, $after: String) {
   viewer {
     assignedIssues(first: 100, after: $after, filter: $filter) {
       nodes {
-        identifier title url description priority dueDate
+        identifier title url description priority dueDate createdAt
+        creator { name }
+        botActor { name }
         state { name type }
         children { nodes { state { type } } }
         attachments { nodes { url } }
@@ -280,6 +282,9 @@ type AssignedNode = {
   description?: string | null
   priority: number
   dueDate?: string | null
+  createdAt?: string | null
+  creator?: { name: string } | null
+  botActor?: { name?: string | null } | null
   state: { name: string; type: string }
   children?: { nodes: { state: { type: string } }[] }
   attachments?: { nodes: { url: string }[] }
@@ -436,6 +441,9 @@ export const assignedIssues: Adapter = {
         stage: node.state.type === "started" ? "in progress" : "todo",
         priority: PRIORITIES[node.priority] ?? "none",
         dueDate: node.dueDate ?? null,
+        createdAt: node.createdAt ?? null,
+        // An issue an integration filed has a bot, not a person, as its author.
+        creator: node.creator?.name ?? node.botActor?.name ?? null,
         openSubIssues: (node.children?.nodes ?? []).some((c) =>
           open(c.state.type),
         ),
