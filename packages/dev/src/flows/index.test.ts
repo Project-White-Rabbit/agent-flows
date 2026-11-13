@@ -786,25 +786,31 @@ describe("dev flows", () => {
     )
   })
 
-  it("shows a prototype's mockup wherever the session can, never in the working tree", () => {
+  it("shows a prototype's mockup wherever the session can, outside the working tree unless kept", () => {
     const skill =
       files.find((f) => f.path === "skills/prototype/SKILL.md")?.content ?? ""
-    expect(skill).toContain('configure.ts" get prototype.style --optional`')
+    expect(skill).toContain(
+      'configure.ts" get prototype.style prototype.show --optional`',
+    )
+    expect(skill).toContain('`["page", "design", "browser"]` when it\'s `null`')
+    expect(skill).toContain("A place `<show>` leaves out is never tried.")
     expect(skill).toContain('prototype.ts" dir`')
     expect(skill).toContain('prototype.ts" serve`')
     expect(skill).toContain('prototype.ts" stop`')
+    expect(skill).toContain("**Keep it.**")
+    expect(skill).toContain("prints `kept` true")
     expect(skill).toContain("run before --flow prototype --mode <mode>")
-    expect(skill).toContain("**Never the working tree.**")
+    expect(skill).toContain("**Never the working tree, unless kept.**")
     const show = skill.slice(
       skill.indexOf("## 3. Show it"),
       skill.indexOf("## 4. Report"),
     )
     // A hosted page first, then the design tool, then a browser.
-    expect(show.indexOf("**A page the host publishes.**")).toBeLessThan(
-      show.indexOf("**The team's design tool.**"),
+    expect(show.indexOf("**`page`: a page the host publishes.**")).toBeLessThan(
+      show.indexOf("**`design`: the team's design tool.**"),
     )
-    expect(show.indexOf("**The team's design tool.**")).toBeLessThan(
-      show.indexOf("**A browser.**"),
+    expect(show.indexOf("**`design`: the team's design tool.**")).toBeLessThan(
+      show.indexOf("**`browser`: a browser.**"),
     )
     expect(skill).toContain('configure.ts" integrations design --optional`')
     expect(skill).toContain("`styleGuide` op")

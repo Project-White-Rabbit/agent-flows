@@ -5,6 +5,7 @@ import path from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   indexPage,
+  pagesDir,
   resolveRequest,
   serveStatic,
   urlFromLog,
@@ -92,5 +93,29 @@ describe("urlFromLog", () => {
   it("is undefined before the server has printed it", () => {
     expect(urlFromLog("")).toBeUndefined()
     expect(urlFromLog("Error: listen EADDRINUSE")).toBeUndefined()
+  })
+})
+
+describe("pagesDir", () => {
+  it("is the scratch folder by default", () => {
+    for (const dir of [undefined, null, false, ""]) {
+      expect(
+        pagesDir("/repo", "/repo/.git/agent-flows/prototype", dir),
+      ).toEqual({ dir: "/repo/.git/agent-flows/prototype/pages", kept: false })
+    }
+  })
+
+  it("is prototype.dir inside the checkout when set", () => {
+    expect(pagesDir("/repo", "/state", "prototypes")).toEqual({
+      dir: "/repo/prototypes",
+      kept: true,
+    })
+  })
+
+  it("refuses a folder outside the checkout", () => {
+    expect(() => pagesDir("/repo", "/state", "../elsewhere")).toThrow(
+      "inside the repo",
+    )
+    expect(() => pagesDir("/repo", "/state", ".")).toThrow("inside the repo")
   })
 })

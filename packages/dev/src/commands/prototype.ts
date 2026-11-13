@@ -1,6 +1,7 @@
 // The mechanical half of prototype, for a session that shows its mockups in a
-// browser: a scratch folder in the worktree's own git dir for the pages (never
-// the working tree, so a mockup can't end up committed), served over HTTP so a
+// browser: a folder for the pages (by default a scratch one in the worktree's
+// own git dir, so a mockup can't end up committed; `prototype.dir` when the
+// team keeps its mockups in the repo), served over HTTP so a
 // browser (and the agent's browser tools, which often refuse file:// pages)
 // can open a mockup and reload it after each edit. What the mockup shows, and
 // where the person sees it, stays in the skill.
@@ -16,7 +17,8 @@ import fs from "node:fs"
 import http from "node:http"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
-import { repoRoot } from "./configure.ts"
+import { getAt } from "../config/config.ts"
+import { loadConfig, repoRoot } from "./configure.ts"
 import {
   isMain,
   parseFlags,
@@ -30,6 +32,28 @@ import {
 const TIMEOUT = 15
 /** Minutes with no request before the static server stops itself. */
 const IDLE_MINUTES = 240
+
+/**
+ * The folder a worktree's mockup pages go in: `prototype.dir` inside the
+ * checkout when the team keeps its mockups (`kept`), else the scratch folder
+ * in the worktree's git dir. Undefined `dir` (or false) is the default.
+ */
+export function pagesDir(
+  root: string,
+  state: string,
+  dir: unknown,
+): { dir: string; kept: boolean } {
+  if (typeof dir !== "string" || !dir) {
+    return { dir: path.join(state, "pages"), kept: false }
+  }
+  const resolved = path.resolve(root, dir)
+  if (!resolved.startsWith(`${root}${path.sep}`)) {
+    throw new UsageError(
+      `prototype.dir must be a folder inside the repo: ${dir}`,
+    )
+  }
+  return { dir: resolved, kept: true }
+}
 
 /** The static server prototype started in a worktree, as recorded. */
 type ServerState = {
@@ -292,9 +316,9 @@ async function start(state: string, dir: string) {
 
 const USAGE = `Usage: prototype.ts <subcommand>
 
-  dir                  Print the scratch folder for this worktree's mockup
-                       pages (in its git dir, never the working tree),
-                       creating it
+  dir                  Print the folder for this worktree's mockup pages,
+                       creating it: prototype.dir when the config sets one
+                       (kept: true), else a scratch folder in its git dir
   serve                Serve that folder on localhost, starting the server in
                        the background when this worktree has none running.
                        Prints its url, dir, and status. Pages are never cached
@@ -332,10 +356,14 @@ export async function main(argv: string[]): Promise<void> {
       printJson(await stop(state))
       return
     }
-    const dir = path.join(state, "pages")
+    const { dir, kept } = pagesDir(
+      root,
+      state,
+      getAt(loadConfig(root).config ?? {}, "prototype.dir"),
+    )
     fs.mkdirSync(dir, { recursive: true })
     if (command === "dir") {
-      printJson({ dir })
+      printJson({ dir, kept })
       return
     }
     const running = readState(state)
@@ -350,6 +378,7 @@ export async function main(argv: string[]): Promise<void> {
         status: "running",
         url: running.url,
         dir,
+        kept,
         pid: running.pid,
         log: running.log,
       })
@@ -358,7 +387,7 @@ export async function main(argv: string[]): Promise<void> {
     // It stopped answering, or there's none: start afresh.
     await stop(state)
     const result = await start(state, dir)
-    printJson({ ...result, dir })
+    printJson({ ...result, dir, kept })
     if (result.status !== "started") {
       process.exitCode = 1
     }
