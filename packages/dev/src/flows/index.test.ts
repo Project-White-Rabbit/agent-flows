@@ -713,6 +713,24 @@ describe("dev flows", () => {
     }
   })
 
+  it("reports hooks only when one ran", () => {
+    const flows = files.filter((f) =>
+      f.content.includes("**Run the repo's hooks around this command.**"),
+    )
+    expect(flows.length).toBeGreaterThan(0)
+    for (const file of flows) {
+      expect(file.content, file.path).toContain(
+        "When `ran` lists any hook, say in the report which ran at each point",
+      )
+      expect(file.content, file.path).toContain(
+        "when no point ran one, leave hooks out of the report",
+      )
+      expect(file.content, file.path).not.toContain(
+        "Say in the report which hooks ran at each point",
+      )
+    }
+  })
+
   it("passes the pull request to ready's hooks, and runs beforeFixPush between a fix batch's commit and its push", () => {
     const main =
       files.find((f) => f.path === "skills/ready/SKILL.md")?.content ?? ""
