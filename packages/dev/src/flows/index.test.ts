@@ -24,6 +24,7 @@ describe("dev flows", () => {
       "skills/finish/SKILL.md",
       "skills/finish-run/SKILL.md",
       "skills/preview/SKILL.md",
+      "skills/prototype/SKILL.md",
       "skills/ready/SKILL.md",
       "skills/ready-run/SKILL.md",
       "skills/server/SKILL.md",
@@ -127,6 +128,7 @@ describe("dev flows", () => {
         "codeReview",
         "deployments",
         "browser",
+        "design",
       ].flatMap((id) => Object.keys(findCapability(id)?.ops ?? {})),
     )
     const flows = files.filter((f) => !f.path.includes("configure"))
@@ -155,6 +157,8 @@ describe("dev flows", () => {
         "mergeCommit",
         "deployment",
         "openUrl",
+        "styleGuide",
+        "showMockup",
       ]),
     )
     for (const op of named) {
@@ -798,6 +802,40 @@ describe("dev flows", () => {
     expect(skill.indexOf("## 4. The repo's steps on the page")).toBeGreaterThan(
       skill.indexOf("## 3. Open it"),
     )
+  })
+
+  it("shows a prototype's mockup wherever the session can, outside the working tree unless kept", () => {
+    const skill =
+      files.find((f) => f.path === "skills/prototype/SKILL.md")?.content ?? ""
+    expect(skill).toContain(
+      'configure.ts" get prototype.style prototype.show --optional`',
+    )
+    expect(skill).toContain('`["page", "design", "browser"]` when it\'s `null`')
+    expect(skill).toContain("A place `<show>` leaves out is never tried.")
+    expect(skill).toContain('prototype.ts" dir`')
+    expect(skill).toContain('prototype.ts" serve`')
+    expect(skill).toContain('prototype.ts" stop`')
+    expect(skill).toContain("**Keep it.**")
+    expect(skill).toContain("prints `kept` true")
+    expect(skill).toContain("run before --flow prototype --mode <mode>")
+    expect(skill).toContain("**Never the working tree, unless kept.**")
+    const show = skill.slice(
+      skill.indexOf("## 3. Show it"),
+      skill.indexOf("## 4. Report"),
+    )
+    // A hosted page first, then the design tool, then a browser.
+    expect(show.indexOf("**`page`: a page the host publishes.**")).toBeLessThan(
+      show.indexOf("**`design`: the team's design tool.**"),
+    )
+    expect(show.indexOf("**`design`: the team's design tool.**")).toBeLessThan(
+      show.indexOf("**`browser`: a browser.**"),
+    )
+    expect(skill).toContain('configure.ts" integrations design --optional`')
+    expect(skill).toContain("`styleGuide` op")
+    expect(skill).not.toMatch(/figma/i)
+    const tool = skill.slice(skill.indexOf("## 5. Put it in the design tool"))
+    expect(tool).toContain("**Run only when mode is `design`.**")
+    expect(tool).toContain("at level `write`")
   })
 
   it("routes configure through confirm before writing", () => {
