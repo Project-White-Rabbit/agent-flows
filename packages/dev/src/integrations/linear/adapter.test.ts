@@ -257,6 +257,9 @@ describe("linear assignedIssues adapter", () => {
       description: "Body",
       priority: 0,
       dueDate: null,
+      createdAt: "2026-10-30T14:02:11.000Z",
+      creator: { name: "Sam Lee" },
+      botActor: null,
       state: { name: "Todo", type: "unstarted" },
       children: { nodes: [] },
       attachments: { nodes: [] },
@@ -285,6 +288,8 @@ describe("linear assignedIssues adapter", () => {
       page(
         [
           node("ENG-2", {
+            creator: null,
+            botActor: { name: "Sentry" },
             state: { name: "In Progress", type: "started" },
             attachments: { nodes: [{ url: "https://g/acme/web/pull/4" }] },
             relations: {
@@ -320,6 +325,8 @@ describe("linear assignedIssues adapter", () => {
         stage: "todo",
         priority: "high",
         dueDate: "2026-11-01",
+        createdAt: "2026-10-30T14:02:11.000Z",
+        creator: "Sam Lee",
         openSubIssues: true,
         pullRequests: [],
         blocks: false,
@@ -329,6 +336,7 @@ describe("linear assignedIssues adapter", () => {
         id: "ENG-2",
         stage: "in progress",
         priority: "none",
+        creator: "Sentry",
         openSubIssues: false,
         pullRequests: ["https://g/acme/web/pull/4"],
         blocks: true,

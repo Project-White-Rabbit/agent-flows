@@ -13,7 +13,7 @@ const RECENT_JQL =
 const ASSIGNED_JQL =
   "`project = {projectKey} AND assignee = currentUser() AND statusCategory != Done`"
 const ASSIGNED_FIELDS =
-  "`summary`, `status`, `description`, `priority`, `duedate`, `subtasks`, and `issuelinks` (it blocks another issue through a `Blocks` link whose outward issue isn't done)"
+  "`summary`, `status`, `description`, `priority`, `duedate`, `created` (when it was filed), `creator` (who filed it: its `displayName`), `subtasks`, and `issuelinks` (it blocks another issue through a `Blocks` link whose outward issue isn't done)"
 // Keep only issues anchored to the branch, however the line was written.
 const BRANCH_MATCH =
   "Keep only issues whose description has a `> Branch:` line that is `<branch>` once backticks are dropped and any link is read as its text"
