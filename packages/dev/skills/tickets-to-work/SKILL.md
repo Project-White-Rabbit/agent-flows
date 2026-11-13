@@ -62,7 +62,7 @@ An issue with open sub-issues is left out: its sub-issues are the work.
    ```json
    {
      "issues": [
-       { "id": "<ID>", "title": "...", "url": "...", "state": "<workflow state name>", "stage": "todo", "description": "...", "priority": "high", "dueDate": "<YYYY-MM-DD, or null>", "openSubIssues": false, "pullRequests": [], "blocks": false }
+       { "id": "<ID>", "title": "...", "url": "...", "state": "<workflow state name>", "stage": "todo", "description": "...", "priority": "high", "dueDate": "<YYYY-MM-DD, or null>", "createdAt": "<when it was filed>", "creator": "<who filed it, or null>", "openSubIssues": false, "pullRequests": [], "blocks": false }
      ],
      "workspaces": [
        { "integration": "<integration or instance>", "id": "...", "name": "...", "branch": "...", "section": "<section, or null>", "current": false }
@@ -82,7 +82,7 @@ When `COUNT` is 0, say there is nothing waiting and stop; when `TOTAL` is above 
 
 ## 2. Decide each issue
 
-Take the issues in the printed order, one at a time. Each gets its own question, asked with `AskUserQuestion` as one question per call: never several issues in one question, never an issue decided for the person, and never a question skipped because the answer looks obvious. The question names the issue: its id and title, then its priority, its due date (saying when it's past), its state, whether it stops a customer (`blocker`) or blocks other work, and its link. It offers all four options, Stop included, so the person can end the run from any issue:
+Take the issues in the printed order, one at a time. Each gets its own question, asked with `AskUserQuestion` as one question per call: never several issues in one question, never an issue decided for the person, and never a question skipped because the answer looks obvious. The question names the issue: its id and title, then its priority, its due date (saying when it's past), when it was filed and who filed it (the `TICKET` line's `filed` and `by`; leave out what it doesn't say), its state, whether it stops a customer (`blocker`) or blocks other work, and its link. It offers all four options, Stop included, so the person can end the run from any issue:
 
 - **Start:** open a workspace with a coding agent on it and move the issue to in progress.
 - **Skip:** leave it and move on.
