@@ -386,7 +386,7 @@ export const ready: SectionSpec = {
       key: "requireChecks",
       type: "boolean",
       description:
-        "Never take a commit with no CI checks (or only ignored or optional ones) as having no CI: ready and finish wait until one reports, and a pass with none times out instead of passing (default false: none within 3 minutes reads as no CI)",
+        "Never take a commit with no CI checks (or only ignored or optional ones) as having no CI: ready and finish wait until one reports, and a pass with none times out instead of passing (default false: none within 3 minutes, or 30 seconds in a repo with no CI config, reads as no CI)",
       example: true,
     },
     {
