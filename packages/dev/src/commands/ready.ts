@@ -45,6 +45,63 @@ export const DEFAULT_INTERVAL = 30
  */
 export const NO_CHECKS_GRACE = 180
 
+/**
+ * The same, for a repo with no CI config at all: one poll, so a status an
+ * outside app posts a moment after the push still counts.
+ */
+export const NO_CI_CONFIG_GRACE = DEFAULT_INTERVAL
+
+/**
+ * Files and directories whose presence means something runs checks on a
+ * pushed commit: CI systems, and apps that post a status without a workflow.
+ */
+const CI_CONFIG_FILES = [
+  ".gitlab-ci.yml",
+  ".circleci",
+  ".travis.yml",
+  "azure-pipelines.yml",
+  ".azure-pipelines",
+  "bitbucket-pipelines.yml",
+  ".buildkite",
+  "buildkite.yml",
+  "Jenkinsfile",
+  ".drone.yml",
+  ".woodpecker.yml",
+  ".woodpecker",
+  "appveyor.yml",
+  ".appveyor.yml",
+  ".semaphore",
+  "cloudbuild.yaml",
+  "cloudbuild.yml",
+  "buildspec.yml",
+  "codemagic.yaml",
+  "vercel.json",
+  "netlify.toml",
+]
+
+/** Directories whose YAML files are workflows. */
+const CI_WORKFLOW_DIRS = [
+  ".github/workflows",
+  ".gitea/workflows",
+  ".forgejo/workflows",
+]
+
+/** Whether the repo at `root` has any CI config, so a pushed commit may get checks. */
+export function hasCiConfig(root: string): boolean {
+  if (CI_CONFIG_FILES.some((file) => fs.existsSync(path.join(root, file)))) {
+    return true
+  }
+  return CI_WORKFLOW_DIRS.some((dir) => {
+    try {
+      return fs
+        .readdirSync(path.join(root, dir))
+        .some((file) => /\.ya?ml$/i.test(file))
+    } catch {
+      return false
+    }
+  })
+}
+
 /** Passes kept per branch; older ones only matter to the stall guard. */
 const KEPT_PASSES = 20
 
@@ -318,6 +375,8 @@ export type CiSettings = {
   requireChecks: boolean
   /** Check name patterns that only report others' results, so they're never fixed themselves. */
   rollupChecks: string[]
+  /** The repo has no CI config, so an empty check set reads as no CI after one poll. */
+  noCiConfig?: boolean
 }
 
 export function ciSettings(
@@ -347,12 +406,17 @@ export function ciSettings(
 /** The config's CI settings, read from the repo this runs in (none outside one). */
 function configuredCi(): CiSettings {
   let config: Record<string, unknown> | undefined
+  let root: string | undefined
   try {
-    config = loadConfig(repoRoot()).config
+    root = repoRoot()
+    config = loadConfig(root).config
   } catch {
     config = undefined
   }
-  return ciSettings(config)
+  const settings = ciSettings(config)
+  return root !== undefined && !hasCiConfig(root)
+    ? { ...settings, noCiConfig: true }
+    : settings
 }
 
 /** The steps ready can skip, in the order it reaches them. */
@@ -541,6 +605,7 @@ function plan(args: string[]): void {
         : {}),
       ...(ci.requireChecks ? { requireChecks: true } : {}),
       ...(ci.rollupChecks.length > 0 ? { rollupChecks: ci.rollupChecks } : {}),
+      ...(hasCiConfig(root) ? {} : { noCiConfig: true }),
     },
     logDir,
   })
@@ -613,6 +678,8 @@ export type RecordOptions = {
   requireChecks?: boolean
   /** Check name patterns that only report others' results. */
   rollups?: string[]
+  /** Seconds an empty check set waits before it reads as no CI (default NO_CHECKS_GRACE). */
+  noChecksGrace?: number
 }
 
 /** A check name pattern, where `*` is any run of characters, case aside. */
@@ -714,7 +781,8 @@ export function recordChecks(
     !options.requireChecks &&
     checks.length === 0 &&
     (ignored.length + optional.length > 0 ||
-      elapsedSeconds >= Math.min(NO_CHECKS_GRACE, timeoutSeconds))
+      elapsedSeconds >=
+        Math.min(options.noChecksGrace ?? NO_CHECKS_GRACE, timeoutSeconds))
   const awaitingChecks = checks.length === 0 && options.requireChecks === true
   const terminal = checks.length > 0 && pending.length === 0
   // A check that registers late changes the set: it settles only once the
@@ -947,6 +1015,7 @@ export function recordOptions(ci: CiSettings): RecordOptions {
     settleGrace: ci.settleGraceSeconds,
     requireChecks: ci.requireChecks,
     rollups: ci.rollupChecks,
+    ...(ci.noCiConfig ? { noChecksGrace: NO_CI_CONFIG_GRACE } : {}),
   }
 }
 
@@ -1106,9 +1175,11 @@ const USAGE = `Usage: ready.ts <subcommand> [flags]
       From the config too: ready.settleGrace holds a set with nothing pending
       open (settling) until it hasn't changed for that many seconds;
       ready.requireChecks never reads an empty set as no CI (awaitingChecks,
-      until the timeout); ready.rollupChecks names the failures that only
-      gather others (rollupFailures). noProgress: the run's previous pass
-      settled with failures and every one failed again.
+      until the timeout); without it, an empty set reads as no CI (noChecks)
+      after ${NO_CHECKS_GRACE / 60} minutes, or ${NO_CI_CONFIG_GRACE} seconds when the repo has no
+      CI config; ready.rollupChecks names the failures that only gather
+      others (rollupFailures). noProgress: the run's previous pass settled
+      with failures and every one failed again.
 
   ci wait --sha <sha> --command <cmd> [--interval <s>] [--timeout <s>] [--max-wait <s>] [--ignore-check <pattern>]... [--require-check <pattern>]... [--required-only]
       Run <cmd> (it prints the checks op's JSON) every --interval seconds

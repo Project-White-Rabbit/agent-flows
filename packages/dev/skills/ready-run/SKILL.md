@@ -85,7 +85,7 @@ Join the waiter the publish step started. When there's none (the op has no `scri
 
 Each report has `settled`, `timedOut`, `green`, `noChecks`, `counts`, `pending`, `failures` (each with its `name`, `state`, `link`, `log`, and `codeScanning` for a code-scanning check), `newFailures` (not reported before in this pass), `stalled`, `noProgress`, `rollupFailures` (failed checks in `ready.rollupChecks`, which only gather the others), `ignored` (checks left out by `ignoreChecks`), `missing` (required checks not reported yet, counted as pending), `settling`, and `awaitingChecks`. Use them as given: the last report once settled is the authority for this pass.
 
-- `noChecks`: nothing reported on the commit within 3 minutes, so the repo runs no CI on it, or every check reported is ignored. Say which in the report and skip to the review threads.
+- `noChecks`: nothing reported on the commit within 3 minutes (one 30-second poll when the plan's `ci` has `noCiConfig`), so the repo runs no CI on it, or every check reported is ignored. Say which in the report and skip to the review threads.
 - `timedOut`: list `pending` and stop as above. With `awaitingChecks` true, nothing reported at all, and `ready.requireChecks` says every commit runs CI: stop, `No CI check reported on <short sha> within <ciTimeout> minutes, and ready.requireChecks needs one to. Check that CI ran on the commit.`
 - `stalled` not empty: checks a fix was pushed for failed again. The fix didn't work: stop and hand them to the user with their logs. Don't push again.
 - `noProgress`: this run's previous pass settled with failures, and every one of them failed again, so nothing the last push did turned a check green. Stop and hand the failures to the user, as for `stalled`. Don't push again.
