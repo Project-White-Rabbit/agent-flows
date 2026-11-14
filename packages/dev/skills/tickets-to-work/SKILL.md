@@ -5,7 +5,7 @@ argument-hint: "[--priority <ranks>] [--limit <n>] [--section <name> | --section
 
 # /dev-flows:tickets-to-work
 
-Walks through the open issues assigned to you that have no pull request, workspace, or git worktree yet, most urgent first, and decides each one with you: start it (through `/dev-flows:start-work`: a workspace with a coding agent on it, and the issue moved to in progress), skip it, or close it. One issue at a time, one question each. Issues are read and closed through the repo's configured issue tracker, and workspaces through its workspaces integration (`/dev-flows:configure`).
+Walks through the open issues assigned to you that have no pull request, workspace, or git worktree yet, most urgent first, and decides each one with you: start it (through `/dev-flows:start-work`: a workspace with a coding agent on it, and the issue moved to in progress), skip it, or close it. One issue at a time, one question each. A start runs in the background, so the next question comes right away, and every start's result reaches you by the report. Issues are read and closed through the repo's configured issue tracker, and workspaces through its workspaces integration (`/dev-flows:configure`).
 
 **CLI commands** available via Bash (paths relative to `${CLAUDE_PLUGIN_ROOT}/src/commands/`):
 
@@ -19,6 +19,7 @@ Walks through the open issues assigned to you that have no pull request, workspa
 
 - **Act through the integrations' ops.** Issues are read and closed, and workspaces listed, only through the ops `configure.ts integrations` returns, run as given; workspaces open only through `/dev-flows:start-work`.
 - **The person decides every issue.** One question per issue, never several in one, never skipped because the answer looks obvious.
+- **Every start reaches the person.** A start runs in the background, but its result (started, already open, skipped, or failed) is told before the report or in it, and the report waits for every start still running.
 - **Run the repo's hooks around this command.** Skip this when the mode is `help`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run before --flow tickets-to-work --mode <mode>`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: `node "${CLAUDE_PLUGIN_ROOT}/src/commands/hooks.ts" run after --flow tickets-to-work --mode <mode> --outcome <success, when it did its job, else failure>`, leaving out a flag whose value isn't known yet. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest (with `agent.recheck`, that first runs the hook's check again, and it fails like any check when the task didn't satisfy it); a task you can't do with confidence is a stop: say so, and ask. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). `running`: a hook was still running when `--max-wait` ran out, and goes on running: run the same command again with `--wait <running.resume>` in place of any `--after`, until the status is another one, relaying `running.name` and how long it has run. When the host limits how long one command runs, add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`. An exit of 2 means bad arguments or an invalid config: relay its message and stop. At the end, a `stop` can't happen: report the `failures`. When `ran` lists any hook, say in the report which ran at each point, what any task for you changed, and what failed; when no point ran one, leave hooks out of the report.
 
 ## 0. Help shortcut
@@ -37,7 +38,8 @@ worktree yet, most urgent first (then the ones whose title has the team's
 blocker mark, then the earliest due, then the ones blocking other work),
 and asks about each one:
   - Start: opens a workspace with a coding agent on it and moves the issue
-    to in progress (/dev-flows:start-work)
+    to in progress (/dev-flows:start-work), in the background, so the next
+    question comes right away
   - Skip: leaves it for later
   - Close: moves it to canceled (or done, if you say so)
   - Stop: ends the run
@@ -91,11 +93,13 @@ Take the issues in the printed order, one at a time. Each gets its own question,
 
 Act on the answer before asking about the next issue:
 
-- **Start:** run the `/dev-flows:start-work` skill with `<ID> --yes`, plus `--section-by-rank` when it was given, else `--section "<name>"` when that was, else `--no-section` (so the workspace lands in no section rather than this one's), plus `--workspaces <entry>` when given, and follow it through. The answer is the go-ahead, which is what `--yes` tells it, so it doesn't ask again. Report its row for the issue; on a failure, say so and keep going.
+- **Start:** start it in the background, and ask about the next issue in the same turn, without waiting for it. Hand a subagent that runs in the background (on Claude Code, the `Agent` tool) this task, with `<ID>` and the flags filled in: "Run the `/dev-flows:start-work` skill with `<ID> --yes --run <ID> <flags>` and follow it through. Answer with its report row for <ID>: what happened (started, already open, skipped and why, or failed and why), the issue's link, its branch and section, whether it moved to in progress, and the command that starts the agent when the integration couldn't start one." The flags are `--section-by-rank` when it was given, else `--section "<name>"` when that was, else `--no-section` (so the workspace lands in no section rather than this one's), plus `--workspaces <entry>` when given. The answer is the go-ahead, which is what `--yes` tells it, so it doesn't ask again. Starts running at once don't race: `--run <ID>` keeps each one's files apart, and start-work holds the repo's lock while it opens a workspace. Keep a list of the starts still running. When this host can't run a subagent in the background, run `/dev-flows:start-work` here instead, with the same arguments, and tell its row before the next question.
 - **Skip:** move on.
 - **Close:** the entry's `updateIssue` op with only the state `canceled`, or `done` when the person says the work is already done. Leave the title, description, and fields out.
 - **Stop:** go to the report.
 
+**Background results.** Each start's result comes back when it finishes. Tell the ones that came back in the same message as the next question, before it, one line each and failures first, rather than in a turn of their own. A start that ended without a row (its subagent errored or was stopped) failed: say it's unknown whether its workspace opened, and that `/dev-flows:start-work <ID>` finishes it (it opens only what didn't). Results that come back after the last question wait for the report.
+
 ## 3. Report
 
-List what happened in three groups: started (issue link and branch, and the command to start the agent when the integration couldn't), closed (issue link and the state it moved to), and skipped. Then say how many issues weren't reached when the run stopped early. Anything that failed goes first.
+First wait for every start still running: say which ones, and don't report until each has come back. Never guess a result that hasn't. Then list what happened, every start's result included, even ones already told, in three groups: started (issue link and branch, and the command to start the agent when the integration couldn't; an issue start-work found already open or skipped says so), closed (issue link and the state it moved to), and skipped. Then say how many issues weren't reached when the run stopped early. Anything that failed goes first.

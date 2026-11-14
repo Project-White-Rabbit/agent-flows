@@ -429,10 +429,21 @@ describe("dev flows", () => {
   it("chains tickets-to-work to start-work, and start-work to create-tickets", () => {
     const skill = (id: string) =>
       files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
-    expect(skill("tickets-to-work")).toContain(
-      "run the `/dev-flows:start-work` skill with `<ID> --yes`",
+    const ticketsToWork = skill("tickets-to-work")
+    expect(ticketsToWork).toContain(
+      "Run the `/dev-flows:start-work` skill with `<ID> --yes --run <ID> <flags>`",
     )
+    // Each start runs in the background, and the next question doesn't wait.
+    expect(ticketsToWork).toContain(
+      "start it in the background, and ask about the next issue in the same turn",
+    )
+    expect(ticketsToWork).toContain("First wait for every start still running")
     const startWork = skill("start-work")
+    // Starts running at once keep their files apart and open one at a time.
+    expect(startWork).toContain("plus `/<name>` with `--run <name>`")
+    expect(startWork).toMatch(
+      /first `node "[^"]+\/work\.ts" lock`[\s\S]*createWorkspace[\s\S]*work\.ts" unlock --token <token>`, whether the op worked or failed/,
+    )
     expect(startWork).toContain(
       "run the `/dev-flows:create-tickets` skill with the text and `--yes`",
     )
