@@ -8,9 +8,11 @@ import {
   ciSettings,
   DEFAULT_TIMEOUT,
   fillCommand,
+  hasCiConfig,
   instructionFiles,
   matchesCheck,
   NO_CHECKS_GRACE,
+  NO_CI_CONFIG_GRACE,
   parseChecks,
   progressLine,
   type ReadyState,
@@ -194,6 +196,17 @@ describe("ready commands' {files} and tests", () => {
       checks: [],
       tests: "pytest {tests}",
     })
+  })
+})
+
+describe("hasCiConfig", () => {
+  it("finds workflows, CI files, and apps that post statuses", () => {
+    expect(hasCiConfig(repo({ "README.md": "" }))).toBe(false)
+    expect(hasCiConfig(repo({ ".github/workflows/README.md": "" }))).toBe(false)
+    expect(hasCiConfig(repo({ ".github/workflows/ci.yml": "" }))).toBe(true)
+    expect(hasCiConfig(repo({ ".gitlab-ci.yml": "" }))).toBe(true)
+    expect(hasCiConfig(repo({ ".circleci/config.yml": "" }))).toBe(true)
+    expect(hasCiConfig(repo({ "vercel.json": "{}" }))).toBe(true)
   })
 })
 
@@ -487,6 +500,32 @@ describe("recordChecks", () => {
     expect(
       recordChecks(started, "sha1", [], at(NO_CHECKS_GRACE)).report,
     ).toMatchObject({ settled: true, noChecks: true, green: false })
+  })
+
+  it("takes it there's no CI after one poll in a repo with no CI config", () => {
+    const options = { noChecksGrace: NO_CI_CONFIG_GRACE }
+    const record = (checks: Check[], seconds: number) =>
+      recordChecks(
+        started,
+        "sha1",
+        checks,
+        at(seconds),
+        DEFAULT_TIMEOUT,
+        [],
+        false,
+        [],
+        options,
+      ).report
+    expect(record([], 0)).toMatchObject({ settled: false, noChecks: false })
+    expect(record([], NO_CI_CONFIG_GRACE)).toMatchObject({
+      settled: true,
+      noChecks: true,
+      green: false,
+    })
+    // An outside app's status that shows up still gets waited on.
+    expect(
+      record([check("Vercel", "pending")], NO_CI_CONFIG_GRACE),
+    ).toMatchObject({ settled: false, noChecks: false })
   })
 
   it("calls a check stalled when the push meant to fix it and it fails again", () => {
