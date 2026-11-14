@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawn } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -18,9 +18,11 @@ import {
   planReuse,
   planStart,
   queue,
+  releaseLock,
   renameBranch,
   slugify,
   type Ticket,
+  takeLock,
   type Workspace,
   workspaceName,
 } from "./work.ts"
@@ -561,5 +563,81 @@ describe("work.ts", () => {
     process.exitCode = undefined
     capture(["plan", "--input", input, "--section", "x", "--no-section"])
     expect(process.exitCode).toBe(2)
+  })
+})
+
+describe("the open lock", () => {
+  let dir: string
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true })
+    process.exitCode = undefined
+  })
+
+  it("lets one holder in at a time, and the next in once it's released", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "lock-"))
+    const lock = path.join(dir, "locks", "open.lock")
+    const first = takeLock(lock, 0)
+    expect(first).toBeDefined()
+    expect(takeLock(lock, 0)).toBeUndefined()
+    expect(releaseLock(lock, "someone else")).toBe(false)
+    expect(releaseLock(lock, first as string)).toBe(true)
+    expect(takeLock(lock, 0)).toBeDefined()
+  })
+
+  it("takes over a lock left by a run that died", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "lock-"))
+    const lock = path.join(dir, "open.lock")
+    expect(takeLock(lock, 0)).toBeDefined()
+    const later = () => Date.now() + 11 * 60 * 1000
+    expect(takeLock(lock, 0, { now: later })).toBeDefined()
+  })
+
+  it("never lets two starts running side by side hold it at once", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "lock-"))
+    execFileSync("git", ["init", "-q"], { cwd: dir })
+    const log = path.join(dir, "log")
+    const work = path.join(import.meta.dirname, "work.ts")
+    // Each holds the lock for a moment, logging when it goes in and out.
+    const script = `
+      set -e
+      token=$(node "${work}" lock --wait 30 | sed 's/^LOCKED //')
+      echo in >> "${log}"
+      sleep 0.2
+      echo out >> "${log}"
+      node "${work}" unlock --token "$token"
+    `
+    const runs = Array.from(
+      { length: 4 },
+      () =>
+        new Promise<number | null>((resolve) =>
+          spawn("sh", ["-c", script], { cwd: dir }).on("exit", resolve),
+        ),
+    )
+    expect(await Promise.all(runs)).toEqual([0, 0, 0, 0])
+    expect(fs.readFileSync(log, "utf8")).toBe("in\nout\n".repeat(4))
+  }, 30000)
+
+  it("prints BUSY when it's held past --wait, and NOT-HELD for a stale token", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "lock-"))
+    execFileSync("git", ["init", "-q"], { cwd: dir })
+    const cli = (args: string[]) => {
+      try {
+        return execFileSync(
+          "node",
+          [path.join(import.meta.dirname, "work.ts"), ...args],
+          { cwd: dir, encoding: "utf8" },
+        )
+      } catch (error) {
+        const failed = error as { status: number; stdout: string }
+        return `${failed.status} ${failed.stdout}`
+      }
+    }
+    const token = cli(["lock"])
+      .trim()
+      .replace(/^LOCKED /, "")
+    expect(cli(["lock", "--wait", "0"])).toBe("1 BUSY after 0s\n")
+    expect(cli(["unlock", "--token", "nope"])).toBe("NOT-HELD\n")
+    expect(cli(["unlock", "--token", token])).toBe("UNLOCKED\n")
+    expect(cli(["unlock", "--token", token])).toBe("NOT-HELD\n")
   })
 })

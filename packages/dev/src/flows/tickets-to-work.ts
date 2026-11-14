@@ -44,10 +44,11 @@ export const ticketsToWorkFlow: Flow = devKit.defineFlow({
   compile: { mode: { default: "monolith" }, inlinePhases: [] },
   entries: { default: "main/list", help: "main/help" },
   defaultMode: "default",
-  intro: `Walks through the open issues assigned to you that have no pull request, workspace, or git worktree yet, most urgent first, and decides each one with you: start it (through \`{{cmd}}start-work\`: a workspace with a coding agent on it, and the issue moved to in progress), skip it, or close it. One issue at a time, one question each. Issues are read and closed through the repo's configured issue tracker, and workspaces through its workspaces integration (\`{{cmd}}configure\`).`,
+  intro: `Walks through the open issues assigned to you that have no pull request, workspace, or git worktree yet, most urgent first, and decides each one with you: start it (through \`{{cmd}}start-work\`: a workspace with a coding agent on it, and the issue moved to in progress), skip it, or close it. One issue at a time, one question each. A start runs in the background, so the next question comes right away, and every start's result reaches you by the report. Issues are read and closed through the repo's configured issue tracker, and workspaces through its workspaces integration (\`{{cmd}}configure\`).`,
   invariants: [
     "**Act through the integrations' ops.** Issues are read and closed, and workspaces listed, only through the ops `configure.ts integrations` returns, run as given; workspaces open only through `{{cmd}}start-work`.",
     "**The person decides every issue.** One question per issue, never several in one, never skipped because the answer looks obvious.",
+    "**Every start reaches the person.** A start runs in the background, but its result (started, already open, skipped, or failed) is told before the report or in it, and the report waits for every start still running.",
     hooksInvariant("tickets-to-work"),
   ],
   phases: [
@@ -73,7 +74,8 @@ worktree yet, most urgent first (then the ones whose title has the team's
 blocker mark, then the earliest due, then the ones blocking other work),
 and asks about each one:
   - Start: opens a workspace with a coding agent on it and moves the issue
-    to in progress ({{cmd}}start-work)
+    to in progress ({{cmd}}start-work), in the background, so the next
+    question comes right away
   - Skip: leaves it for later
   - Close: moves it to canceled (or done, if you say so)
   - Stop: ends the run
@@ -127,17 +129,19 @@ When \`COUNT\` is 0, say there is nothing waiting and stop; when \`TOTAL\` is ab
 
 Act on the answer before asking about the next issue:
 
-- **Start:** run the \`{{cmd}}start-work\` skill with \`<ID> --yes\`, plus \`--section-by-rank\` when it was given, else \`--section "<name>"\` when that was, else \`--no-section\` (so the workspace lands in no section rather than this one's), plus \`--workspaces <entry>\` when given, and follow it through. The answer is the go-ahead, which is what \`--yes\` tells it, so it doesn't ask again. Report its row for the issue; on a failure, say so and keep going.
+- **Start:** start it in the background, and ask about the next issue in the same turn, without waiting for it. Hand a subagent that runs in the background (on Claude Code, the \`Agent\` tool) this task, with \`<ID>\` and the flags filled in: "Run the \`{{cmd}}start-work\` skill with \`<ID> --yes --run <ID> <flags>\` and follow it through. Answer with its report row for <ID>: what happened (started, already open, skipped and why, or failed and why), the issue's link, its branch and section, whether it moved to in progress, and the command that starts the agent when the integration couldn't start one." The flags are \`--section-by-rank\` when it was given, else \`--section "<name>"\` when that was, else \`--no-section\` (so the workspace lands in no section rather than this one's), plus \`--workspaces <entry>\` when given. The answer is the go-ahead, which is what \`--yes\` tells it, so it doesn't ask again. Starts running at once don't race: \`--run <ID>\` keeps each one's files apart, and start-work holds the repo's lock while it opens a workspace. Keep a list of the starts still running. When this host can't run a subagent in the background, run \`{{cmd}}start-work\` here instead, with the same arguments, and tell its row before the next question.
 - **Skip:** move on.
 - **Close:** the entry's \`updateIssue\` op with only the state \`canceled\`, or \`done\` when the person says the work is already done. Leave the title, description, and fields out.
-- **Stop:** go to the report.`,
+- **Stop:** go to the report.
+
+**Background results.** Each start's result comes back when it finishes. Tell the ones that came back in the same message as the next question, before it, one line each and failures first, rather than in a turn of their own. A start that ended without a row (its subagent errored or was stopped) failed: say it's unknown whether its workspace opened, and that \`{{cmd}}start-work <ID>\` finishes it (it opens only what didn't). Results that come back after the last question wait for the report.`,
           next: "main/report",
         },
         {
           id: "report",
           kind: "action",
           title: "Report",
-          body: `List what happened in three groups: started (issue link and branch, and the command to start the agent when the integration couldn't), closed (issue link and the state it moved to), and skipped. Then say how many issues weren't reached when the run stopped early. Anything that failed goes first.`,
+          body: `First wait for every start still running: say which ones, and don't report until each has come back. Never guess a result that hasn't. Then list what happened, every start's result included, even ones already told, in three groups: started (issue link and branch, and the command to start the agent when the integration couldn't; an issue start-work found already open or skipped says so), closed (issue link and the state it moved to), and skipped. Then say how many issues weren't reached when the run stopped early. Anything that failed goes first.`,
           next: null,
         },
       ],

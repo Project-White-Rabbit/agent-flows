@@ -8,6 +8,7 @@
 // Git worktrees are read here directly: a branch checked out in any worktree
 // of the repo already has someone on it, whichever app opened it.
 
+import { randomUUID } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import {
@@ -33,6 +34,7 @@ import {
   run,
   runMain,
   runSubcommand,
+  stateDir,
   USAGE_EXIT,
   UsageError,
 } from "./lib.ts"
@@ -724,6 +726,87 @@ function list(args: Args): void {
   )
 }
 
+/** A lock held longer than this is left by a run that died, and is taken over. */
+export const LOCK_STALE_MS = 10 * 60 * 1000
+
+/**
+ * Takes the lock at `dir` (a directory, made atomically), waiting up to
+ * `waitMs` for whoever holds it. Returns the token that releases it, or
+ * undefined when it's still held when the wait runs out.
+ */
+export function takeLock(
+  dir: string,
+  waitMs: number,
+  options: { staleMs?: number; pollMs?: number; now?: () => number } = {},
+): string | undefined {
+  const { staleMs = LOCK_STALE_MS, pollMs = 250, now = Date.now } = options
+  const until = now() + waitMs
+  const token = randomUUID()
+  fs.mkdirSync(path.dirname(dir), { recursive: true })
+  for (;;) {
+    try {
+      fs.mkdirSync(dir)
+      fs.writeFileSync(path.join(dir, "token"), token)
+      return token
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error
+      }
+    }
+    const since = fs.statSync(dir, { throwIfNoEntry: false })?.mtimeMs
+    if (since !== undefined && now() - since > staleMs) {
+      fs.rmSync(dir, { recursive: true, force: true })
+      continue
+    }
+    if (now() >= until) {
+      return undefined
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pollMs)
+  }
+}
+
+/** Releases the lock at `dir` when `token` holds it. True when it did. */
+export function releaseLock(dir: string, token: string): boolean {
+  const held = fs.readFileSync(path.join(dir, "token"), "utf8")
+  if (held.trim() !== token) {
+    return false
+  }
+  fs.rmSync(dir, { recursive: true, force: true })
+  return true
+}
+
+/** The lock opening workspaces takes, shared by every worktree of the repo. */
+function openLock(): string {
+  return path.join(stateDir("start-work", { shared: true }), "open.lock")
+}
+
+function lock(args: Args): void {
+  const wait = Number(args.get("wait") ?? 300)
+  if (!(Number.isFinite(wait) && wait >= 0)) {
+    throw new UsageError("--wait takes a number of seconds")
+  }
+  const token = takeLock(openLock(), wait * 1000)
+  if (!token) {
+    console.log(`BUSY after ${wait}s`)
+    process.exitCode = 1
+    return
+  }
+  console.log(`LOCKED ${token}`)
+}
+
+function unlock(args: Args): void {
+  const token = requiredFlag(args, "token")
+  let released = false
+  try {
+    released = releaseLock(openLock(), token)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error
+    }
+  }
+  console.log(released ? "UNLOCKED" : "NOT-HELD")
+}
+
 const USAGE = `Usage: work.ts <command>
 
   plan --input <file> [--section <name> | --section-by-rank | --no-section]
@@ -774,6 +857,16 @@ const USAGE = `Usage: work.ts <command>
                            [blocker] [blocks-other-work] "<title>" <url>
                   then COUNT <n> (printed) and TOTAL <n> (before --priority
                   and --limit).
+  lock [--wait <seconds>]
+                  Take the repo's lock on opening workspaces, shared by all
+                  its worktrees, so starts running side by side open one at a
+                  time. Waits up to <seconds> (default 300) for whoever holds
+                  it, then prints LOCKED <token>, or BUSY (exit 1) when it's
+                  still held. A lock older than ${LOCK_STALE_MS / 60000} minutes was left by a run that
+                  died, and is taken over.
+  unlock --token <token>
+                  Release the lock <token> took. Prints UNLOCKED, or NOT-HELD
+                  when that token no longer holds it.
 
 --ranks names the priorities ${PRIORITIES.join(", ")}, in that order, for
 sections, TICKET lines, and --priority (default: the config's tickets.ranks,
@@ -784,6 +877,8 @@ const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   reuse,
   "branch-line": branchLine,
   list,
+  lock,
+  unlock,
 }
 
 export function main(argv: string[]): void {
