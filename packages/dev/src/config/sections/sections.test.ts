@@ -148,6 +148,18 @@ describe("sync format", () => {
     )
   })
 
+  it("takes the places prototype shows a mockup, in order", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({ ...base, prototype: { show: ["page", "browser"] } }).issues,
+    ).toEqual([])
+    for (const show of [[], ["page", "page"], ["canvas"], "page"]) {
+      expect(checkConfig({ ...base, prototype: { show } }).issues).toEqual([
+        expect.stringContaining("prototype.show"),
+      ])
+    }
+  })
+
   it("takes another tool's state files and header, and the body knobs", () => {
     const base = { version: 3, repo: { baseBranch: "main" } }
     expect(

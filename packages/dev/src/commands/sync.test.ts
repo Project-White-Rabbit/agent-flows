@@ -686,7 +686,9 @@ describe("protected branches", () => {
   })
 })
 
-describe("sync.ts (as a script)", () => {
+// Each test here runs sync.ts and git as real processes, a dozen or more per
+// test, which a busy CI runner can push past vitest's 5s default.
+describe("sync.ts (as a script)", { timeout: 30_000 }, () => {
   let dir: string | undefined
   afterEach(() => {
     if (dir) {

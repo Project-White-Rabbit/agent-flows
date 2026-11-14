@@ -6,6 +6,7 @@
 import type { IntegrationSpec } from "../config/types.ts"
 import { claude } from "./claude/spec.ts"
 import { conductor } from "./conductor/spec.ts"
+import { figma } from "./figma/spec.ts"
 import { github } from "./github/spec.ts"
 import { gitlab } from "./gitlab/spec.ts"
 import { graphite } from "./graphite/spec.ts"
@@ -34,6 +35,7 @@ export const INTEGRATIONS: IntegrationSpec[] = [
   posthog,
   slack,
   lore,
+  figma,
   superset,
   orca,
   conductor,
