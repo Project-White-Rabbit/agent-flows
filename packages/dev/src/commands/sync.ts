@@ -960,6 +960,7 @@ function survey(args: Args): void {
     baseRef: baseRef ?? null,
     onBase,
     catchUp,
+    catchUpBy: catchUpMethod(),
     dirty,
     ahead,
     behind,
@@ -1038,6 +1039,52 @@ export function capText(text: string, max: number): string {
 }
 
 /** The config's `sync` section, or nothing. */
+/** How sync catches a plain branch up to its base: the config's `sync.catchUp`. */
+export function catchUpMethod(
+  section: Record<string, unknown> = syncSection(),
+): "merge" | "rebase" {
+  return section.catchUp === "rebase" ? "rebase" : "merge"
+}
+
+/**
+ * The branch's remote tip, fetched, against HEAD: for a catch-up by rebase,
+ * which folds in what was pushed since (`missing`, oldest first: the remote's
+ * commits with no equivalent change on HEAD) and pushes with a lease on
+ * `remote`, so the push can replace only the tip it read.
+ */
+function upstream(_args: Args): void {
+  const branch = currentBranch()
+  const onRemote = remoteHasBranch(branch)
+  if (onRemote === undefined) {
+    throw new Error(
+      `couldn't ask origin for ${branch}: a rebase would need force without knowing what's there`,
+    )
+  }
+  if (!onRemote) {
+    printJson({ branch, remote: null, contained: true, missing: [] })
+    return
+  }
+  const fetched = run("git", ["fetch", "--quiet", "origin", branch])
+  if (fetched.status !== 0) {
+    throw new Error(
+      `fetching origin/${branch} failed: ${(fetched.stderr || fetched.stdout).trim()}`,
+    )
+  }
+  const remote = git(["rev-parse", `refs/remotes/origin/${branch}`])
+  if (!remote) {
+    throw new Error(`origin/${branch} is missing after the fetch`)
+  }
+  const contained =
+    run("git", ["merge-base", "--is-ancestor", remote, "HEAD"]).status === 0
+  const missing = contained
+    ? []
+    : (git(["cherry", "HEAD", remote]) ?? "")
+        .split("\n")
+        .filter((line) => line.startsWith("+ "))
+        .map((line) => line.slice(2).trim())
+  printJson({ branch, remote, contained, missing })
+}
+
 function syncSection(): Record<string, unknown> {
   const root = git(["rev-parse", "--show-toplevel"])
   const section = root ? loadConfig(root).config?.sync : undefined
@@ -1132,6 +1179,7 @@ const USAGE = `Usage: sync.ts <command>
                   for the branch until a remote sync links them.
                   --no-catch-up: a base that moved is no reason for local
                   work. Refuses on a branch in repo.protectedBranches.
+                  catchUpBy is sync.catchUp: merge (the default) or rebase.
   facts --base <branch> --pr <pr>
                   For the remote writes: the issue's workState, the
                   lastSyncedLine (in sync.timezone, else UTC), updateKind
@@ -1154,6 +1202,13 @@ const USAGE = `Usage: sync.ts <command>
                   lastSyncedLine, when the file has it), any older
                   last-synced line dropped. Prints CHANGED <file> or
                   UNCHANGED.
+  upstream        Fetch origin/<branch> and print {"branch", "remote", "contained",
+                  "missing"}: its tip (null when origin has no such branch),
+                  whether HEAD already holds it, and its commits with no
+                  equivalent change on HEAD, oldest first. For a catch-up by
+                  rebase (sync.catchUp): cherry-pick the missing commits, then
+                  push with --force-with-lease=<branch>:<remote>. Stops when
+                  origin can't be asked or the fetch fails.
   issue           The issue a sync recorded for the current branch (or an
                   earlier sync tool left for it), as {"branch", "issue"}, with
                   issue null when there's none. Reads only.
@@ -1193,6 +1248,7 @@ const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   description,
   finish,
   issue,
+  upstream,
 }
 
 export function main(argv: string[]): void {

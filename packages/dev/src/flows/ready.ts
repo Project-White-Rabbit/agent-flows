@@ -36,6 +36,11 @@ export const readyFlow: Flow = devKit.defineFlow({
   commands: DEV_COMMANDS.defineCommands({
     hooks: HOOKS_COMMAND,
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
+    sync: {
+      description:
+        "`upstream` fetches the branch's remote tip and says what's on it that HEAD lacks, for the push after a catch-up by rebase",
+      args: "<subcommand>",
+    },
     ready: {
       description:
         "`plan` scopes the branch (merge base, changed files, touched packages and their check scripts, agent instructions, the config's ready commands, and the steps to skip and CI checks to ignore); `ci start`, `ci record`, and `ci wait` track each pushed commit's CI pass: settled, timed out, new failures, and fixes that didn't work",
@@ -70,7 +75,7 @@ export const readyFlow: Flow = devKit.defineFlow({
     `This command fixes CI failures itself. ${CONFIDENCE}`,
     "**Act through the integrations' ops.** Pull requests, checks, logs, review threads, and stacks are reached only through the ops `configure.ts integrations` returns, run as given. Plain `git` is fine for everything local.",
     "**Sync owns the pull request's body and the issue.** Ready never writes either; it runs `{{cmd}}sync` for them.",
-    "**Never rewrite pushed history yourself, and never force-push,** except `--force-with-lease` when a stacking integration's `submit` fails on a branch it rebased. Without a stacking integration, catch up by merging; with one, its `restack` and `submit` ops own the rebase and the push.",
+    "**Never rewrite pushed history yourself, and never force-push,** except a `--force-with-lease` push: when a stacking integration's `submit` fails on a branch it rebased, or, with the config's `sync.catchUp` `rebase`, of the branch sync rebased, leased on the remote tip `upstream` read. Without a stacking integration, sync catches up (by merging, unless `sync.catchUp` is `rebase`); with one, its `restack` and `submit` ops own the rebase and the push.",
     "**Never use destructive escapes** (`git reset --hard`, `git rebase --abort`, `git stash`, `git push --force` without `--force-with-lease`) to get out of a conflict.",
     "**Never run a command with side effects outside the checkout** to check the branch: nothing that deploys, publishes, migrates or writes to a database, or calls a shared service. Read a script before running it when its name doesn't make that plain.",
     "**Never create, edit, or apply a database migration, and never move a dependency or toolchain version** to make a check pass. Those are the team's decisions: surface them.",
@@ -261,7 +266,8 @@ When sync stops (a conflict it needs you for, a hook it couldn't satisfy), stop 
 Skip the push when the branch's remote has this exact commit: \`git fetch origin <branch>\` and \`git rev-parse HEAD\` equals \`git rev-parse origin/<branch>\`.
 
 - **With a stacking integration:** its \`submit\` op. It pushes and opens the pull request as a draft when there's none, and leaves an existing one's title, body, and draft or ready state alone. When it says the branch isn't tracked, run its \`track\` op with \`<parent>\`, then \`submit\` again. When it fails for another reason than a conflict (the tool's own API or sign-in), push anyway with \`git push --force-with-lease -u origin HEAD\` (the stacking tool rebased the branch, and the lease refuses to overwrite work pushed since the last fetch), and say so in the report. Keep the stacking tool's URL for the pull request when it prints one.
-- **Without one:** \`git push -u origin HEAD\`. If it's rejected because the remote branch moved, \`git fetch origin <branch>\`, \`git merge --no-edit origin/<branch>\`, resolve as sync does, and push again. Never force.
+- **Without one:** \`git push -u origin HEAD\`. If it's rejected because the remote branch moved, \`git fetch origin <branch>\`, \`git merge --no-edit origin/<branch>\`, resolve as sync does, and push again. Never force. With the config's \`sync.catchUp\` \`rebase\`, a rejection goes by the next bullet instead.
+- **Without one, when \`git push\` is refused as not a fast-forward and the config's \`sync.catchUp\` is \`rebase\`** (\`{{command:configure}} get sync.catchUp --optional\`; sync rebased the branch): \`{{command:sync}} upstream\`. When its \`missing\` isn't empty, someone pushed to the branch since: run the \`{{cmd}}sync\` skill with \`local\` again (it folds their commits in before rebasing), then push again. Otherwise \`git push --force-with-lease=<branch>:<its remote> -u origin HEAD\`, the lease naming the tip it read; when that's refused, start this bullet over. Never \`--force\`, and never \`--force-with-lease\` without the tip.
 
 ### Pull request
 

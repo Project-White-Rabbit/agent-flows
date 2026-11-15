@@ -23,6 +23,11 @@ const TITLE_TEMPLATE: FieldPattern = {
   hint: "text with `{issueId}`, `{title}`, and `{summary}` placeholders (`{issueId}: {title}`, `{summary} ({issueId})`)",
 }
 
+const CATCH_UP: FieldPattern = {
+  regex: /^(merge|rebase)$/,
+  hint: "`merge` or `rebase`",
+}
+
 const LINK_STYLE: FieldPattern = {
   regex: /^(link|url)$/,
   hint: "`link` or `url`",
@@ -42,8 +47,15 @@ export const sync: SectionSpec = {
   path: "sync",
   name: "Sync format",
   purpose:
-    "How sync writes the PR body, its title, and the issue's link lines; unset, it uses its own format",
+    "How sync catches the branch up and writes the PR body, its title, and the issue's link lines; unset, it merges the base in and uses its own format",
   fields: [
+    {
+      key: "catchUp",
+      description:
+        "How sync (and ready, through it) catches a branch with no stacking integration up to its base: `merge` (the default: merges the base in, so a push never needs force) or `rebase` (replays the branch's own commits onto the base, for a linear history, first folding in commits pushed to the branch from elsewhere, then pushes with a lease on the remote tip it read). A stacking integration's `restack` decides for stacked branches; GitHub stacking always merges",
+      example: "rebase",
+      pattern: CATCH_UP,
+    },
     {
       key: "linkLabels",
       description:
@@ -179,7 +191,7 @@ export const sync: SectionSpec = {
     },
   ],
   lookup:
-    "Leave it out for sync's own format. A team that also runs bitfab-dev's sync uses its format, so the two don't duplicate each other's lines. A team moving from another sync tool sets `adoptState` and `adoptHeader` to that tool's state file and PR header, and the format fields to what it wrote, so sync takes its branches over without a second copy of each line. Set `commitBodies` when the repo's commit messages carry verification notes, `requireBase` when the host's default branch isn't the base (a pull request opened by hand would target it), and `linkUnverified` when the issue tracker is linked only and its issues may be out of reach",
+    "Leave it out for sync's own format. A team that also runs bitfab-dev's sync uses its format, so the two don't duplicate each other's lines. A team moving from another sync tool sets `adoptState` and `adoptHeader` to that tool's state file and PR header, and the format fields to what it wrote, so sync takes its branches over without a second copy of each line. Set `catchUp: rebase` when the team keeps branch history linear (bitfab-dev's sync rebases), `commitBodies` when the repo's commit messages carry verification notes, `requireBase` when the host's default branch isn't the base (a pull request opened by hand would target it), and `linkUnverified` when the issue tracker is linked only and its issues may be out of reach",
   detect(ctx) {
     const evidence: string[] = []
     if (
@@ -195,7 +207,7 @@ export const sync: SectionSpec = {
       evidence.push(".bitfab-dev/state.json exists")
     }
     return evidence.length > 0
-      ? { values: { ...BITFAB_DEV_FORMAT }, evidence }
+      ? { values: { ...BITFAB_DEV_FORMAT, catchUp: "rebase" }, evidence }
       : undefined
   },
 }

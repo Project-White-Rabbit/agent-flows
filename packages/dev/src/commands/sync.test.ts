@@ -721,6 +721,69 @@ describe("sync.ts (as a script)", { timeout: 30_000 }, () => {
     git("switch", "-q", "-c", "feature")
   }
 
+  it("reads the branch's remote tip for a catch-up by rebase", () => {
+    init()
+    expect(json(["upstream"])).toEqual({
+      branch: "feature",
+      remote: null,
+      contained: true,
+      missing: [],
+    })
+    expect(
+      json(["survey", "local", "--base", "main", "--pr", "none"]).catchUpBy,
+    ).toBe("merge")
+    fs.mkdirSync(path.join(work(), ".agent-flows"))
+    fs.writeFileSync(
+      path.join(work(), ".agent-flows", "config.json"),
+      JSON.stringify({
+        version: 2,
+        repo: { baseBranch: "main" },
+        sync: { catchUp: "rebase" },
+      }),
+    )
+    expect(
+      json(["survey", "local", "--base", "main", "--pr", "none"]).catchUpBy,
+    ).toBe("rebase")
+
+    fs.writeFileSync(path.join(work(), "a.txt"), "a")
+    git("add", "a.txt")
+    git("commit", "-q", "-m", "Add a")
+    git("push", "-q", "-u", "origin", "HEAD")
+    const pushed = git("rev-parse", "HEAD").trim()
+    expect(json(["upstream"])).toEqual({
+      branch: "feature",
+      remote: pushed,
+      contained: true,
+      missing: [],
+    })
+
+    // Someone else pushes a commit; this checkout rebases its own.
+    const other = path.join(dir as string, "other")
+    execFileSync("git", [
+      "clone",
+      "-q",
+      "-b",
+      "feature",
+      path.join(dir as string, "origin.git"),
+      other,
+    ])
+    const og = (...args: string[]) =>
+      execFileSync("git", ["-C", other, ...args], { encoding: "utf8" })
+    og("config", "user.email", "o@example.com")
+    og("config", "user.name", "Other")
+    fs.writeFileSync(path.join(other, "b.txt"), "b")
+    og("add", "b.txt")
+    og("commit", "-q", "-m", "Add b")
+    og("push", "-q", "origin", "feature")
+    const theirs = og("rev-parse", "HEAD").trim()
+    git("commit", "-q", "--amend", "-m", "Add a, reworded")
+
+    const read = json(["upstream"])
+    expect(read).toMatchObject({ remote: theirs, contained: false })
+    // Their commit is missing; ours, reworded, has an equivalent change here.
+    expect(read.missing).toEqual([theirs])
+  })
+
   it("prints the issue a sync recorded for the branch, without writing", () => {
     init()
     expect(json(["issue"])).toEqual({ branch: "feature", issue: null })
