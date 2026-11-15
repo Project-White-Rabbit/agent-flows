@@ -631,7 +631,10 @@ export type Pass = {
   stableSince?: string
 }
 
-export type ReadyState = { passes: Pass[] }
+/** The last time ready ran on the branch (`mark`), so finish can tell a branch ready never saw. */
+export type ReadyRun = { mode: string; sha: string; at: string }
+
+export type ReadyState = { passes: Pass[]; run?: ReadyRun }
 
 export type CiReport = {
   sha: string
@@ -713,7 +716,27 @@ export function startPass(
   } else {
     passes.push(pass)
   }
-  return { passes: passes.slice(-KEPT_PASSES) }
+  return {
+    passes: passes.slice(-KEPT_PASSES),
+    ...(state.run ? { run: state.run } : {}),
+  }
+}
+
+/** Record that a ready run started on the branch, at its head. */
+export function markRun(
+  state: ReadyState,
+  mode: string,
+  sha: string,
+  now: Date,
+): ReadyState {
+  return { ...state, run: { mode, sha, at: now.toISOString() } }
+}
+
+/** Whether ready has run on the branch, and its last run. */
+export function lastRun(
+  state: ReadyState,
+): { ran: boolean } & Partial<ReadyRun> {
+  return state.run ? { ran: true, ...state.run } : { ran: false }
 }
 
 /** The last pass's number within its ready run: from the last `first` pass, else the branch's first kept one. */
@@ -831,7 +854,7 @@ export function recordChecks(
     ]),
   ) as Record<CheckState, number>
   return {
-    state: { passes },
+    state: { ...next, passes },
     report: {
       sha,
       pass: index + 1,
@@ -906,7 +929,11 @@ export function parseChecks(text: string): Check[] {
 
 function readState(dir: string, branch: string): ReadyState {
   const stored = readBranchState<ReadyState>(dir, branch)
-  return { passes: Array.isArray(stored?.passes) ? stored.passes : [] }
+  const run = stored?.run
+  return {
+    passes: Array.isArray(stored?.passes) ? stored.passes : [],
+    ...(run && typeof run.sha === "string" ? { run } : {}),
+  }
 }
 
 export function numberFlag(
@@ -965,6 +992,26 @@ function ciStart(args: string[]): void {
       ? { maxPasses: ci.maxPasses, capped: inRun >= ci.maxPasses }
       : {}),
   })
+}
+
+function mark(args: string[]): void {
+  const flags = parseFlags(args)
+  const mode = requiredFlag(flags, "mode")
+  const sha = git(["rev-parse", "HEAD"])
+  if (!sha) {
+    throw new UsageError("mark needs a commit: HEAD doesn't resolve")
+  }
+  const dir = stateDir("ready", { shared: true })
+  const branch = currentBranch()
+  const state = markRun(readState(dir, branch), mode, sha, new Date())
+  writeBranchState(dir, branch, state)
+  printJson(lastRun(state))
+}
+
+function last(): void {
+  printJson(
+    lastRun(readState(stateDir("ready", { shared: true }), currentBranch())),
+  )
 }
 
 /** `--required-only` takes no value, so it comes out before the flags are parsed. */
@@ -1155,6 +1202,15 @@ const USAGE = `Usage: ready.ts <subcommand> [flags]
       The agent instruction and matching rule files for the repo-relative
       paths in <file> (one per line), as JSON, the same way plan finds them.
 
+  mark --mode <mode>
+      Record that a ready run started on this branch, in <mode> (default,
+      loop, or draft), at HEAD. Prints what last prints.
+
+  last
+      Whether ready has run on this branch: {"ran": false}, or ran: true with
+      the last run's mode, sha, and at (when it started). Finish reads it to
+      run ready itself on a branch ready never saw.
+
   ci start --sha <sha> [--fixed <check>]... [--first]
       Start the CI pass for a pushed commit. --fixed names each check the
       push meant to fix, so its failing again reads as stalled. --first
@@ -1189,7 +1245,7 @@ const USAGE = `Usage: ready.ts <subcommand> [flags]
       go to stderr; the last record's report to stdout. --ignore-check,
       --require-check, and --required-only as for record.
 
-A pass's state is kept per branch in the repo's git common dir.`
+A pass's state, and the last run's mark, are kept per branch in the repo's git common dir.`
 
 /** The instruction and rule files for a list of changed files, for a flow with its own diff. */
 function instructions(args: string[]): void {
@@ -1209,6 +1265,10 @@ export async function main(argv: string[]): Promise<void> {
       instructions([sub, ...rest].filter((a) => a !== undefined))
     } else if (command === "plan") {
       plan([sub, ...rest].filter((a) => a !== undefined))
+    } else if (command === "mark") {
+      mark([sub, ...rest].filter((a) => a !== undefined))
+    } else if (command === "last") {
+      last()
     } else if (command === "ci" && sub === "start") {
       ciStart(rest)
     } else if (command === "ci" && sub === "record") {

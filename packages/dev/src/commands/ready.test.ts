@@ -10,6 +10,8 @@ import {
   fillCommand,
   hasCiConfig,
   instructionFiles,
+  lastRun,
+  markRun,
   matchesCheck,
   NO_CHECKS_GRACE,
   NO_CI_CONFIG_GRACE,
@@ -795,6 +797,25 @@ describe("startPass", () => {
     }
     expect(state.passes).toHaveLength(20)
     expect(state.passes[0].sha).toBe("sha5")
+  })
+})
+
+describe("markRun and lastRun", () => {
+  it("says ready never ran on a branch with no mark", () => {
+    expect(lastRun({ passes: [] })).toEqual({ ran: false })
+  })
+
+  it("keeps the last run's mark through later CI passes", () => {
+    const marked = markRun({ passes: [] }, "loop", "sha1", start)
+    expect(lastRun(marked)).toEqual({
+      ran: true,
+      mode: "loop",
+      sha: "sha1",
+      at: start.toISOString(),
+    })
+    const started = startPass(marked, "sha1", [], at(10), true)
+    const { state } = recordChecks(started, "sha2", [], at(20))
+    expect(lastRun(state)).toMatchObject({ ran: true, sha: "sha1" })
   })
 })
 

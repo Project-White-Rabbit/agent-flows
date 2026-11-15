@@ -8,9 +8,9 @@ user-invocable: false
 
 ## 1. Sync
 
-Skip this step when the pre-flight already ran sync.
+**With `<readyRun>`** from the *Pre-flight* section of the `finish` skill: run the `/dev-flows:ready` skill with the argument `loop` in place of the sync below: invoke it, don't redo its steps. It does what the sync would (commits, catches up to the base, pushes, and refreshes the pull request and its issue), and before that the branch's cleanup and checks, then fixes CI with high confidence until it's green. For `stack`, it readies only `<branch>`: 1d already checked the branches below. When it ends on anything but a green pass (a stop, a question it handed back, a timeout, the pass cap, no progress), stop and pass its report on: nothing has merged. A green pass goes on to the merge, which waits on the same commit again and finds it settled. Keep its report's summary (what it fixed and pushed, its passes) for finish's.
 
-Otherwise, by `<syncMode>` from the *Pre-flight* section of the `finish` skill:
+Otherwise, skip this step when the pre-flight already ran sync, and else, by `<syncMode>` from the *Pre-flight* section of the `finish` skill:
 
 - **`full`:** run the `/dev-flows:sync` skill with no arguments: invoke it, don't redo its steps. The tree is clean, so it commits nothing, but it catches the branch up to its base, pushes what's unpushed, and refreshes the pull request body and its issue.
 - **`remote`:** nothing in finish pushes, so first `git fetch origin <branch>`: when `git rev-parse HEAD` isn't `git rev-parse origin/<branch>`, stop, `<branch> has commits that aren't pushed, and finish.sync is remote, so finish won't push them. Run /dev-flows:sync, then re-run /dev-flows:finish.` Then run the `/dev-flows:sync` skill with the argument `remote`: it refreshes the pull request body and its issue, and never commits, catches up, or pushes. A branch that's behind its base or conflicting stops at the merge state below.
@@ -114,7 +114,8 @@ Lead with anything that needs the user's attention: a stop and its reason, a cha
 - **Scope:** `branch` or `stack`, and how it was decided (an argument, the user's answer, or nothing below this branch). Branches still open above this one, and that `/dev-flows:sync` on each restacks them.
 - **Method:** the method and why; for a chain, `set by the stacking tool or the host`, and a method argument that wasn't used.
 - **CI:** the commit it passed on (short sha), how long it waited, the checks it didn't wait on (not required by the base, or ignored by `ready.ignoreChecks`; with `finish.requireAllChecks`, only the ignored ones), and any failed checks the host didn't require.
-- **Sync:** `full` (caught up and pushed, or nothing to do) or `remote` (only the pull request and issue refreshed, from `finish.sync`).
+- **Ready:** ran `/dev-flows:ready loop` (what it fixed and pushed, and its passes), or didn't, and why: it already ran on this branch (its mode and commit), `no-ready`, `finish.runReady`, or `finish.sync` remote.
+- **Sync:** `full` (caught up and pushed, or nothing to do), `remote` (only the pull request and issue refreshed, from `finish.sync`), or done by ready.
 - **Hooks:** what the `beforeCi` hooks committed and pushed, if anything.
 - **Evaluation:** with `finish.requireEvaluation`, the verdict it merged on and its commit, whether it carried over from an earlier commit or finish ran evaluate for it, and a flag the user accepted.
 - **Close-out:** the issue and its state (or left to the tracker, or as it was, with `finish.issueOnMerge` `tracker` or `leave`), errors resolved, and any to resolve by hand, from the remote sync.
