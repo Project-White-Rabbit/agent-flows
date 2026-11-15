@@ -365,6 +365,16 @@ describe("merge section", () => {
       checkConfig({ ...base, finish: { blockingReviewers: "codeql" } }).issues,
     ).toEqual([expect.stringContaining("finish.blockingReviewers")])
   })
+
+  it("takes whether finish runs ready on a branch ready never saw", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({ ...base, finish: { runReady: false } }).issues,
+    ).toEqual([])
+    expect(checkConfig({ ...base, finish: { runReady: "no" } }).issues).toEqual(
+      ["finish.runReady must be true or false"],
+    )
+  })
 })
 
 describe("ready section's CI settle rules", () => {

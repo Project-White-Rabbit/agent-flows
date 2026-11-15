@@ -665,7 +665,7 @@ describe("dev flows", () => {
     const run =
       files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
     expect(main).toMatch(
-      /finish\.ciTimeout finish\.blockingReviewers finish\.requireClean --optional/,
+      /finish\.ciTimeout finish\.blockingReviewers finish\.requireClean finish\.runReady --optional/,
     )
     expect(main).toContain("`null` reads as 30")
     expect(run).toContain("--timeout <ciTimeout × 60> --required-only")
@@ -679,6 +679,33 @@ describe("dev flows", () => {
     const sync = main.indexOf("1. **No pull request?**")
     expect(clean).toBeGreaterThan(-1)
     expect(sync).toBeGreaterThan(clean)
+  })
+
+  it("runs ready loop from finish when ready never ran on the branch, unless skipped", () => {
+    const main =
+      files.find((f) => f.path === "skills/finish/SKILL.md")?.content ?? ""
+    const run =
+      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
+    const ready =
+      files.find((f) => f.path === "skills/ready/SKILL.md")?.content ?? ""
+    expect(main).toContain(
+      'argument-hint: "[stack | branch] [squash | merge | rebase] [no-ready]"',
+    )
+    expect(main).toMatch(/finish\.requireClean finish\.runReady --optional/)
+    const decide = main.indexOf("### 1f. Ready")
+    expect(decide).toBeGreaterThan(main.indexOf("### 1e."))
+    expect(main.slice(decide)).toContain('ready.ts" last')
+    expect(main.slice(decide)).toContain("Not with the `no-ready` argument")
+    // Ready replaces finish's own sync, before the CI wait.
+    const loop = run.indexOf(
+      "run the `/dev-flows:ready` skill with the argument `loop` in place of the sync below",
+    )
+    expect(loop).toBeGreaterThan(-1)
+    expect(run.indexOf('ready.ts" ci start --sha <sha>')).toBeGreaterThan(loop)
+    // Ready marks its run, before its own hooks.
+    const mark = ready.indexOf('ready.ts" mark --mode <mode>')
+    expect(mark).toBeGreaterThan(-1)
+    expect(ready.indexOf("run ready.before")).toBeGreaterThan(mark)
   })
 
   it("reads code-scanning alerts, works past rollups, and stops on no progress", () => {
