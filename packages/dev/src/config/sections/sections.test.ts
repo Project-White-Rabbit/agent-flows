@@ -93,7 +93,10 @@ describe("sync format", () => {
       }),
       checkout([], { ".bitfab-dev/state.json": "{}" }),
     ]) {
-      expect(sync.detect?.(ctx)?.values).toEqual(BITFAB_DEV_FORMAT)
+      expect(sync.detect?.(ctx)?.values).toEqual({
+        ...BITFAB_DEV_FORMAT,
+        catchUp: "rebase",
+      })
     }
   })
 

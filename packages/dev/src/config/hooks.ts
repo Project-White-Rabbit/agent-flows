@@ -32,6 +32,7 @@ export const HOOK_VARS = [
   "since",
   "scope",
   "url",
+  "port",
 ] as const
 
 export type HookVar = (typeof HOOK_VARS)[number]
@@ -87,6 +88,12 @@ export type HookPoint = {
    * that needs what the flow has set up by then (an open page).
    */
   untried?: string
+  /**
+   * Why no agent is there when it runs (the server command runs it itself,
+   * and its watchdog on its own): its hooks can only be commands, and an
+   * exit 2 is a failure, not a task.
+   */
+  unattended?: string
   example: Hook[]
 }
 
@@ -267,6 +274,35 @@ export const HOOK_POINTS: HookPoint[] = [
     ],
   },
   {
+    id: "server.started",
+    flow: "server",
+    when: "Each time a dev server dev-flows starts answers, whichever command started it (server, preview, or server adopt restarting one started by hand), with `{url}` where it serves and `{port}` its port: for what must know the running server's address, such as a git-ignored config file a tool reads it from. A server that comes back on another port runs it again with the new one",
+    effects:
+      "Commands may write local files the repo ignores (a local config), but not deploy, publish, migrate, or write to a shared service or database",
+    failure: "report",
+    untried: "it needs the dev server running",
+    unattended:
+      "the server command runs it itself, often for another command, so its hooks are commands only",
+    example: [
+      {
+        name: "service-url",
+        run: 'printf \'{"serviceUrl": "%s"}\\n\' {url} > .tool/config.local.json',
+      },
+    ],
+  },
+  {
+    id: "server.stopped",
+    flow: "server",
+    when: "Each time a dev server dev-flows started stops while its worktree is still there: server stop (and stop all, for each worktree's), finish and cancel stopping it, the watchdog stopping one nothing has used for `server.idleTimeout` minutes, and a server that exits on its own. `{url}` and `{port}` are where it served. Not when its worktree is deleted, since what it wrote went with it",
+    effects:
+      "Commands may remove what `server.started` wrote, but not deploy, publish, migrate, or write to a shared service or database",
+    failure: "report",
+    untried: "it needs a dev server that was running",
+    unattended:
+      "the watchdog runs it when it stops an idle server, with no agent there, so its hooks are commands only",
+    example: [{ name: "service-url", run: "rm -f .tool/config.local.json" }],
+  },
+  {
     id: "cancel.before",
     flow: "cancel",
     when: "After cancel's survey and gates, before it closes the pull request or deletes anything: a check that must pass before the branch's work is thrown away",
@@ -370,6 +406,41 @@ function stringList(value: unknown): value is string[] {
  * Problems in the hook list at `where` (a point's config path), and keys a
  * newer plugin may know.
  */
+// The flows renamed in config format 4. The upgrade renames a hook's flows
+// filter, but a command that tests $AGENT_FLOWS_FLOW against an old name
+// itself would silently stop matching, so it gets a warning instead.
+const OLD_FLOW_NAMES: Record<string, string> = {
+  merge: "finish",
+  close: "cancel",
+}
+
+/**
+ * The warning for a command that compares `$AGENT_FLOWS_FLOW` with a flow's
+ * old name (a `case` arm such as `sync|merge)`, or a test such as
+ * `= merge`), or undefined.
+ */
+export function oldFlowNames(command: unknown): string | undefined {
+  if (typeof command !== "string" || !command.includes("AGENT_FLOWS_FLOW")) {
+    return undefined
+  }
+  const names = Object.keys(OLD_FLOW_NAMES).join("|")
+  const compared = new RegExp(
+    `(?:[|(]\\s*|=\\s*["']?)(${names})\\b|\\b(${names})["']?\\s*[|)]`,
+    "g",
+  )
+  const found = new Set<string>()
+  for (const match of command.matchAll(compared)) {
+    found.add((match[1] ?? match[2]) as string)
+  }
+  if (found.size === 0) {
+    return undefined
+  }
+  const list = [...found]
+    .map((name) => `"${name}" (now "${OLD_FLOW_NAMES[name]}")`)
+    .join(" and ")
+  return `compares $AGENT_FLOWS_FLOW with ${list}, a flow's old name, so it no longer matches; use the new name, or a flows filter`
+}
+
 export function checkHooks(
   value: unknown,
   where: string,
@@ -413,9 +484,17 @@ export function checkHooks(
       if (personal) {
         warnings.push(`${at}.${key} ${personal}`)
       }
+      const renamed = key !== "prompt" && oldFlowNames(entry[key])
+      if (renamed) {
+        warnings.push(`${at}.${key} ${renamed}`)
+      }
     }
     if ((entry.run === undefined) === (entry.prompt === undefined)) {
       issues.push(`${at} must have either run or prompt`)
+    } else if (point?.unattended && entry.prompt !== undefined) {
+      issues.push(
+        `${at}.prompt isn't for ${where}: ${point.unattended}. Use run`,
+      )
     }
     if (entry.fix !== undefined && entry.run === undefined) {
       issues.push(`${at}.fix needs a run command to check it`)
@@ -488,8 +567,11 @@ export function checkHooks(
     if (entry.recheck !== undefined) {
       if (entry.run === undefined) {
         issues.push(`${at}.recheck is only for a run command`)
-      } else if (typeof entry.recheck !== "boolean") {
-        issues.push(`${at}.recheck must be true or false`)
+      } else if (
+        typeof entry.recheck !== "boolean" &&
+        entry.recheck !== "report"
+      ) {
+        issues.push(`${at}.recheck must be true, false, or "report"`)
       } else if (point?.findings) {
         issues.push(
           `${at}.recheck isn't for ${where}: its commands only read, so an exit 2 there stops rather than hands over a task`,

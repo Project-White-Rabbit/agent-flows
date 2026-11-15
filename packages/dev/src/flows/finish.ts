@@ -233,7 +233,7 @@ Only after the host said merged. When \`above\` is more than 0, keep it: the pul
 
 ### Stop the dev server
 
-Only after the host said merged: the work is done, so the dev server \`{{cmd}}server\` started for it isn't needed. \`{{command:server}} stop\`. It stops only one \`{{cmd}}server\` started in this worktree (and any it started for worktrees that are gone, as \`reaped\`), never one the person started by hand, and stopping none is fine. Keep what it prints for the report.
+Only after the host said merged: the work is done, so the dev server \`{{cmd}}server\` started for it isn't needed. \`{{command:server}} stop\`. It stops only one \`{{cmd}}server\` started in this worktree (and any it started for worktrees that are gone, as \`reaped\`), never one the person started by hand, and stopping none is fine. It runs the repo's \`server.stopped\` hooks itself. Keep what it prints for the report, with any hook in its \`hooks.failures\`.
 
 ### Watch the deployment
 

@@ -1,3 +1,4 @@
+import { hookField } from "../hooks.ts"
 import {
   packageScripts,
   resolveScript,
@@ -16,6 +17,12 @@ import type {
 const LOCAL_URL: FieldPattern = {
   regex: /^https?:\/\/[\w.-]+(:\d{1,5})?(\/[\w./%~-]*)?$/,
   hint: "a URL like `http://localhost:3000`",
+}
+
+/** A port range, `3001-3099`, or one port. */
+const PORT_RANGE: FieldPattern = {
+  regex: /^\d{1,5}(-\d{1,5})?$/,
+  hint: "a range of ports like `3001-3099`",
 }
 
 /** Script names that start a dev server, most likely first. */
@@ -84,6 +91,15 @@ export const server: SectionSpec = {
         "Minutes a server dev-flows started may go with nothing connected to it (no page open on it) before it's stopped (default 240; 0: never). One is also stopped once its worktree is deleted, whatever this says",
       example: 60,
     },
+    {
+      key: "ports",
+      description:
+        "A range of ports (`3001-3099`) to give each worktree's server its own: dev-flows picks one nothing listens on, keeps the same one for a worktree while it's free, and passes it to `command` as `$PORT` and `{port}`. The server's URL is then `url` on that port (`http://localhost:<port>` with no `url`). Leave it unset when the repo's dev script picks its own port",
+      example: "3001-3099",
+      pattern: PORT_RANGE,
+    },
+    hookField("server.started"),
+    hookField("server.stopped"),
   ],
   detect: detectServer,
   lookup:

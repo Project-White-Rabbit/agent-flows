@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { spawnSync } from "node:child_process"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { afterEach, describe, expect, it } from "vitest"
+import { CONFIG_VERSION } from "../config/config.ts"
 import {
   adoptPlan,
   type Deps,
@@ -8,13 +13,129 @@ import {
   parseCwds,
   parseEtime,
   parseLsof,
+  parsePorts,
+  pickPort,
   running,
   type ServerState,
   type Settings,
+  serverHooks,
   sweep,
   urlFromLog,
   watchVerdict,
+  withPort,
 } from "./server.ts"
+
+const dirs: string[] = []
+
+afterEach(() => {
+  for (const dir of dirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+describe("a port of its own", () => {
+  it("reads a range, or one port, and refuses anything else", () => {
+    expect(parsePorts("3001-3099")).toEqual([3001, 3099])
+    expect(parsePorts("4000")).toEqual([4000, 4000])
+    expect(parsePorts("3099-3001")).toBeUndefined()
+    expect(parsePorts("0-10")).toBeUndefined()
+    expect(parsePorts("70000")).toBeUndefined()
+    expect(parsePorts("3001,3002")).toBeUndefined()
+  })
+
+  it("keeps a worktree's port while it's free, else takes the first nobody listens on or holds", () => {
+    const none = new Set<number>()
+    expect(pickPort([3001, 3005], 3003, none, none)).toBe(3003)
+    expect(pickPort([3001, 3005], 3003, new Set([3003]), none)).toBe(3001)
+    expect(pickPort([3001, 3005], 4000, none, none)).toBe(3001)
+    expect(
+      pickPort([3001, 3005], undefined, new Set([3001]), new Set([3002])),
+    ).toBe(3003)
+  })
+
+  it("takes a port another worktree holds before giving up, but never one in use", () => {
+    expect(
+      pickPort([3001, 3002], undefined, new Set([3001]), new Set([3002])),
+    ).toBe(3002)
+    expect(
+      pickPort([3001, 3002], undefined, new Set([3001, 3002]), new Set()),
+    ).toBeUndefined()
+  })
+
+  it("puts the port in the command and the URL", () => {
+    const settings: Settings & { command: string } = {
+      command: "bun run dev --port {port}",
+      url: null,
+      ports: [3001, 3099],
+      timeout: 120,
+      idleTimeout: 240,
+    }
+    expect(withPort(settings, 3004)).toMatchObject({
+      command: "bun run dev --port 3004",
+      url: "http://localhost:3004",
+      port: 3004,
+    })
+    expect(
+      withPort({ ...settings, url: "http://127.0.0.1:3000/app" }, 3004).url,
+    ).toBe("http://127.0.0.1:3004/app")
+  })
+})
+
+describe("the server's hooks", () => {
+  function repo(config: unknown): string {
+    const root = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "server-hooks-")),
+    )
+    dirs.push(root)
+    const git = (...args: string[]) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" })
+    git("init", "--quiet", "--initial-branch", "main")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    git("commit", "--quiet", "--allow-empty", "-m", "base")
+    fs.mkdirSync(path.join(root, ".agent-flows"))
+    fs.writeFileSync(
+      path.join(root, ".agent-flows", "config.json"),
+      JSON.stringify(config),
+    )
+    return root
+  }
+
+  it("runs the started hooks with where the server serves, and the stopped ones after", () => {
+    const root = repo({
+      version: CONFIG_VERSION,
+      repo: { baseBranch: "main" },
+      server: {
+        command: "bun run dev",
+        started: [
+          { name: "url", run: "echo {url} {port} > url.txt" },
+          { name: "broken", run: "exit 1" },
+        ],
+        stopped: [{ name: "url", run: "rm url.txt" }],
+      },
+    })
+    const started = serverHooks(root, "server.started", {
+      url: "http://localhost:3004",
+      port: 3004,
+    })
+    expect(fs.readFileSync(path.join(root, "url.txt"), "utf8")).toBe(
+      "http://localhost:3004 3004\n",
+    )
+    expect(started?.failures.map((f) => f.name)).toEqual(["broken"])
+    const stopped = serverHooks(root, "server.stopped", {
+      url: "http://localhost:3004",
+    })
+    expect(stopped?.ran.map((r) => r.result)).toEqual(["passed"])
+    expect(fs.existsSync(path.join(root, "url.txt"))).toBe(false)
+  })
+
+  it("does nothing when the point has no hooks", () => {
+    const root = repo({ version: CONFIG_VERSION, repo: { baseBranch: "main" } })
+    expect(
+      serverHooks(root, "server.started", { url: "http://localhost:3000" }),
+    ).toBeUndefined()
+  })
+})
 
 describe("urlFromLog", () => {
   it("reads the local URL a dev server prints, past its colors", () => {
@@ -65,6 +186,7 @@ describe("findServer", () => {
   const settings = (over: Partial<Settings> = {}): Settings => ({
     command: "bun run dev",
     url: null,
+    ports: null,
     timeout: 120,
     idleTimeout: 240,
     ...over,

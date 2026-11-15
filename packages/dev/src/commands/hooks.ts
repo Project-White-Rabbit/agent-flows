@@ -59,7 +59,11 @@ const LOST_GRACE = 10
 export type HookRun = {
   point: string
   name: string
-  result: "passed" | "fixed" | "failed" | "timedOut" | "skipped"
+  /**
+   * `open`: a `recheck: "report"` hook's check still found something after
+   * the agent's task; what it printed is in the report's `open`.
+   */
+  result: "passed" | "fixed" | "failed" | "timedOut" | "skipped" | "open"
   /** Why it was skipped. */
   reason?: string
   /** This run was the recheck after a task the hook handed over. */
@@ -86,8 +90,12 @@ export type HookReport = {
     name: string
     task: string
     resume: string
-    /** The hook runs its command again on `--after`, and still failing stops. */
-    recheck?: boolean
+    /**
+     * The hook runs its command again on `--after`: `true`, and still
+     * failing stops; `report`, and what it still finds (an exit 2) is
+     * carried to `open`, so the agent fixes only what it can with confidence.
+     */
+    recheck?: true | "report"
   }
   stop?: HookRun
   running?: {
@@ -106,6 +114,12 @@ export type HookReport = {
    * lines; the rest stays in `log`.
    */
   findings?: { point: string; name: string; output: string; log: string }[]
+  /**
+   * What a `recheck: "report"` hook's check still printed after the agent's
+   * task (it exited 2 again): findings the agent left, for the flow's report
+   * to list as open. They don't stop the command.
+   */
+  open?: { point: string; name: string; output: string; log: string }[]
 }
 
 export type HookRequest = {
@@ -135,8 +149,10 @@ export type HookRequest = {
   since?: string
   /** How much evaluate reviews: full, delta, or carry. */
   scope?: string
-  /** The page preview opened. */
+  /** The page preview opened, or where the dev server serves (server). */
   url?: string
+  /** The dev server's port (server). */
+  port?: string
   /** The `<point>/<name>` a previous call stopped at. */
   after?: string
   /** The `<point>/<name>` a previous call left running, to wait on. */
@@ -423,6 +439,16 @@ export function runHooks(
         since: request.since,
         scope: request.scope,
         url: request.url,
+        port: request.port,
+      }
+      // No agent is there to do a prompt's task (config checks refuse one).
+      if (hook.prompt !== undefined && point.unattended) {
+        report.ran.push({
+          ...at,
+          result: "skipped",
+          reason: `a prompt can't run here: ${point.unattended}`,
+        })
+        continue
       }
       if (hook.prompt !== undefined) {
         report.status = "agent"
@@ -452,6 +478,7 @@ export function runHooks(
         AGENT_FLOWS_SINCE: request.since ?? "",
         AGENT_FLOWS_SCOPE: request.scope ?? "",
         AGENT_FLOWS_URL: request.url ?? "",
+        AGENT_FLOWS_PORT: request.port ?? "",
         AGENT_FLOWS_CHANGED_FILES: changedFile,
       }
       const timeout = hook.timeout ?? DEFAULT_TIMEOUT
@@ -562,12 +589,31 @@ export function runHooks(
         }
         continue
       }
+      // A `recheck: "report"` hook that still finds something after the
+      // task: what's left is open, for the report, not a failure. It ran
+      // once more only, so it can't loop.
+      if (
+        result.code === 2 &&
+        !result.timedOut &&
+        stage === "recheck" &&
+        hook.recheck === "report"
+      ) {
+        const printed =
+          result.stderr.trim() ||
+          result.stdout.trim() ||
+          `The ${hook.name} hook exited 2 with no output; read its log: ${log}`
+        report.ran.push({ ...at, result: "open", recheck: true, seconds, log })
+        report.open ??= []
+        report.open.push({ ...at, output: head(printed), log })
+        continue
+      }
       // A findings point only reads, so it has no task to hand over, and a
       // recheck that still finds something is a failure.
       if (
         result.code === 2 &&
         !result.timedOut &&
         !point.findings &&
+        !point.unattended &&
         stage !== "recheck"
       ) {
         report.ran.push({ ...at, result: "passed", seconds, log })
@@ -579,7 +625,11 @@ export function runHooks(
             result.stdout.trim() ||
             `The ${hook.name} hook exited 2 with no output; read its log: ${log}`,
           resume: marker,
-          ...(hook.recheck ? { recheck: true } : {}),
+          ...(hook.recheck === "report"
+            ? { recheck: "report" as const }
+            : hook.recheck
+              ? { recheck: true as const }
+              : {}),
         }
         return report
       }
@@ -733,6 +783,7 @@ function request(
       since: args.flags.get("since"),
       scope: args.flags.get("scope"),
       url: args.flags.get("url"),
+      port: args.flags.get("port"),
       after: args.flags.get("after"),
       wait: args.flags.get("wait"),
       maxWait: maxWait === undefined ? undefined : Number(maxWait),
@@ -796,10 +847,12 @@ const USAGE = `Usage: hooks.ts run <point>... --flow <flow> [flags]
       or \`after\` (around every command), or a flow's own (\`ready.before\`,
       \`finish.after\`). Prints JSON: \`status\` (done, agent, stop, or
       running), \`ran\` (each hook's result: passed, fixed, failed, timedOut,
-      or skipped and why), \`failures\` (at points that report rather than
-      stop), \`agent\` (a task for the agent: a prompt, or what a command
+      open, or skipped and why), \`failures\` (at points that report rather
+      than stop), \`agent\` (a task for the agent: a prompt, or what a command
       printed when it exited 2; run again with --after <its resume> once
       it's done, which first runs a \`recheck\` hook's command again),
+      \`open\` (what a \`recheck: "report"\` hook's command still printed
+      then: findings left open, for the report, not a stop),
       \`stop\` (the hook that failed), and \`running\` (a hook still running
       at --max-wait; run again with --wait <its resume>).
 
@@ -825,7 +878,9 @@ Flags:
   --merge-commit <sha>   The commit the merge landed, for {merge}
   --since <sha>          The previous recorded evaluation's commit, for {since}
   --scope <scope>        What evaluate reviews (${EVALUATE_SCOPES.join(", ")}), for {scope}
-  --url <url>            The page preview opened, for {url}
+  --url <url>            The page preview opened, or where the dev server
+                         serves (server.started, server.stopped), for {url}
+  --port <port>          The dev server's port, for {port}
   --after <point>/<name> Go on after this hook, where a call stopped
   --wait <point>/<name>  Wait on this hook, where a call left it running
   --max-wait <seconds>   Stop waiting after this long, leaving the hook

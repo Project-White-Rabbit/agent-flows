@@ -8,6 +8,7 @@ import {
   globRegex,
   HOOK_FLOWS,
   HOOK_POINTS,
+  oldFlowNames,
 } from "./hooks.ts"
 import { SECTIONS } from "./sections/index.ts"
 
@@ -148,6 +149,9 @@ describe("checkHooks", () => {
 
   it("takes recheck only on a command that can hand over a task", () => {
     expect(check([{ name: "a", run: "x", recheck: true }]).issues).toEqual([])
+    expect(check([{ name: "a", run: "x", recheck: "report" }]).issues).toEqual(
+      [],
+    )
     expect(
       check([
         { name: "a", prompt: "x", recheck: true },
@@ -155,8 +159,12 @@ describe("checkHooks", () => {
       ]).issues,
     ).toEqual([
       "ready.before[a].recheck is only for a run command",
-      "ready.before[b].recheck must be true or false",
+      'ready.before[b].recheck must be true, false, or "report"',
     ])
+    expect(
+      check([{ name: "a", run: "x", recheck: "report" }], "evaluate.scan")
+        .issues,
+    ).toHaveLength(1)
     expect(
       check([{ name: "a", run: "x", recheck: true }], "evaluate.scan").issues,
     ).toEqual([
@@ -188,6 +196,20 @@ describe("checkHooks", () => {
     ])
   })
 
+  it("takes only commands at the server's points, which run with no agent", () => {
+    expect(
+      check(
+        [
+          { name: "a", run: "x" },
+          { name: "b", prompt: "x" },
+        ],
+        "server.stopped",
+      ).issues,
+    ).toEqual([
+      "server.stopped[b].prompt isn't for server.stopped: the watchdog runs it when it stops an idle server, with no agent there, so its hooks are commands only. Use run",
+    ])
+  })
+
   it("rejects what isn't a list of objects", () => {
     expect(check({ name: "a" }).issues).toEqual([
       "ready.before must be a list of hooks",
@@ -202,6 +224,43 @@ describe("checkHooks", () => {
         expect.stringContaining('unknown field "ready.before[a].retries"'),
       ],
     })
+  })
+})
+
+describe("oldFlowNames", () => {
+  it("warns when a command compares $AGENT_FLOWS_FLOW with a renamed flow", () => {
+    expect(
+      check(
+        [
+          {
+            name: "fingerprint",
+            run: 'case "$AGENT_FLOWS_FLOW" in sync|ready|merge) ;; *) exit 0 ;; esac; ./go.sh',
+          },
+        ],
+        "hooks.after",
+      ).warnings,
+    ).toEqual([
+      'hooks.after[fingerprint].run compares $AGENT_FLOWS_FLOW with "merge" (now "finish"), a flow\'s old name, so it no longer matches; use the new name, or a flows filter',
+    ])
+    expect(
+      oldFlowNames('[ "$AGENT_FLOWS_FLOW" = "close" ] && ./teardown.sh'),
+    ).toContain('"close" (now "cancel")')
+    expect(
+      oldFlowNames("case $AGENT_FLOWS_FLOW in (merge|close) ;; esac"),
+    ).toContain('"merge" (now "finish") and "close" (now "cancel")')
+  })
+
+  it("leaves commands that only mention merge or close, or don't test the flow", () => {
+    expect(
+      oldFlowNames(
+        '[ "$AGENT_FLOWS_FLOW" = sync ] && git merge --no-edit origin/main',
+      ),
+    ).toBeUndefined()
+    expect(
+      oldFlowNames("case $AGENT_FLOWS_FLOW in finish|cancel) ;; esac"),
+    ).toBeUndefined()
+    expect(oldFlowNames("case $X in merge) ;; esac")).toBeUndefined()
+    expect(oldFlowNames(undefined)).toBeUndefined()
   })
 })
 
