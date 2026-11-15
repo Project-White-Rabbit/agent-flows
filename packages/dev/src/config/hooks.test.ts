@@ -188,6 +188,20 @@ describe("checkHooks", () => {
     ])
   })
 
+  it("takes only commands at the server's points, which run with no agent", () => {
+    expect(
+      check(
+        [
+          { name: "a", run: "x" },
+          { name: "b", prompt: "x" },
+        ],
+        "server.stopped",
+      ).issues,
+    ).toEqual([
+      "server.stopped[b].prompt isn't for server.stopped: the watchdog runs it when it stops an idle server, with no agent there, so its hooks are commands only. Use run",
+    ])
+  })
+
   it("rejects what isn't a list of objects", () => {
     expect(check({ name: "a" }).issues).toEqual([
       "ready.before must be a list of hooks",
