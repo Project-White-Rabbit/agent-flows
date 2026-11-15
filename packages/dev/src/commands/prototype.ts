@@ -6,6 +6,12 @@
 // can open a mockup and reload it after each edit. What the mockup shows, and
 // where the person sees it, stays in the skill.
 //
+// `prototype.index`, when set, is a Markdown file in the repo that keeps a
+// record of each mockup: what it shows and the links that outlast the session
+// (a hosted page such as a Claude artifact, a design link, the file kept in
+// `prototype.dir`). `record` adds a mockup's entry or updates it in place, so
+// a team that doesn't keep the pages themselves still keeps where they are.
+//
 // The server is this file run as `static`, started in the background and
 // recorded beside the pages, so each worktree has its own and `stop` stops
 // only that one. It stops itself once its folder is gone (the worktree was
@@ -20,9 +26,12 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { getAt } from "../config/config.ts"
 import { loadConfig, repoRoot } from "./configure.ts"
 import {
+  type Flags,
   isMain,
   parseFlags,
   printJson,
+  requiredFlag,
+  run,
   stateDir,
   USAGE_EXIT,
   UsageError,
@@ -53,6 +62,261 @@ export function pagesDir(
     )
   }
   return { dir: resolved, kept: true }
+}
+
+/**
+ * The Markdown file a worktree's mockups are recorded in: `prototype.index`
+ * inside the checkout, or null when the team doesn't keep one.
+ */
+export function indexFile(root: string, index: unknown): string | null {
+  if (typeof index !== "string" || !index) {
+    return null
+  }
+  const resolved = path.resolve(root, index)
+  if (!resolved.startsWith(`${root}${path.sep}`)) {
+    throw new UsageError(
+      `prototype.index must be a file inside the repo: ${index}`,
+    )
+  }
+  return resolved
+}
+
+/** One mockup's entry in `prototype.index`. */
+export type IndexEntry = {
+  /** The mockup's kebab-case name, which keys its entry. */
+  name: string
+  title?: string
+  summary?: string
+  /** A hosted page that shows it (a Claude artifact, a canvas). */
+  page?: string
+  /** Where it is in the team's design tool. */
+  design?: string
+  /** The kept page, relative to the index file's folder. */
+  file?: string
+  branch?: string
+  /** YYYY-MM-DD. */
+  updated?: string
+}
+
+const INDEX_HEADER = `# Prototypes
+
+UI mockups made with \`/dev-flows:prototype\`, newest first. Each entry links to where the mockup lives: a hosted page, the design tool, or the page kept in the repo. Entries are updated in place as a mockup changes; text outside them is left alone.
+`
+
+const FIELDS = [
+  ["page", "Page"],
+  ["design", "Design"],
+  ["file", "File"],
+] as const
+
+function startMarker(name: string): string {
+  return `<!-- prototype: ${name} -->`
+}
+
+function endMarker(name: string): string {
+  return `<!-- /prototype: ${name} -->`
+}
+
+/** An entry's fields, read back from the block `renderEntry` wrote. */
+export function parseEntry(name: string, block: string): IndexEntry {
+  const entry: IndexEntry = { name }
+  const lines = block.split("\n")
+  const titleAt = lines.findIndex((l) => l.startsWith("### "))
+  if (titleAt !== -1) {
+    entry.title = lines[titleAt].slice(4).trim()
+  }
+  for (const [key, label] of FIELDS) {
+    const prefix = `- **${label}:** `
+    const line = lines.find((l) => l.startsWith(prefix))
+    if (line) {
+      const value = line.slice(prefix.length).trim()
+      // The file is written as a link; the others as bare URLs.
+      entry[key] = decodeURI(/^\[.*\]\((.*)\)$/.exec(value)?.[1] ?? value)
+    }
+  }
+  const meta = lines.find((l) => l.startsWith("- **Branch:** "))
+  const branch = meta && /^- \*\*Branch:\*\* `([^`]*)`/.exec(meta)?.[1]
+  if (branch) {
+    entry.branch = branch
+  }
+  const updated = /(?:updated|\*\*Updated:\*\*) (\d{4}-\d{2}-\d{2})/.exec(
+    block,
+  )?.[1]
+  if (updated) {
+    entry.updated = updated
+  }
+  const fieldsAt = lines.findIndex((l) => l.startsWith("- **"))
+  const summary = lines
+    .slice(titleAt + 1, fieldsAt === -1 ? undefined : fieldsAt)
+    .join("\n")
+    .trim()
+  if (summary) {
+    entry.summary = summary
+  }
+  return entry
+}
+
+/** The Markdown block for one entry, between its markers. */
+export function renderEntry(entry: IndexEntry): string {
+  const lines = [
+    startMarker(entry.name),
+    `### ${entry.title ?? entry.name}`,
+    "",
+  ]
+  if (entry.summary) {
+    lines.push(entry.summary, "")
+  }
+  for (const [key, label] of FIELDS) {
+    const value = entry[key]
+    if (value) {
+      lines.push(
+        `- **${label}:** ${key === "file" ? `[${path.posix.basename(value)}](${encodeURI(value)})` : value}`,
+      )
+    }
+  }
+  const meta = [
+    entry.branch ? `\`${entry.branch}\`` : undefined,
+    entry.updated ? `updated ${entry.updated}` : undefined,
+  ].filter(Boolean)
+  if (entry.branch) {
+    lines.push(`- **Branch:** ${meta.join(", ")}`)
+  } else if (entry.updated) {
+    lines.push(`- **Updated:** ${entry.updated}`)
+  }
+  lines.push(endMarker(entry.name))
+  return lines.join("\n")
+}
+
+/**
+ * `text` (the index file's content, empty when it's new) with `entry` in it:
+ * its block replaced in place when it's there, the fields it doesn't give
+ * kept from before, else a new block above every other entry (newest first).
+ */
+export function upsertEntry(
+  text: string,
+  entry: IndexEntry,
+): { text: string; entry: IndexEntry; added: boolean } {
+  const start = startMarker(entry.name)
+  const end = endMarker(entry.name)
+  const at = text.indexOf(start)
+  const endAt = at === -1 ? -1 : text.indexOf(end, at)
+  if (at !== -1 && endAt !== -1) {
+    const merged: IndexEntry = parseEntry(entry.name, text.slice(at, endAt))
+    for (const [key, value] of Object.entries(entry)) {
+      if (value) {
+        ;(merged as Record<string, string>)[key] = value
+      }
+    }
+    return {
+      text:
+        text.slice(0, at) +
+        renderEntry(merged) +
+        text.slice(endAt + end.length),
+      entry: merged,
+      added: false,
+    }
+  }
+  const block = `${renderEntry(entry)}\n`
+  if (!text.trim()) {
+    return { text: `${INDEX_HEADER}\n${block}`, entry, added: true }
+  }
+  const first = text.indexOf("<!-- prototype: ")
+  return {
+    text:
+      first === -1
+        ? `${text.replace(/\n*$/, "\n")}\n${block}`
+        : `${text.slice(0, first)}${block}\n${text.slice(first)}`,
+    entry,
+    added: true,
+  }
+}
+
+const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+/**
+ * `value` when it's a link that outlasts the session (http or https, and not
+ * on this machine), else a UsageError naming `flag`.
+ */
+export function lastingUrl(
+  flag: string,
+  value: string | undefined,
+): string | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new UsageError(`--${flag} must be a URL: ${value}`)
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new UsageError(`--${flag} must be an http(s) URL: ${value}`)
+  }
+  if (
+    /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0)$/.test(url.hostname)
+  ) {
+    throw new UsageError(
+      `--${flag} is a link on this machine, which doesn't outlast the session: record the kept page with --file instead`,
+    )
+  }
+  return value
+}
+
+/** Add or update a mockup's entry in `prototype.index`. */
+function record(root: string, index: string | null, flags: Flags) {
+  if (!index) {
+    throw new UsageError(
+      "prototype.index isn't set: there's no file to record mockups in",
+    )
+  }
+  const name = requiredFlag(flags, "name")
+  if (!NAME.test(name)) {
+    throw new UsageError(`--name must be kebab-case: ${name}`)
+  }
+  const page = lastingUrl("page", flags.get("page"))
+  const design = lastingUrl("design", flags.get("design"))
+  let file: string | undefined
+  const given = flags.get("file")
+  if (given) {
+    const absolute = path.resolve(root, given)
+    if (!absolute.startsWith(`${root}${path.sep}`)) {
+      throw new UsageError(
+        `--file must be a page inside the repo (one kept in prototype.dir): ${given}`,
+      )
+    }
+    file = path
+      .relative(path.dirname(index), absolute)
+      .split(path.sep)
+      .join("/")
+  }
+  let text = ""
+  try {
+    text = fs.readFileSync(index, "utf8")
+  } catch {}
+  if (!page && !design && !file && !text.includes(startMarker(name))) {
+    throw new UsageError(
+      "nothing lasting to record: give --page, --design, or --file",
+    )
+  }
+  const branch = run("git", ["branch", "--show-current"], root).stdout.trim()
+  const result = upsertEntry(text, {
+    name,
+    title: flags.get("title"),
+    summary: flags.get("summary")?.trim(),
+    page,
+    design,
+    file,
+    branch: branch || undefined,
+    updated: new Date().toISOString().slice(0, 10),
+  })
+  fs.mkdirSync(path.dirname(index), { recursive: true })
+  fs.writeFileSync(index, result.text)
+  return {
+    status: result.added ? "added" : "updated",
+    index,
+    entry: result.entry,
+  }
 }
 
 /** The static server prototype started in a worktree, as recorded. */
@@ -318,7 +582,14 @@ const USAGE = `Usage: prototype.ts <subcommand>
 
   dir                  Print the folder for this worktree's mockup pages,
                        creating it: prototype.dir when the config sets one
-                       (kept: true), else a scratch folder in its git dir
+                       (kept: true), else a scratch folder in its git dir,
+                       and index: the prototype.index file, or null
+  record --name <name> [--title <words>] [--summary <text>] [--page <url>]
+         [--design <url>] [--file <path>]
+                       Add the mockup's entry to prototype.index, or update
+                       it in place (fields not given keep their value). Links
+                       must outlast the session: a hosted page, a design
+                       link, or a page kept in the repo
   serve                Serve that folder on localhost, starting the server in
                        the background when this worktree has none running.
                        Prints its url, dir, and status. Pages are never cached
@@ -344,26 +615,33 @@ export async function main(argv: string[]): Promise<void> {
       )
       return
     }
-    if (command !== "dir" && command !== "serve" && command !== "stop") {
+    if (
+      command !== "dir" &&
+      command !== "serve" &&
+      command !== "stop" &&
+      command !== "record"
+    ) {
       console.log(USAGE)
       process.exitCode = command && command !== "help" ? 1 : 0
       return
     }
-    parseFlags(rest)
+    const flags = parseFlags(rest)
     const root = fs.realpathSync(repoRoot())
     const state = stateDir("prototype", { cwd: root })
     if (command === "stop") {
       printJson(await stop(state))
       return
     }
-    const { dir, kept } = pagesDir(
-      root,
-      state,
-      getAt(loadConfig(root).config ?? {}, "prototype.dir"),
-    )
+    const config = loadConfig(root).config ?? {}
+    const index = indexFile(root, getAt(config, "prototype.index"))
+    if (command === "record") {
+      printJson(record(root, index, flags))
+      return
+    }
+    const { dir, kept } = pagesDir(root, state, getAt(config, "prototype.dir"))
     fs.mkdirSync(dir, { recursive: true })
     if (command === "dir") {
-      printJson({ dir, kept })
+      printJson({ dir, kept, index })
       return
     }
     const running = readState(state)

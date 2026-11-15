@@ -14,7 +14,7 @@ export const prototypeFlow: Flow = devKit.defineFlow({
   title: "{{cmd}}prototype",
   frontmatter: {
     description:
-      "Mock up a UI from a description, as a clickable page in the look of the team's design system, and show it to the person wherever this session can (a hosted page, the team's design tool, or a browser), then iterate on it from their feedback. For exploring a UI, not building production components; it writes in the working tree only when the team keeps its mockups there (`prototype.dir`), and never commits.",
+      "Mock up a UI from a description, as a clickable page in the look of the team's design system, and show it to the person wherever this session can (a hosted page, the team's design tool, or a browser), then iterate on it from their feedback. For exploring a UI, not building production components; it writes in the working tree only when the team keeps its mockups there (pages in `prototype.dir`, a record of each in `prototype.index`), and never commits.",
     argumentHint:
       "[<description of the UI> | design [<design link>] | stop | help]",
   },
@@ -23,7 +23,7 @@ export const prototypeFlow: Flow = devKit.defineFlow({
     configure: CONFIGURE_GET_AND_INTEGRATIONS,
     prototype: {
       description:
-        "`dir` prints the folder for this worktree's mockup pages, and `kept`: true when it's `prototype.dir`, a folder in the repo the team keeps its mockups in, else it's a scratch folder in the worktree's git dir; `serve` serves that folder on localhost, starting the server in the background when this worktree has none, and prints its `status`, `url`, and `dir`; `stop` stops the server prototype started",
+        "`dir` prints the folder for this worktree's mockup pages, and `kept`: true when it's `prototype.dir`, a folder in the repo the team keeps its mockups in, else it's a scratch folder in the worktree's git dir; and `index`: the `prototype.index` file the team records its mockups in, or `null`; `record --name <name> [--title <words>] [--summary <text>] [--page <url>] [--design <url>] [--file <path>]` adds the mockup's entry to that file, or updates it in place (a field not given keeps its value), and prints `status` (`added` or `updated`), `index`, and the `entry`; it takes only links that outlast the session, never a localhost one; `serve` serves that folder on localhost, starting the server in the background when this worktree has none, and prints its `status`, `url`, and `dir`; `stop` stops the server prototype started",
       args: "<subcommand>",
     },
   }),
@@ -42,13 +42,13 @@ export const prototypeFlow: Flow = devKit.defineFlow({
       "Put the current mockup in the team's design tool, at the design link given or the tool's own file.",
     help: "Show usage and exit.",
   },
-  intro: `Turns a description of a UI into a mockup the person can see and click through, so a direction can be judged before anyone writes production code. The mockup is the point: it's shown in the first place this session can show it, in the order \`prototype.show\` gives, by default: a tool that hosts a page for the person (an artifact or canvas tool the host provides), else the team's design tool (the \`design\` integrations the repo uses at \`write\`), else a browser (the workspace app's beside this session, this session's own, or the system's). The places after the one that works are its backups. It takes its look from \`prototype.style\`, else the team's design system (every \`design\` integration), else the repo's own styles. Any page behind it is scratch, kept outside the working tree, unless the team keeps its mockups in the repo (\`prototype.dir\`): then each is also saved there.
+  intro: `Turns a description of a UI into a mockup the person can see and click through, so a direction can be judged before anyone writes production code. The mockup is the point: it's shown in the first place this session can show it, in the order \`prototype.show\` gives, by default: a tool that hosts a page for the person (an artifact or canvas tool the host provides), else the team's design tool (the \`design\` integrations the repo uses at \`write\`), else a browser (the workspace app's beside this session, this session's own, or the system's). The places after the one that works are its backups. It takes its look from \`prototype.style\`, else the team's design system (every \`design\` integration), else the repo's own styles. Any page behind it is scratch, kept outside the working tree, unless the team keeps its mockups in the repo (\`prototype.dir\`): then each is also saved there. When the team keeps a record of its mockups (\`prototype.index\`, a Markdown file in the repo), each gets an entry there with the links that outlast the session: the hosted page (a Claude artifact, say), the design tool's link, the kept page.
 
 **Iterating.** After the report, the person's feedback in this session is more work on the same mockup, under this skill's rules: change it where it's shown (republish the same hosted page, replace the same designs, or reload the same browser page), look at it again, and say what changed. A new variant only when they ask for one, or for a pivot ("try a completely different layout"), shown beside the first rather than over it. When they ask to put it in the design tool, run the design step. When they're done, \`{{cmd}}prototype stop\` stops a browser mockup's server.
 
-It never writes in the working tree outside \`prototype.dir\`, and never commits or pushes: a mockup that should become real work, or a saved one worth committing, is the person's call.`,
+It never writes in the working tree outside \`prototype.dir\` and \`prototype.index\`, and never commits or pushes: a mockup that should become real work, or a saved one worth committing, is the person's call.`,
   invariants: [
-    "**Never the working tree, unless kept.** A mockup is never written into the repo's files, except as a page in `prototype.dir` when the team keeps its mockups there, and nothing is committed or pushed. A page behind a mockup goes in a scratch folder: the one the hosting tool reads from, else the one `{{command:prototype}} dir` prints.",
+    "**Never the working tree, unless kept.** A mockup is never written into the repo's files, except as a page in `prototype.dir` when the team keeps its mockups there, or an entry in `prototype.index` when it keeps a record of them, and nothing is committed or pushed. A page behind a mockup goes in a scratch folder: the one the hosting tool reads from, else the one `{{command:prototype}} dir` prints.",
     "**Self-contained.** A mockup page opens as it is: styles and scripts inline or from a CDN, no package install, no bundler, no imports from the repo's code. Read the repo's code for how its UI looks and reads; never run it to make a mockup.",
     "**The design tool at its level.** Read a `design` integration's design system at any level, but put a mockup in it only at `write`, and only in the `design` mode, when the person asks for it (a design link, \"put this in the design file\"), or when it's the first place in `<show>` this session can show a mockup. A failed write there leaves the mockup as it was.",
     hooksInvariant("prototype"),
@@ -74,7 +74,8 @@ in the look of the team's design system, and shows it wherever this session
 can: a page the host publishes for you, else the team's design tool, else a
 browser (prototype.show sets the order, and can leave one out). Feedback afterwards changes it in place. Never writes in the
 working tree, unless prototype.dir names a folder the team keeps its
-mockups in, and never commits.
+mockups in, or prototype.index a Markdown file that records each one and
+its links (a hosted page, the design tool, the kept file), and never commits.
 
 <description>: the UI to mock up ("a settings page with billing tabs"), or
   a change to an existing screen ("the dashboard with a usage chart")
@@ -144,6 +145,8 @@ Take its colors (as hex values), fonts, radii, spacing, and whether it's light o
 
 **Keep it.** When \`{{command:prototype}} dir\` prints \`kept\` true (run it now when this step hasn't), the team keeps its mockups in the repo: save the page as \`<name>.html\` in the \`dir\` it prints too, wherever the mockup is shown, and save it again after each change, so the kept file is always the latest. A variant gets its own file (\`<name>-2.html\`). Leave it uncommitted, and say in the report where it is.
 
+**Record it.** When \`{{command:prototype}} dir\` prints an \`index\` (not \`null\`), the team records its mockups there: run \`{{command:prototype}} record --name <name> --title '<the mockup's name in words>' --summary '<one or two sentences: what it shows, and the screen it changes>'\`, adding \`--page <link>\` when a hosted page showed it, \`--design <link>\` when the design tool did, and \`--file <the kept file>\` when it was kept. A variant gets its own entry (\`<name>-2\`). After each change, run it again with what changed (a new link, a new summary): it updates the entry in place, and the fields left out keep their value. When the only link is a localhost one and nothing was kept, there's nothing that outlasts the session to record: skip it, and say in the report that the entry needs a hosted page or \`prototype.dir\`. When it exits 2, relay its message. Leave the file uncommitted, and say in the report where it is.
+
 **Look at it.** When this session's browser tools can open \`<link>\` (a hosted page or design tool that wants a sign-in they don't have doesn't count), open it there, take a screenshot, and look: fix what's broken (a blank page, an overflowing layout, a console error) and show it again before the person sees it. Then click through its states (the main interactions, modals open, a filtered view, the empty state), a screenshot of each, kept in the session, never written into the repo. When nothing here can see it, say so.`,
           next: "main/report",
         },
@@ -154,7 +157,7 @@ Take its colors (as hex values), fonts, radii, spacing, and whether it's light o
           body: `A few lines:
 
 - **Mockup:** what it shows, the screen it changes (when it changes one), and where its look came from (\`<style>\`, the design system and which integration, the repo's styles and which file, or the neutral default).
-- **See it at:** \`<link>\`, and the kept file's path when there is one, and where it is (a hosted page, the design tool, the workspace app's browser, this session's browser, the system's browser), with why the places before it in \`<show>\` weren't used.
+- **See it at:** \`<link>\`, the kept file's path and the \`index\` file it's recorded in when there are, and where it is (a hosted page, the design tool, the workspace app's browser, this session's browser, the system's browser), with why the places before it in \`<show>\` weren't used.
 - **States:** each one you looked at, one line on what it shows. Anything that doesn't work yet, and the screens a bigger UI would add.
 - **Next:** feedback changes it in place; ask for a variant to try another direction; \`{{cmd}}prototype design\` puts it in the design tool (name the \`<design>\` entries at \`write\`, or, with none, say \`{{cmd}}configure design\` sets one up); a browser mockup's server stops with \`{{cmd}}prototype stop\`.`,
           next: null,
@@ -165,7 +168,9 @@ Take its colors (as hex values), fonts, radii, spacing, and whether it's light o
           title: "Put it in the design tool",
           body: `For each \`<design>\` entry at level \`write\` (only the one named, when the argument names one): its \`showMockup\` op, with \`<file>\` the mockup's page (write it to the folder \`{{command:prototype}} dir\` prints when it isn't in a file yet), \`<title>\` the mockup's name in words, and \`<link>\` the design link the argument or the conversation gives, else the one that entry printed for this mockup earlier in the session, when there is one (so the same designs are replaced, not added again). When no way of the op works, say what would make it work and go on to the next entry.
 
-Report, for each entry, the link it printed and anything that didn't carry over (an interaction, an animation).`,
+When \`{{command:prototype}} dir\` prints an \`index\`, record the link: \`{{command:prototype}} record --name <name> --design <link>\` (the first entry's link, when several printed one), as the show step's **Record it** says.
+
+Report, for each entry, the link it printed, anything that didn't carry over (an interaction, an animation), and the \`index\` file when it recorded the link there.`,
           next: null,
         },
       ],
