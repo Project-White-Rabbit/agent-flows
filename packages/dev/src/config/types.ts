@@ -37,7 +37,8 @@ export type ProjectRoute = string | { name: string; paths?: string[] }
  * environment (`AGENT_FLOWS_BASE` and friends) and as `{base}`-style
  * placeholders. Exit 0 passes. Exit 2 hands its stderr to the agent as a task,
  * for a check that found something only judgment can fix; with `recheck`, the
- * command runs again once the task is done, and still failing stops. Any other
+ * command runs again once the task is done, and still failing stops, or, with
+ * `recheck: "report"`, what it still finds is carried to the report as open. Any other
  * exit, or running past `timeout`, fails: with a `fix`, the flow runs it once
  * and the command again. A prompt is a task too. Either way, the agent works
  * under the command's own rules for what it may change.
@@ -62,8 +63,13 @@ export type Hook = {
   fix?: string
   /** Only with `run`: seconds before it counts as failed (default 60). */
   timeout?: number
-  /** Only with `run`: after the task an exit 2 hands over, run the command again; still failing stops. */
-  recheck?: boolean
+  /**
+   * Only with `run`: after the task an exit 2 hands over, run the command
+   * again; still failing stops. `report`: an exit 2 then is what the agent
+   * left with good reason, carried to the report as open rather than a stop
+   * (any other failure still fails).
+   */
+  recheck?: boolean | "report"
   /**
    * Only with `run`, at a point whose output is findings (`evaluate.scan`):
    * a regex; only the lines it matches go to the reviewer.

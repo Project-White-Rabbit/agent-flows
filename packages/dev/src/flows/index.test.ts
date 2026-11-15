@@ -721,7 +721,16 @@ describe("dev flows", () => {
         "add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`",
       )
       expect(file.content, file.path).toContain("with `agent.recheck`")
+      expect(file.content, file.path).toContain(
+        "fix each one you can with confidence and leave the rest, which is not a stop",
+      )
+      expect(file.content, file.path).toContain("comes back in `open`")
     }
+  })
+
+  it("lists a recheck: report hook's open findings in ready's report", () => {
+    const report = files.find((f) => f.path.endsWith("ready-run/SKILL.md"))
+    expect(report?.content).toContain("**Open findings:**")
   })
 
   it("reports hooks only when one ran", () => {

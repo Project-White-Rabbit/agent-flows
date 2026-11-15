@@ -390,6 +390,7 @@ with a \`--fixed\` for each failed check the batch meant to fix, so the next pas
           refName: "report",
           body: `Lead with anything that needs the user's attention: every stop bucket and stalled fix with the check's name and log tail, what you would have done and why you didn't, a failed remote sync, a timeout. Don't bury it under the rest. Then:
 
+- **Open findings:** when any \`hooks.ts run\` this run printed an \`open\` list (a \`recheck: "report"\` hook's findings you left), \`Open (<hook>): <finding>\`, one line each, with the hook's log; leave the line out when there were none. They didn't stop ready, but they're the reviewer's to weigh.
 - **Mode** that ran (\`default\`, \`loop\`, or \`draft\`), the steps it skipped, and the CI check patterns it ignored, each with where it came from (the config or a flag).
 - **Local cleanup:** clean, fixed N things (what changed together, tests written, check fixes), or surfaced N for the user; the packages checked and with which commands.
 - **Sync (local):** committed, caught up (and any conflicts resolved, by file), or nothing to do.
