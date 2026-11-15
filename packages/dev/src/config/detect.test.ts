@@ -130,6 +130,29 @@ describe("detect", () => {
       directory: "apps/docs",
     })
   })
+
+  it("finds one Railway instance per config-as-code file", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flows-detect-"))
+    const root = dir
+    const write = (file: string, content: string) => {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
+      fs.writeFileSync(path.join(root, file), content)
+    }
+    execFileSync("git", ["-C", root, "init", "-q"])
+    write("apps/api/railway.toml", "[build]\n")
+    write("apps/worker/railway.json", "{}")
+    execFileSync("git", ["-C", root, "add", "apps"])
+    const railway = detectSections(createDetectContext(root, {}))[
+      "integrations.railway"
+    ]
+    expect(railway?.instances?.map((i) => [i.name, i.directory])).toEqual([
+      ["api", "apps/api"],
+      ["worker", "apps/worker"],
+    ])
+    expect(railway?.evidence).toContain(
+      "apps/api/railway.toml (Railway config as code)",
+    )
+  })
 })
 
 describe("detect ready", () => {
