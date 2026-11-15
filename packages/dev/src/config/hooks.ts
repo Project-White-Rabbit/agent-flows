@@ -488,8 +488,11 @@ export function checkHooks(
     if (entry.recheck !== undefined) {
       if (entry.run === undefined) {
         issues.push(`${at}.recheck is only for a run command`)
-      } else if (typeof entry.recheck !== "boolean") {
-        issues.push(`${at}.recheck must be true or false`)
+      } else if (
+        typeof entry.recheck !== "boolean" &&
+        entry.recheck !== "report"
+      ) {
+        issues.push(`${at}.recheck must be true, false, or "report"`)
       } else if (point?.findings) {
         issues.push(
           `${at}.recheck isn't for ${where}: its commands only read, so an exit 2 there stops rather than hands over a task`,

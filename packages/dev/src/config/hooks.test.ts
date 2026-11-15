@@ -148,6 +148,9 @@ describe("checkHooks", () => {
 
   it("takes recheck only on a command that can hand over a task", () => {
     expect(check([{ name: "a", run: "x", recheck: true }]).issues).toEqual([])
+    expect(check([{ name: "a", run: "x", recheck: "report" }]).issues).toEqual(
+      [],
+    )
     expect(
       check([
         { name: "a", prompt: "x", recheck: true },
@@ -155,8 +158,12 @@ describe("checkHooks", () => {
       ]).issues,
     ).toEqual([
       "ready.before[a].recheck is only for a run command",
-      "ready.before[b].recheck must be true or false",
+      'ready.before[b].recheck must be true, false, or "report"',
     ])
+    expect(
+      check([{ name: "a", run: "x", recheck: "report" }], "evaluate.scan")
+        .issues,
+    ).toHaveLength(1)
     expect(
       check([{ name: "a", run: "x", recheck: true }], "evaluate.scan").issues,
     ).toEqual([

@@ -441,6 +441,71 @@ describe("runHooks", () => {
     ])
   })
 
+  it("carries what a recheck: report hook still finds to open, and goes on", () => {
+    const root = repo()
+    // A scan: STOP is a hard stop (exit 1); FLAG lines are findings to weigh (exit 2).
+    const scan = [
+      "if [ -f stop.txt ]; then echo 'STOP: migration' >&2; exit 1; fi",
+      "out=''",
+      '[ -f fixed-a ] || out="$out FLAG: a"',
+      '[ -f fixed-b ] || out="$out FLAG: b"',
+      'if [ -n "$out" ]; then echo "$out" >&2; exit 2; fi',
+    ].join("; ")
+    const hooks = config({
+      ready: {
+        beforePush: [
+          { name: "scan", run: scan, recheck: "report" },
+          { name: "next", run: "touch next" },
+        ],
+      },
+    })
+    const first = runHooks(root, hooks, request(["ready.beforePush"], "ready"))
+    expect(first.status).toBe("agent")
+    expect(first.agent).toMatchObject({
+      task: "FLAG: a FLAG: b",
+      resume: "ready.beforePush/scan",
+      recheck: "report",
+    })
+
+    // The agent fixed a, and left b: b is open, not a stop, and the rest run.
+    fs.writeFileSync(path.join(root, "fixed-a"), "")
+    const after = runHooks(
+      root,
+      hooks,
+      request(["ready.beforePush"], "ready", {
+        after: "ready.beforePush/scan",
+      }),
+    )
+    expect(after.status).toBe("done")
+    expect(after.failures).toEqual([])
+    expect(after.open).toMatchObject([
+      { point: "ready.beforePush", name: "scan", output: "FLAG: b" },
+    ])
+    expect(after.ran.map((r) => [r.name, r.result, r.recheck])).toEqual([
+      ["scan", "open", true],
+      ["next", "passed", undefined],
+    ])
+    expect(fs.existsSync(path.join(root, "next"))).toBe(true)
+
+    // A hard failure on the recheck still stops.
+    fs.writeFileSync(path.join(root, "stop.txt"), "")
+    const stopped = runHooks(
+      root,
+      hooks,
+      request(["ready.beforePush"], "ready", {
+        after: "ready.beforePush/scan",
+      }),
+    )
+    expect(stopped.status).toBe("stop")
+    expect(stopped.stop).toMatchObject({
+      name: "scan",
+      result: "failed",
+      recheck: true,
+      output: "STOP: migration",
+    })
+    expect(stopped.open).toBeUndefined()
+  })
+
   it("leaves a hook running at --max-wait, and --wait picks it up and goes on", () => {
     const root = repo()
     const hooks = config({
