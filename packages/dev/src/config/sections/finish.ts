@@ -64,6 +64,13 @@ export const finish: SectionSpec = {
           : "must list logins (`github-advanced-security`, `claude[bot]`)",
     },
     {
+      key: "runReady",
+      type: "boolean",
+      description:
+        "Run `ready loop` before the CI wait when ready has never run on the branch, so its cleanup, checks, and CI fixes happen before anything lands (default true). `false` never runs it; the `no-ready` argument skips it for one run. With `finish.sync: remote` it never runs, since ready pushes",
+      example: false,
+    },
+    {
       key: "requireClean",
       type: "boolean",
       description:
@@ -117,5 +124,5 @@ export const finish: SectionSpec = {
     hookField("finish.after"),
   ],
   lookup:
-    "Leave it out when merging needs nothing of the repo's own. Set `requireAllChecks` when the team never merges past a failing check, required or not; `unresolvedThreads` to `bots` when an automated reviewer's open thread should block, or `blockingReviewers` when only some reviewers' should (CodeQL's `github-advanced-security`); `requireClean` when uncommitted work should never ride along with finish's own sync; `ciTimeout` when CI on the landing commit takes longer than 30 minutes; `watchDeploy` when merging to the base deploys, and a merge isn't done until that deploy is, with `deployTimeout` when the deploy can take longer than 30 minutes and `deployLogLines` when a failed step's log says more than its name; `sync` to `remote` when catching up shouldn't happen inside finish (a slow CI run, or a review gate on the head commit). Set `requireEvaluation` when nothing lands without a review of its head (with `evaluate.record`). Set `issueOnMerge` to `tracker` when the tracker's integration with the host moves the issue on merge, `leave` when merging shouldn't move it at all (the team does by hand), `after` for teardown done by hand after a merge today (with `on: success`), `before` for a check that must pass before anything lands, `beforeCi` for a commit that must land with the merge (a changelog entry)",
+    "Leave it out when merging needs nothing of the repo's own. Set `requireAllChecks` when the team never merges past a failing check, required or not; `unresolvedThreads` to `bots` when an automated reviewer's open thread should block, or `blockingReviewers` when only some reviewers' should (CodeQL's `github-advanced-security`); `runReady` to `false` when finish shouldn't run ready on a branch it never saw; `requireClean` when uncommitted work should never ride along with finish's own sync; `ciTimeout` when CI on the landing commit takes longer than 30 minutes; `watchDeploy` when merging to the base deploys, and a merge isn't done until that deploy is, with `deployTimeout` when the deploy can take longer than 30 minutes and `deployLogLines` when a failed step's log says more than its name; `sync` to `remote` when catching up shouldn't happen inside finish (a slow CI run, or a review gate on the head commit). Set `requireEvaluation` when nothing lands without a review of its head (with `evaluate.record`). Set `issueOnMerge` to `tracker` when the tracker's integration with the host moves the issue on merge, `leave` when merging shouldn't move it at all (the team does by hand), `after` for teardown done by hand after a merge today (with `on: success`), `before` for a check that must pass before anything lands, `beforeCi` for a commit that must land with the merge (a changelog entry)",
 }
