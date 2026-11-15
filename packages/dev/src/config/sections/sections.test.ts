@@ -163,6 +163,19 @@ describe("sync format", () => {
     }
   })
 
+  it("takes a Markdown file in the repo as the prototype index", () => {
+    const base = { version: 3, repo: { baseBranch: "main" } }
+    expect(
+      checkConfig({ ...base, prototype: { index: "docs/prototypes.md" } })
+        .issues,
+    ).toEqual([])
+    for (const index of ["/abs/p.md", "../p.md", "docs/p.html", 3]) {
+      expect(checkConfig({ ...base, prototype: { index } }).issues).toEqual([
+        expect.stringContaining("prototype.index"),
+      ])
+    }
+  })
+
   it("takes another tool's state files and header, and the body knobs", () => {
     const base = { version: 3, repo: { baseBranch: "main" } }
     expect(

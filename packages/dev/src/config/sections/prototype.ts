@@ -7,7 +7,7 @@ export const prototype: SectionSpec = {
   path: "prototype",
   name: "Prototype",
   purpose:
-    "The look prototype's mockups take, so they look like the team's product, where they're shown, and where the team keeps them, when it does",
+    "The look prototype's mockups take, so they look like the team's product, where they're shown, and how the team keeps them, when it does",
   fields: [
     {
       key: "style",
@@ -41,7 +41,20 @@ export const prototype: SectionSpec = {
           ? "must be a folder inside the repo, relative to its root"
           : undefined,
     },
+    {
+      key: "index",
+      description:
+        "A Markdown file in the repo, relative to its root, where prototype records each mockup: what it shows and the links that outlast the session (the hosted page, such as a Claude artifact; where it is in the design tool; the page kept in `dir`). An entry is updated in place as its mockup changes, and text outside the entries is left alone. Use it alone to keep where mockups are without keeping their pages, or with `dir` to list the kept pages too. Off by default. Prototype never commits it",
+      example: "docs/prototypes.md",
+      check: (value) =>
+        typeof value !== "string" ||
+        path.isAbsolute(value) ||
+        value.split(/[\\/]/).some((part) => part === ".." || part === ".git") ||
+        !/\.(md|markdown|mdx)$/i.test(value)
+          ? "must be a Markdown file inside the repo, relative to its root"
+          : undefined,
+    },
   ],
   lookup:
-    'Leave all three out to take the look from the repo\'s own styles, show mockups wherever the session can, and keep them out of the working tree. Set `style` when the product\'s look lives in one file worth naming (its CSS variables or Tailwind theme) or has a rule the files don\'t show (always dark). Set `show` when the team wants mockups in a particular place first, or never in one (`["page", "browser"]` keeps them out of the design tool). Set `dir` only when the team asks to keep mockups in the repo',
+    'Leave them all out to take the look from the repo\'s own styles, show mockups wherever the session can, and keep them out of the working tree. Set `style` when the product\'s look lives in one file worth naming (its CSS variables or Tailwind theme) or has a rule the files don\'t show (always dark). Set `show` when the team wants mockups in a particular place first, or never in one (`["page", "browser"]` keeps them out of the design tool). Set `dir` only when the team asks to keep the mockup pages in the repo, and `index` when it wants a record of its mockups and where each lives (a hosted page such as a Claude artifact, the design tool), with or without the pages',
 }

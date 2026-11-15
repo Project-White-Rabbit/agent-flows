@@ -863,6 +863,8 @@ describe("dev flows", () => {
     expect(skill).toContain('prototype.ts" serve`')
     expect(skill).toContain('prototype.ts" stop`')
     expect(skill).toContain("**Keep it.**")
+    expect(skill).toContain("**Record it.**")
+    expect(skill).toContain('prototype.ts" record --name <name>')
     expect(skill).toContain("prints `kept` true")
     expect(skill).toContain("run before --flow prototype --mode <mode>")
     expect(skill).toContain("**Never the working tree, unless kept.**")
