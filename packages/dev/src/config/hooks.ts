@@ -370,6 +370,41 @@ function stringList(value: unknown): value is string[] {
  * Problems in the hook list at `where` (a point's config path), and keys a
  * newer plugin may know.
  */
+// The flows renamed in config format 4. The upgrade renames a hook's flows
+// filter, but a command that tests $AGENT_FLOWS_FLOW against an old name
+// itself would silently stop matching, so it gets a warning instead.
+const OLD_FLOW_NAMES: Record<string, string> = {
+  merge: "finish",
+  close: "cancel",
+}
+
+/**
+ * The warning for a command that compares `$AGENT_FLOWS_FLOW` with a flow's
+ * old name (a `case` arm such as `sync|merge)`, or a test such as
+ * `= merge`), or undefined.
+ */
+export function oldFlowNames(command: unknown): string | undefined {
+  if (typeof command !== "string" || !command.includes("AGENT_FLOWS_FLOW")) {
+    return undefined
+  }
+  const names = Object.keys(OLD_FLOW_NAMES).join("|")
+  const compared = new RegExp(
+    `(?:[|(]\\s*|=\\s*["']?)(${names})\\b|\\b(${names})["']?\\s*[|)]`,
+    "g",
+  )
+  const found = new Set<string>()
+  for (const match of command.matchAll(compared)) {
+    found.add((match[1] ?? match[2]) as string)
+  }
+  if (found.size === 0) {
+    return undefined
+  }
+  const list = [...found]
+    .map((name) => `"${name}" (now "${OLD_FLOW_NAMES[name]}")`)
+    .join(" and ")
+  return `compares $AGENT_FLOWS_FLOW with ${list}, a flow's old name, so it no longer matches; use the new name, or a flows filter`
+}
+
 export function checkHooks(
   value: unknown,
   where: string,
@@ -412,6 +447,10 @@ export function checkHooks(
       const personal = entry[key] && homePathWarning(entry[key])
       if (personal) {
         warnings.push(`${at}.${key} ${personal}`)
+      }
+      const renamed = key !== "prompt" && oldFlowNames(entry[key])
+      if (renamed) {
+        warnings.push(`${at}.${key} ${renamed}`)
       }
     }
     if ((entry.run === undefined) === (entry.prompt === undefined)) {

@@ -423,7 +423,7 @@ Commands get these filled in as `{name}`, and the same in their environment, whi
 | `{scope}` | `AGENT_FLOWS_SCOPE` | What evaluate reviews: `full` or `delta` | `evaluate.scan` |
 | `{url}` | `AGENT_FLOWS_URL` | The page preview opened | `preview.afterOpen` |
 
-Every command also gets `AGENT_FLOWS_FLOW`, `AGENT_FLOWS_MODE`, `AGENT_FLOWS_POINT`, `AGENT_FLOWS_HOOK`, and `AGENT_FLOWS_CHANGED_FILES` (a file listing the branch's changed files, one per line).
+Every command also gets `AGENT_FLOWS_FLOW`, `AGENT_FLOWS_MODE`, `AGENT_FLOWS_POINT`, `AGENT_FLOWS_HOOK`, and `AGENT_FLOWS_CHANGED_FILES` (a file listing the branch's changed files, one per line). A command that tests `AGENT_FLOWS_FLOW` against `merge` or `close`, the names finish and cancel had before 0.26, gets a warning: the upgrade renames a hook's `flows` filter, not the text of its command, so prefer `flows` to testing the variable.
 
 Whatever a hook hands the agent, the command's own rules hold: the same high-confidence bar as a CI fix, and in ready, never a migration or a dependency version. A task the agent can't do with confidence stops the command and asks.
 

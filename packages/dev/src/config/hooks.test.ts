@@ -7,6 +7,7 @@ import {
   fillVars,
   globRegex,
   HOOK_FLOWS,
+  oldFlowNames,
   HOOK_POINTS,
 } from "./hooks.ts"
 import { SECTIONS } from "./sections/index.ts"
@@ -202,6 +203,37 @@ describe("checkHooks", () => {
         expect.stringContaining('unknown field "ready.before[a].retries"'),
       ],
     })
+  })
+})
+
+describe("oldFlowNames", () => {
+  it("warns when a command compares $AGENT_FLOWS_FLOW with a renamed flow", () => {
+    expect(
+      check(
+        [
+          {
+            name: "fingerprint",
+            run: 'case "$AGENT_FLOWS_FLOW" in sync|ready|merge) ;; *) exit 0 ;; esac; ./go.sh',
+          },
+        ],
+        "hooks.after",
+      ).warnings,
+    ).toEqual([
+      'hooks.after[fingerprint].run compares $AGENT_FLOWS_FLOW with "merge" (now "finish"), a flow\'s old name, so it no longer matches; use the new name, or a flows filter',
+    ])
+    expect(oldFlowNames('[ "$AGENT_FLOWS_FLOW" = "close" ] && ./teardown.sh')).toContain(
+      '"close" (now "cancel")',
+    )
+    expect(oldFlowNames('case $AGENT_FLOWS_FLOW in (merge|close) ;; esac')).toContain(
+      '"merge" (now "finish") and "close" (now "cancel")',
+    )
+  })
+
+  it("leaves commands that only mention merge or close, or don't test the flow", () => {
+    expect(oldFlowNames('[ "$AGENT_FLOWS_FLOW" = sync ] && git merge --no-edit origin/main')).toBeUndefined()
+    expect(oldFlowNames("case $AGENT_FLOWS_FLOW in finish|cancel) ;; esac")).toBeUndefined()
+    expect(oldFlowNames("case $X in merge) ;; esac")).toBeUndefined()
+    expect(oldFlowNames(undefined)).toBeUndefined()
   })
 })
 
