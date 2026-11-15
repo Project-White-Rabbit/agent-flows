@@ -309,6 +309,40 @@ describe("runHooks", () => {
     expect(report.agent?.task).toBe(`If ${url} asks, sign in`)
   })
 
+  it("gives the server's hooks its url and port, and has no agent to hand a task to", () => {
+    const root = repo()
+    const report = runHooks(
+      root,
+      {
+        ...config({}),
+        server: {
+          started: [
+            {
+              name: "url-file",
+              run: 'echo "$AGENT_FLOWS_URL {url} $AGENT_FLOWS_PORT {port}" > url.txt',
+            },
+            { name: "asks", run: "echo do this; exit 2" },
+            { name: "prompt", prompt: "Write {url} somewhere" },
+          ],
+        },
+      },
+      request(["server.started"], "server", {
+        url: "http://localhost:3007",
+        port: "3007",
+      }),
+    )
+    expect(fs.readFileSync(path.join(root, "url.txt"), "utf8")).toBe(
+      "http://localhost:3007 http://localhost:3007 3007 3007\n",
+    )
+    expect(report.status).toBe("done")
+    expect(report.ran.map((r) => r.result)).toEqual([
+      "passed",
+      "failed",
+      "skipped",
+    ])
+    expect(report.failures.map((f) => f.name)).toEqual(["asks"])
+  })
+
   it("reports a failed afterOpen hook rather than stopping preview", () => {
     const root = repo()
     const report = runHooks(

@@ -14,12 +14,18 @@
 // `stop` stops only this worktree's: never a server someone started by hand,
 // or another checkout's. `adopt` restarts one started by hand under the
 // watchdog, when the person says so.
+//
+// The repo's `server.started` and `server.stopped` hooks run from here, on
+// every start and stop, whichever command or watchdog does it, so a file that
+// holds the server's URL always matches the one running.
 
 import { spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { getAt } from "../config/config.ts"
+import { hookPoint } from "../config/hooks.ts"
 import { loadConfig, repoRoot } from "./configure.ts"
+import { type HookRun, runHooks } from "./hooks.ts"
 import {
   isMain,
   parseFlags,
@@ -48,6 +54,20 @@ export type ServerState = {
   startedAt: string
   /** Whether it runs under the watchdog (older versions started it bare). */
   watched?: boolean
+  /** The port dev-flows gave it from `server.ports`. */
+  port?: number
+  /**
+   * The URL its `server.started` hooks last ran with, so a server that
+   * answered only after `start` stopped waiting, or on a new URL, gets them.
+   */
+  announced?: string
+}
+
+/** What the repo's `server.started` or `server.stopped` hooks did. */
+export type ServerHooks = {
+  point: "server.started" | "server.stopped"
+  ran: HookRun[]
+  failures: HookRun[]
 }
 
 /** A process, as `ps` lists it. */
@@ -61,6 +81,8 @@ export type Reaped = {
   worktree: string
   pid: number
   command: string
+  /** Its `server.stopped` hooks, when any ran. */
+  hooks?: ServerHooks
 }
 
 export type ServerResult = {
@@ -103,11 +125,17 @@ export type ServerResult = {
   tail?: string
   /** Servers dev-flows started for worktrees that are gone, stopped now. */
   reaped?: Reaped[]
+  /** The port it was given from `server.ports`. */
+  port?: number
+  /** The repo's `server.started` hooks, when any ran. */
+  hooks?: ServerHooks
 }
 
 export type Settings = {
   command: string | null
   url: string | null
+  /** `server.ports`: the range a worktree's port comes from, or none. */
+  ports: [number, number] | null
   /** Seconds to wait for a started server to answer. */
   timeout: number
   /** Minutes with nothing connected before the watchdog stops it; 0: never. */
@@ -478,12 +506,140 @@ export function sweep(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** `server.ports` (`3001-3099`, or one port) as its first and last port. */
+export function parsePorts(text: string): [number, number] | undefined {
+  const match = /^(\d{1,5})(?:-(\d{1,5}))?$/.exec(text.trim())
+  if (!match) {
+    return undefined
+  }
+  const low = Number(match[1])
+  const high = Number(match[2] ?? match[1])
+  return low > 0 && high <= 65535 && low <= high ? [low, high] : undefined
+}
+
+/**
+ * The port for a worktree's server: the one it had last time while nothing
+ * listens on it, else the first in `range` nothing listens on and no other
+ * worktree holds, else the first nothing listens on. Undefined when every
+ * port in the range is in use.
+ */
+export function pickPort(
+  range: [number, number],
+  remembered: number | undefined,
+  listening: Set<number>,
+  held: Set<number>,
+): number | undefined {
+  const [low, high] = range
+  if (
+    remembered !== undefined &&
+    remembered >= low &&
+    remembered <= high &&
+    !listening.has(remembered)
+  ) {
+    return remembered
+  }
+  for (const skipHeld of [true, false]) {
+    for (let port = low; port <= high; port++) {
+      if (!listening.has(port) && !(skipHeld && held.has(port))) {
+        return port
+      }
+    }
+  }
+  return undefined
+}
+
+/**
+ * Pick this worktree's port from `range` and remember it, in `ports.json`
+ * beside the registry, dropping worktrees that are gone.
+ */
+function choosePort(
+  dir: string,
+  root: string,
+  range: [number, number],
+): number | undefined {
+  const file = path.join(dir, "ports.json")
+  const ports = readJson<Record<string, number>>(file) ?? {}
+  const live = worktrees(root)
+  const held = new Set<number>()
+  for (const [worktree, port] of Object.entries(ports)) {
+    if (live && !live.has(worktree)) {
+      delete ports[worktree]
+    } else if (worktree !== root) {
+      held.add(port)
+    }
+  }
+  const listening = new Set(systemListeners().map((l) => l.port))
+  const port = pickPort(range, ports[root], listening, held)
+  if (port !== undefined) {
+    ports[root] = port
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(file, `${JSON.stringify(ports, null, 2)}\n`)
+  }
+  return port
+}
+
+/** Where a recorded server served, for its hooks. */
+function served(state: ServerState): { url: string | null; port?: number } {
+  const url = state.announced ?? state.url
+  return { url, port: state.port ?? (url ? portOf(url) : undefined) }
+}
+
+/** `settings` for a server given `port`: its URL on it, `{port}` filled in. */
+export function withPort<T extends Settings & { command: string }>(
+  settings: T,
+  port: number,
+): T & { port: number } {
+  return {
+    ...settings,
+    command: settings.command.replaceAll("{port}", String(port)),
+    url: onPort(settings.url, port),
+    port,
+  }
+}
+
+/**
+ * Run the repo's hooks at `point` for the server of `worktree`, with no agent:
+ * commands only. Undefined when the point has no hooks, or the worktree has
+ * no valid config. A hook that can't run is a failure, never a throw: the
+ * server's start or stop has happened either way.
+ */
+export function serverHooks(
+  worktree: string,
+  point: ServerHooks["point"],
+  served: { url: string | null; port?: number },
+): ServerHooks | undefined {
+  try {
+    const config = loadConfig(worktree).config
+    const list = config && getAt(config, point)
+    const spec = hookPoint(point)
+    if (!config || !spec || !Array.isArray(list) || list.length === 0) {
+      return undefined
+    }
+    const report = runHooks(worktree, config, {
+      points: [spec],
+      flow: "server",
+      url: served.url ?? undefined,
+      port: served.port === undefined ? undefined : String(served.port),
+    })
+    return { point, ran: report.ran, failures: report.failures }
+  } catch (error) {
+    const failed: HookRun = {
+      point,
+      name: "(hooks)",
+      result: "failed",
+      output: error instanceof Error ? error.message : String(error),
+    }
+    return { point, ran: [failed], failures: [failed] }
+  }
+}
+
 /** Start `settings.command` in the background and wait until it answers. */
 async function start(
   root: string,
   dir: string,
-  settings: Settings & { command: string },
+  settings: Settings & { command: string; port?: number },
 ): Promise<ServerResult> {
+  const port = settings.port
   const log = logFile(dir, root)
   fs.mkdirSync(path.dirname(log), { recursive: true })
   const out = fs.openSync(log, "w")
@@ -501,7 +657,15 @@ async function start(
       "--command",
       settings.command,
     ],
-    { cwd: root, detached: true, stdio: ["ignore", out, out] },
+    {
+      cwd: root,
+      detached: true,
+      stdio: ["ignore", out, out],
+      env:
+        port === undefined
+          ? process.env
+          : { ...process.env, PORT: String(port) },
+    },
   )
   fs.closeSync(out)
   let exit: number | null | undefined
@@ -520,6 +684,7 @@ async function start(
     log,
     startedAt: new Date().toISOString(),
     watched: true,
+    ...(port === undefined ? {} : { port }),
   }
   updateRegistry(dir, (registry) => {
     registry[root] = state
@@ -530,6 +695,7 @@ async function start(
     pid,
     command: settings.command,
     log,
+    ...(port === undefined ? {} : { port }),
   }
 
   const deadline = Date.now() + settings.timeout * 1000
@@ -559,10 +725,20 @@ async function start(
     }
     if (url && (await answers(url))) {
       updateRegistry(dir, (registry) => {
-        registry[root] = { ...state, url }
+        registry[root] = { ...state, url, announced: url }
       })
       const servers = systemListeners().filter((l) => inside(l.cwd, root))
-      return { status: "started", url, servers, ...base }
+      const hooks = serverHooks(root, "server.started", {
+        url,
+        port: port ?? portOf(url),
+      })
+      return {
+        status: "started",
+        url,
+        servers,
+        ...base,
+        ...(hooks ? { hooks } : {}),
+      }
     }
   }
   return {
@@ -643,11 +819,18 @@ async function stop(
       delete fresh[worktree]
     }
   })
-  const stopped = targets.map(([worktree, state]) => ({
-    worktree,
-    pid: state.pid,
-    command: state.command,
-  }))
+  const stopped = targets.map(([worktree, state]): Reaped => {
+    // A worktree that's gone took what its hooks wrote with it.
+    const hooks = fs.existsSync(worktree)
+      ? serverHooks(worktree, "server.stopped", served(state))
+      : undefined
+    return {
+      worktree,
+      pid: state.pid,
+      command: state.command,
+      ...(hooks ? { hooks } : {}),
+    }
+  })
   return {
     stopped,
     ...(stopped.length === 0
@@ -865,6 +1048,37 @@ function groupConnected(pgid: number): boolean | undefined {
 }
 
 /**
+ * The watchdog's server stopped: run the repo's `server.stopped` hooks for it,
+ * unless its worktree is gone, or the registry records another server for it.
+ */
+function watchStopped(root: string): void {
+  if (!fs.existsSync(root)) {
+    return
+  }
+  try {
+    const dir = stateDir("server", { cwd: root, shared: true })
+    const state = readRegistry(dir)[root]
+    if (state && state.pid !== process.pid) {
+      return
+    }
+    const hooks = serverHooks(
+      root,
+      "server.stopped",
+      state ? served(state) : { url: null },
+    )
+    for (const failed of hooks?.failures ?? []) {
+      console.log(
+        `[server] the ${failed.name} hook at server.stopped failed: ${failed.output ?? failed.log ?? ""}`,
+      )
+    }
+  } catch (error) {
+    console.log(
+      `[server] couldn't run the server.stopped hooks: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+/**
  * The watchdog: run `command` in this process group, pass on its exit, and
  * stop the whole group when `watchVerdict` says so.
  */
@@ -877,6 +1091,9 @@ function watch(flags: Map<string, string>): void {
   const idleMs = Number(flags.get("idle") ?? DEFAULT_IDLE_MINUTES) * 60_000
   const child = spawn("sh", ["-c", command], { cwd: root, stdio: "inherit" })
   child.on("exit", (code, signal) => {
+    // It stopped idle, or exited on its own: `server stop` kills this
+    // watchdog with it, and runs the hooks itself.
+    watchStopped(root)
     process.exit(code ?? (signal ? 1 : 0))
   })
   child.on("error", () => process.exit(1))
@@ -943,11 +1160,83 @@ function settingsOf(root: string, flags: Map<string, string>): Settings {
       throw new UsageError(`not a URL: ${url}`)
     }
   }
+  const portsText = str("ports")
+  const ports = portsText ? parsePorts(portsText) : null
+  if (ports === undefined) {
+    throw new UsageError(
+      `server.ports must be a range of ports like 3001-3099: ${portsText}`,
+    )
+  }
   return {
     command: flags.get("command") ?? str("command"),
     url,
+    ports,
     timeout,
     idleTimeout,
+  }
+}
+
+/**
+ * The settings `start` and `adopt` launch with: this worktree's port, when
+ * `server.ports` gives a range, else as they are. Undefined when every port
+ * in the range is in use.
+ */
+function launchSettings(
+  dir: string,
+  root: string,
+  settings: Settings & { command: string },
+): (Settings & { command: string; port?: number }) | undefined {
+  if (!settings.ports) {
+    return settings
+  }
+  const port = choosePort(dir, root, settings.ports)
+  return port === undefined ? undefined : withPort(settings, port)
+}
+
+/**
+ * A server dev-flows started that `start` found running at a URL its
+ * `server.started` hooks haven't had yet (it answered only after an earlier
+ * `start` stopped waiting): run them now, and record it. Nothing for `status`,
+ * which only looks, or for a server dev-flows didn't start.
+ */
+function announce(
+  dir: string,
+  root: string,
+  found: ServerResult,
+  looking: boolean,
+): { hooks?: ServerHooks } {
+  const state = readRegistry(dir)[root]
+  if (
+    looking ||
+    !found.ours ||
+    !found.url ||
+    !state ||
+    state.announced === found.url
+  ) {
+    return {}
+  }
+  const url = found.url
+  updateRegistry(dir, (registry) => {
+    const fresh = registry[root]
+    if (fresh && fresh.pid === state.pid) {
+      registry[root] = { ...fresh, url: fresh.url ?? url, announced: url }
+    }
+  })
+  const hooks = serverHooks(root, "server.started", {
+    url,
+    port: state.port ?? portOf(url),
+  })
+  return hooks ? { hooks } : {}
+}
+
+function noFreePort(settings: Settings): ServerResult & { reason: string } {
+  const [low, high] = settings.ports ?? [0, 0]
+  return {
+    status: "failed",
+    url: null,
+    servers: [],
+    ours: false,
+    reason: `every port in server.ports (${low}-${high}) is in use`,
   }
 }
 
@@ -975,7 +1264,12 @@ const USAGE = `Usage: server.ts <subcommand>
   Each run but status first stops the servers dev-flows started for worktrees
   that are gone, and prints them as reaped. Each server it starts runs under a
   watchdog that stops it once its worktree is deleted, or once nothing has
-  been connected to it for server.idleTimeout minutes (default 240; 0: never).`
+  been connected to it for server.idleTimeout minutes (default 240; 0: never).
+  With server.ports, each worktree's server gets its own port from that range,
+  as $PORT and {port} in the command. The repo's server.started hooks run each
+  time one it started answers, and its server.stopped hooks each time one
+  stops while its worktree is still there (the watchdog's stops included);
+  start, adopt, and stop print what they did as hooks.`
 
 export async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv
@@ -1032,12 +1326,16 @@ export async function main(argv: string[]): Promise<void> {
       if (pid !== undefined && !(pid > 1)) {
         throw new UsageError("--pid must be a process id")
       }
-      const result = await adopt(
-        root,
-        dir,
-        { ...settings, command: settings.command },
-        pid,
-      )
+      const launch = launchSettings(dir, root, {
+        ...settings,
+        command: settings.command,
+      })
+      if (!launch) {
+        printJson(noFreePort(settings))
+        process.exitCode = 1
+        return
+      }
+      const result = await adopt(root, dir, launch, pid)
       printJson(result)
       if (result.status !== "started") {
         process.exitCode = 1
@@ -1055,7 +1353,7 @@ export async function main(argv: string[]): Promise<void> {
       running: (s) => running(s),
     })
     if (found) {
-      printJson({ ...found, ...extra })
+      printJson({ ...found, ...extra, ...announce(dir, root, found, looking) })
       return
     }
     if (looking) {
@@ -1072,10 +1370,16 @@ export async function main(argv: string[]): Promise<void> {
       })
       return
     }
-    const result = await start(root, dir, {
+    const launch = launchSettings(dir, root, {
       ...settings,
       command: settings.command,
     })
+    if (!launch) {
+      printJson({ ...noFreePort(settings), ...extra })
+      process.exitCode = 1
+      return
+    }
+    const result = await start(root, dir, launch)
     printJson({ ...result, ...extra })
     if (result.status === "failed" || result.status === "timeout") {
       process.exitCode = 1

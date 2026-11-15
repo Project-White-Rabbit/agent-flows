@@ -149,8 +149,10 @@ export type HookRequest = {
   since?: string
   /** How much evaluate reviews: full, delta, or carry. */
   scope?: string
-  /** The page preview opened. */
+  /** The page preview opened, or where the dev server serves (server). */
   url?: string
+  /** The dev server's port (server). */
+  port?: string
   /** The `<point>/<name>` a previous call stopped at. */
   after?: string
   /** The `<point>/<name>` a previous call left running, to wait on. */
@@ -437,6 +439,16 @@ export function runHooks(
         since: request.since,
         scope: request.scope,
         url: request.url,
+        port: request.port,
+      }
+      // No agent is there to do a prompt's task (config checks refuse one).
+      if (hook.prompt !== undefined && point.unattended) {
+        report.ran.push({
+          ...at,
+          result: "skipped",
+          reason: `a prompt can't run here: ${point.unattended}`,
+        })
+        continue
       }
       if (hook.prompt !== undefined) {
         report.status = "agent"
@@ -466,6 +478,7 @@ export function runHooks(
         AGENT_FLOWS_SINCE: request.since ?? "",
         AGENT_FLOWS_SCOPE: request.scope ?? "",
         AGENT_FLOWS_URL: request.url ?? "",
+        AGENT_FLOWS_PORT: request.port ?? "",
         AGENT_FLOWS_CHANGED_FILES: changedFile,
       }
       const timeout = hook.timeout ?? DEFAULT_TIMEOUT
@@ -600,6 +613,7 @@ export function runHooks(
         result.code === 2 &&
         !result.timedOut &&
         !point.findings &&
+        !point.unattended &&
         stage !== "recheck"
       ) {
         report.ran.push({ ...at, result: "passed", seconds, log })
@@ -769,6 +783,7 @@ function request(
       since: args.flags.get("since"),
       scope: args.flags.get("scope"),
       url: args.flags.get("url"),
+      port: args.flags.get("port"),
       after: args.flags.get("after"),
       wait: args.flags.get("wait"),
       maxWait: maxWait === undefined ? undefined : Number(maxWait),
@@ -863,7 +878,9 @@ Flags:
   --merge-commit <sha>   The commit the merge landed, for {merge}
   --since <sha>          The previous recorded evaluation's commit, for {since}
   --scope <scope>        What evaluate reviews (${EVALUATE_SCOPES.join(", ")}), for {scope}
-  --url <url>            The page preview opened, for {url}
+  --url <url>            The page preview opened, or where the dev server
+                         serves (server.started, server.stopped), for {url}
+  --port <port>          The dev server's port, for {port}
   --after <point>/<name> Go on after this hook, where a call stopped
   --wait <point>/<name>  Wait on this hook, where a call left it running
   --max-wait <seconds>   Stop waiting after this long, leaving the hook

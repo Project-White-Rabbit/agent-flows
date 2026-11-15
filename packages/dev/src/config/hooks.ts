@@ -32,6 +32,7 @@ export const HOOK_VARS = [
   "since",
   "scope",
   "url",
+  "port",
 ] as const
 
 export type HookVar = (typeof HOOK_VARS)[number]
@@ -87,6 +88,12 @@ export type HookPoint = {
    * that needs what the flow has set up by then (an open page).
    */
   untried?: string
+  /**
+   * Why no agent is there when it runs (the server command runs it itself,
+   * and its watchdog on its own): its hooks can only be commands, and an
+   * exit 2 is a failure, not a task.
+   */
+  unattended?: string
   example: Hook[]
 }
 
@@ -265,6 +272,35 @@ export const HOOK_POINTS: HookPoint[] = [
           "If {url} went to a sign-in page, sign in with TEST_USER_EMAIL and TEST_USER_PASSWORD from .env.local, then go back to {url}",
       },
     ],
+  },
+  {
+    id: "server.started",
+    flow: "server",
+    when: "Each time a dev server dev-flows starts answers, whichever command started it (server, preview, or server adopt restarting one started by hand), with `{url}` where it serves and `{port}` its port: for what must know the running server's address, such as a git-ignored config file a tool reads it from. A server that comes back on another port runs it again with the new one",
+    effects:
+      "Commands may write local files the repo ignores (a local config), but not deploy, publish, migrate, or write to a shared service or database",
+    failure: "report",
+    untried: "it needs the dev server running",
+    unattended:
+      "the server command runs it itself, often for another command, so its hooks are commands only",
+    example: [
+      {
+        name: "service-url",
+        run: 'printf \'{"serviceUrl": "%s"}\\n\' {url} > .tool/config.local.json',
+      },
+    ],
+  },
+  {
+    id: "server.stopped",
+    flow: "server",
+    when: "Each time a dev server dev-flows started stops while its worktree is still there: server stop (and stop all, for each worktree's), finish and cancel stopping it, the watchdog stopping one nothing has used for `server.idleTimeout` minutes, and a server that exits on its own. `{url}` and `{port}` are where it served. Not when its worktree is deleted, since what it wrote went with it",
+    effects:
+      "Commands may remove what `server.started` wrote, but not deploy, publish, migrate, or write to a shared service or database",
+    failure: "report",
+    untried: "it needs a dev server that was running",
+    unattended:
+      "the watchdog runs it when it stops an idle server, with no agent there, so its hooks are commands only",
+    example: [{ name: "service-url", run: "rm -f .tool/config.local.json" }],
   },
   {
     id: "cancel.before",
@@ -455,6 +491,10 @@ export function checkHooks(
     }
     if ((entry.run === undefined) === (entry.prompt === undefined)) {
       issues.push(`${at} must have either run or prompt`)
+    } else if (point?.unattended && entry.prompt !== undefined) {
+      issues.push(
+        `${at}.prompt isn't for ${where}: ${point.unattended}. Use run`,
+      )
     }
     if (entry.fix !== undefined && entry.run === undefined) {
       issues.push(`${at}.fix needs a run command to check it`)

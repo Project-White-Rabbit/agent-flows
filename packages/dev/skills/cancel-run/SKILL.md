@@ -97,7 +97,7 @@ Each is independent: one that fails (someone closed the pull request in the mean
 2. **Delete the remote branch:** `git push origin --delete <branch>`. One that says the remote ref doesn't exist was already gone, which counts as done. The local branch and its unpushed commits stay.
 3. **The issue:** for `<issue>` (when the gates left it) its entry's `updateIssue` op with only `<state>` `canceled`; for the issue the person picked, `canceled` or `done` as they said. Leave the title, description, and fields out. Only in an entry at `track`.
 
-4. **Stop the dev server:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" stop`. It stops only a dev server `/dev-flows:server` started in this worktree (and any it started for worktrees that are gone, as `reaped`), never one the person started by hand, and stopping none is fine. Keep what it prints for the report.
+4. **Stop the dev server:** `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" stop`. It stops only a dev server `/dev-flows:server` started in this worktree (and any it started for worktrees that are gone, as `reaped`), never one the person started by hand, and stopping none is fine. It runs the repo's `server.stopped` hooks itself. Keep what it prints for the report, with any hook in its `hooks.failures`.
 
 Never delete the local branch, switch branches, or touch the working tree: that's the person's, or their workspace app's teardown.
 

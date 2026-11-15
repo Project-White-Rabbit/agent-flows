@@ -61,7 +61,7 @@ finish and cancel stop this worktree's.
 
 **Run only when mode is `stop`.**
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" stop`, or with the argument `all`, `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" stop --all`. It prints `stopped` (each server it stopped: its `worktree`, `pid`, and `command`), a `reason` when it stopped none, and `reaped` (servers whose worktree is gone, stopped too): say which, and end here. It stops only servers this command started; for one the person started by hand, say so, and leave it.
+Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" stop`, or with the argument `all`, `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" stop --all`. It prints `stopped` (each server it stopped: its `worktree`, `pid`, `command`, and `hooks`, what the repo's `server.stopped` hooks did for it, which it runs itself), a `reason` when it stopped none, and `reaped` (servers whose worktree is gone, stopped too): say which, name any hook in `hooks.failures`, and end here. It stops only servers this command started; for one the person started by hand, say so, and leave it.
 
 ## 2. List
 
@@ -73,7 +73,7 @@ Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" list`. It prints `serve
 
 **Run only when mode is `default` or `adopt`.**
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" start`. It reads `server.command`, `server.url`, `server.timeout`, and `server.idleTimeout` from the config itself, and works on a repo that isn't configured too. It prints JSON with a `status` and a `url`, `servers` (the processes of this checkout listening for connections, each with its `pid`, `port`, and `command`), `ours` (whether this command started the server), `watched` (whether it runs under the watchdog), and `reaped` (servers it started for worktrees that are gone, stopped now):
+Run `node "${CLAUDE_PLUGIN_ROOT}/src/commands/server.ts" start`. It reads `server.command`, `server.url`, `server.ports`, `server.timeout`, and `server.idleTimeout` from the config itself, and works on a repo that isn't configured too. It prints JSON with a `status` and a `url`, `servers` (the processes of this checkout listening for connections, each with its `pid`, `port`, and `command`), `ours` (whether this command started the server), `watched` (whether it runs under the watchdog), `port` (the one `server.ports` gave it), `hooks` (what the repo's `server.started` hooks did, which it runs itself each time a server it started answers: `ran` and `failures`), and `reaped` (servers it started for worktrees that are gone, stopped now). A `failed` with a `reason` and no `log` started nothing (every port in `server.ports` is in use): say so, and end here:
 
 - `running`: a server of this checkout's answers at `url`. With `url` `null`, it runs several: the one serving the app's pages is `<url>` (`http://localhost:<its port>`), by its `command` (the web app's dev server, not an API, a worker, a database, or a component explorer). When none clearly is, ask the person which, with `AskUserQuestion` listing them.
 - `started`: it started `command` now (`pid`, its output in `log`), and it answers at `url`.
@@ -94,3 +94,4 @@ A few lines, or, when another command runs this one, only what it goes on with:
 
 - **Server:** `<url>`; started now (`pid`, `log`), restarted under the watchdog (what `replaced` was), or already running (whose: this command's, or one started by hand). Whether the watchdog watches it (stopped once the worktree is deleted, or after `server.idleTimeout` minutes with nothing connected), or it was left unwatched. `/dev-flows:server stop` stops one this command started (as `/dev-flows:finish` and `/dev-flows:cancel` do). When the command came from the repo rather than the config: `/dev-flows:configure server` saves it.
 - **Reaped:** the servers it stopped because their worktree is gone, by worktree, when there are any.
+- **Server hooks:** when `hooks` lists any, which of the repo's `server.started` hooks ran, and any that failed (`hooks.failures`: their `name` and `output`); a failure doesn't stop the server.
