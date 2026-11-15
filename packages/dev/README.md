@@ -365,10 +365,10 @@ Integrations cover what's the same for every repo on a vendor (Neon branches, Li
     { "name": "version-bump", "run": "./scripts/check-version.sh {base}", "fix": "bun run bump patch" },
     { "name": "migrations", "run": "pnpm db:verify-migrations", "timeout": 300 },
     { "name": "docs-match", "run": "./scripts/check-docs.sh", "recheck": true },
-    { "name": "review-scan", "run": "./scripts/review-scan.sh {base}", "recheck": "report" },
     { "name": "sdk-docs", "paths": ["sdks/**"], "prompt": "Update the SDK docs for what this branch changed" }
   ],
-  "beforePublish": [{ "name": "screenshots", "paths": ["ui/**"], "run": "bun run screenshots" }]
+  "beforePublish": [{ "name": "screenshots", "paths": ["ui/**"], "run": "bun run screenshots" }],
+  "beforePush": [{ "name": "review-scan", "run": "./scripts/review-scan.sh {base}", "recheck": "report" }]
 },
 "finish": {
   "after": [{ "name": "server-down", "on": "merged", "run": "./scripts/dev-server.sh down {branch}" }]
