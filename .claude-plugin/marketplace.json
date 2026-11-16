@@ -7,8 +7,13 @@
   "plugins": [
     {
       "name": "dev-flows",
+      "source": "./plugins/dev-flows",
+      "description": "Dev workflow commands for any repository: configure the repo's integrations, evaluate a branch or PR for shippability, sync, ready, and land a branch, and start work on issues. Installs dev-flows-base with it."
+    },
+    {
+      "name": "dev-flows-base",
       "source": "./packages/dev",
-      "description": "Dev workflow commands for any repository: configure the repo's integrations, evaluate a branch or PR for shippability."
+      "description": "The dev-flows workflows and their commands, with no skills of its own. Installed as a dependency of dev-flows and other front ends; not useful alone."
     }
   ]
 }

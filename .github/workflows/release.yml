@@ -7,10 +7,12 @@ name: Release
 # the repo. Configure the trusted publisher on the @agent-flows/core package on
 # npmjs.com: repo Project-White-Rabbit/agent-flows, workflow release.yml.
 #
-# Also tags each new version of the dev-flows Claude Code plugin
-# (packages/dev/.claude-plugin/plugin.json) as agent-flows--vX.Y.Z with a
-# GitHub release. The plugin ships from the marketplace in this repo, so
-# merging is what releases it; the tag records which commit each version is.
+# Also tags each new version of the dev-flows Claude Code plugins as
+# agent-flows--vX.Y.Z with a GitHub release: dev-flows-base
+# (packages/dev/.claude-plugin/plugin.json) and the dev-flows front end
+# (plugins/dev-flows/.claude-plugin/plugin.json), which share one version.
+# Both ship from the marketplace in this repo, so merging is what releases
+# them; the tag records which commit each version is.
 # If the version is already released but the plugin changed since, the job
 # fails: those changes can't reach users until the version is bumped.
 on:
@@ -82,5 +84,5 @@ jobs:
           if [ -z "$tag" ]; then
             echo "This plugin version is already released; nothing to do"
           else
-            gh release create "$tag" --target "$GITHUB_SHA" --title "dev-flows plugin ${tag#agent-flows--v}" --generate-notes
+            gh release create "$tag" --target "$GITHUB_SHA" --title "dev-flows ${tag#agent-flows--v}" --generate-notes
           fi

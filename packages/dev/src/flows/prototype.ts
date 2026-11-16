@@ -84,7 +84,7 @@ design: put the current mockup in the team's design tool (the design
 stop: stops the local server a browser mockup used
 
 The look comes from prototype.style, else the design integrations' design
-system, else the repo's own styles. /dev-flows:configure design sets one up.
+system, else the repo's own styles. {{cmd}}configure design sets one up.
 \`\`\``,
           next: "main/settings",
         },

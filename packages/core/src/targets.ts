@@ -41,6 +41,21 @@ export interface TargetSpec {
    * skill discovery would otherwise list every phase.
    */
   phaseReferences?: boolean
+  /**
+   * File name of a flow's main file, which phase references link back to for
+   * an inline phase. Default `SKILL.md`.
+   */
+  mainFile?: string
+  /**
+   * How `{{flow:<id>}}` renders: a noun phrase naming another flow for prose
+   * that runs it ("run {{flow:sync}} with the argument `local`"). Default:
+   * "the `{{cmd}}<id>` skill".
+   */
+  flowRef?: (flowId: string) => string
+  /** Markdown placed right after the main file's title. */
+  entryPreamble?: string
+  /** Markdown placed right after a phase file's title. */
+  phasePreamble?: string
 }
 
 /** A target bound to its name. */
@@ -334,6 +349,63 @@ export function codex(
     subSkillFrontmatter: render,
     dispatchRef: (skillName) => `\`$${options.plugin}:${skillName}\``,
     phaseReferences: options.phaseReferences ?? true,
+  }
+}
+
+export interface BaseTargetOptions {
+  /**
+   * Shell variable holding the base's install directory, e.g.
+   * `DEV_FLOWS_BASE`. `{{pluginRoot}}` renders as `$<rootVar>`.
+   */
+  rootVar: string
+  /**
+   * Directory of this host's flows, relative to the base root, e.g.
+   * `flows/claude`. Each flow lives at `<flowsDir>/<id>/flow.md`.
+   */
+  flowsDir: string
+  /** Notice on the first line of every generated file. */
+  generatedNotice?: string
+}
+
+/** Placeholder the agent fills with the caller's prefix. */
+const CALLER_CMD = "/<caller>:"
+
+/**
+ * A base variant of a host target: the same host conventions, rendered as
+ * plain instruction files (no skills) that front-end plugins read and follow.
+ * Each flow is `<flowsDir>/<id>/flow.md`, its phases `references/<phase>.md`
+ * beside it, and its commands are written `/<caller>:<name>`, where the
+ * caller is the front end that sent the agent there. The base ships no skills,
+ * so none of its flows show up as commands under the base's own name.
+ */
+export function baseTarget(
+  host: TargetSpec,
+  options: BaseTargetOptions,
+): TargetSpec {
+  const root = `$${options.rootVar}`
+  const notice =
+    options.generatedNotice ?? "<!-- Generated file. Do not edit by hand. -->"
+  const flowFile = (flowId: string) =>
+    `${root}/${options.flowsDir}/${flowId}/flow.md`
+  return {
+    ...host,
+    tokens: {
+      ...host.tokens,
+      cmd: CALLER_CMD,
+      pluginRoot: root,
+      pluginDirLookup: "",
+    },
+    argsToken: "the arguments you were given",
+    frontmatter: () => notice,
+    subSkillFrontmatter: () => notice,
+    subSkillTool: undefined,
+    dispatchRef: undefined,
+    phaseReferences: true,
+    mainFile: "flow.md",
+    flowRef: (flowId) =>
+      `the ${flowId} flow (read \`${flowFile(flowId)}\` and follow it, with the same caller, so its commands are \`${CALLER_CMD}<name>\` too)`,
+    entryPreamble: `You were sent here by a command of the front-end plugin named in the request (the caller): \`<caller>\` stands for its name. Commands below are written \`${CALLER_CMD}<name>\`: write and run them with the caller's name in place of \`<caller>\` (with caller \`acme\`, \`${CALLER_CMD}sync\` is \`/acme:sync\`). The arguments are what the caller passed on. \`${root}\` is where these flow files are installed: in a shell it's set, and for reading a file use the path the request or the session start gave. Read flow files (this one's references, and other flows) with your file-reading tool, not a shell command. Text a step gives you to print or say (a usage block, a message) is meant as written: fill in its placeholders and change nothing else.`,
+    phasePreamble: `This continues the flow you were following: \`<caller>\`, the arguments, and \`${root}\` mean what they did there.`,
   }
 }
 

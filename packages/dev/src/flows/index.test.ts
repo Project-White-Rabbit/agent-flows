@@ -3,38 +3,109 @@ import { knownPaths } from "../commands/configure.ts"
 import { findCapability } from "../config/integrations.ts"
 import { configureFlow } from "./configure.ts"
 import { createTicketsFlow } from "./create-tickets.ts"
-import { renderAllSkills } from "./index.ts"
-import { devKit, UNKNOWN_FLAGS } from "./kit.ts"
+import { installPathCommand, renderFrontEnd } from "./front-end.ts"
+import { DEV_FLOWS, renderBase, renderDevFlowsFrontEnd } from "./index.ts"
+import { devKit, FLOW_CONTRACT, UNKNOWN_FLAGS } from "./kit.ts"
 import { readyFlow } from "./ready.ts"
 import { syncFlow } from "./sync.ts"
 
+/** A flow's file, or a phase's reference given as `<flow>/references/<phase>`. */
+function flowPath(id: string): string {
+  return id.includes("/")
+    ? `flows/claude/${id}.md`
+    : `flows/claude/${id}/flow.md`
+}
+
 describe("dev flows", () => {
-  const files = renderAllSkills()
+  const files = renderBase()
+  const wrappers = renderDevFlowsFrontEnd()
+  const wrapper = (id: string) =>
+    wrappers.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
 
   it("renders each flow's Claude Code skills", () => {
     expect(files.map((f) => f.path)).toEqual([
-      "skills/cancel/SKILL.md",
-      "skills/cancel-run/SKILL.md",
-      "skills/configure/SKILL.md",
-      "skills/create-tickets/SKILL.md",
-      "skills/create-tickets-confirm/SKILL.md",
-      "skills/create-tickets-apply/SKILL.md",
-      "skills/evaluate/SKILL.md",
-      "skills/evaluate-run/SKILL.md",
-      "skills/finish/SKILL.md",
-      "skills/finish-run/SKILL.md",
-      "skills/preview/SKILL.md",
-      "skills/prototype/SKILL.md",
-      "skills/ready/SKILL.md",
-      "skills/ready-run/SKILL.md",
-      "skills/server/SKILL.md",
-      "skills/start-work/SKILL.md",
-      "skills/sync/SKILL.md",
-      "skills/sync-local/SKILL.md",
-      "skills/sync-remote/SKILL.md",
-      "skills/sync-report/SKILL.md",
-      "skills/tickets-to-work/SKILL.md",
+      "flows/claude/cancel/flow.md",
+      "flows/claude/cancel/references/run.md",
+      "flows/claude/configure/flow.md",
+      "flows/claude/create-tickets/flow.md",
+      "flows/claude/create-tickets/references/confirm.md",
+      "flows/claude/create-tickets/references/apply.md",
+      "flows/claude/evaluate/flow.md",
+      "flows/claude/evaluate/references/run.md",
+      "flows/claude/finish/flow.md",
+      "flows/claude/finish/references/run.md",
+      "flows/claude/preview/flow.md",
+      "flows/claude/prototype/flow.md",
+      "flows/claude/ready/flow.md",
+      "flows/claude/ready/references/run.md",
+      "flows/claude/server/flow.md",
+      "flows/claude/start-work/flow.md",
+      "flows/claude/sync/flow.md",
+      "flows/claude/sync/references/local.md",
+      "flows/claude/sync/references/remote.md",
+      "flows/claude/sync/references/report.md",
+      "flows/claude/tickets-to-work/flow.md",
+      "flows/manifest.json",
     ])
+  })
+
+  it("wraps every base flow as a dev-flows skill that reads it as the caller", () => {
+    expect(wrappers.map((f) => f.path)).toEqual(
+      DEV_FLOWS.map((flow) => `skills/${flow.id}/SKILL.md`),
+    )
+    const sync = wrapper("sync")
+    expect(sync).toMatch(/^---\ndescription: Commit, catch up/)
+    expect(sync).toContain("# /dev-flows:sync")
+    expect(sync).toContain(
+      "Read `<that directory>/flows/claude/sync/flow.md` with the Read tool",
+    )
+    expect(sync).toContain("as the caller `dev-flows`")
+    expect(sync).toContain("with these arguments: $ARGUMENTS")
+    expect(sync).toContain(`When it isn't ${FLOW_CONTRACT}, stop`)
+    expect(sync).toContain(installPathCommand())
+    expect(sync).toContain(
+      "write that directory in place of `$DEV_FLOWS_BASE` in every command",
+    )
+    for (const file of wrappers) {
+      expect(file.content, file.path).not.toContain("{{")
+    }
+  })
+
+  it("leaves out the flows a front end excludes, and only real ones", () => {
+    const some = renderFrontEnd({
+      plugin: "acme",
+      marketplace: "acme-mkt",
+      flows: DEV_FLOWS,
+      exclude: ["sync", "ready"],
+    })
+    expect(some.map((f) => f.flowId)).not.toContain("sync")
+    expect(some[0]?.content).toContain("claude plugin update acme@acme-mkt")
+    expect(() =>
+      renderFrontEnd({
+        plugin: "acme",
+        marketplace: "acme-mkt",
+        flows: DEV_FLOWS,
+        exclude: ["nope"],
+      }),
+    ).toThrow(/exclude names no flow: nope/)
+  })
+
+  it("lists every flow in the manifest with the contract", () => {
+    const manifest = JSON.parse(
+      files.find((f) => f.path === "flows/manifest.json")?.content ?? "{}",
+    )
+    expect(manifest.contract).toBe(FLOW_CONTRACT)
+    expect(manifest.hosts.claude).toEqual(
+      DEV_FLOWS.map((flow) => flow.id).sort(),
+    )
+  })
+
+  it("names no plugin in the base's flows: commands are the caller's", () => {
+    for (const file of files) {
+      expect(file.content, file.path).not.toMatch(/\/dev-flows[:-]/)
+      expect(file.content, file.path).not.toContain("$ARGUMENTS")
+      expect(file.content, file.path).not.toContain("CLAUDE_PLUGIN_ROOT")
+    }
   })
 
   it("falls back to an op's next variant when its way in fails, never twice for a write", () => {
@@ -53,8 +124,9 @@ describe("dev flows", () => {
   })
 
   it("asks configure for a token only when an adapter needs the API, not for CLI adapters", () => {
-    const configure = files.find((f) => f.path === "skills/configure/SKILL.md")
-      ?.content as string
+    const configure = files.find(
+      (f) => f.path === "flows/claude/configure/flow.md",
+    )?.content as string
     const row = (path: string) =>
       configure.split("\n").find((line) => line.startsWith(`| \`${path}\``))
     // GitHub's adapters all run through `gh`; Linear's call its API.
@@ -69,10 +141,7 @@ describe("dev flows", () => {
 
   it("runs commands from the installed plugin root", () => {
     for (const file of files.filter((f) => f.content.includes("node "))) {
-      expect(file.content).toContain(
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable in rendered markdown
-        'node "${CLAUDE_PLUGIN_ROOT}/src/commands/',
-      )
+      expect(file.content).toContain('node "$DEV_FLOWS_BASE/src/commands/')
     }
   })
 
@@ -248,12 +317,12 @@ describe("dev flows", () => {
   })
 
   it("finds sync's issue through create-tickets' match mode", () => {
-    const sync = files.find((f) => f.path === "skills/sync/SKILL.md")
+    const sync = files.find((f) => f.path === "flows/claude/sync/flow.md")
     expect(sync?.content).toContain(
-      "run the `/dev-flows:create-tickets` skill with `match --branch <branch>",
+      "run the create-tickets flow (read `$DEV_FLOWS_BASE/flows/claude/create-tickets/flow.md` and follow it, with the same caller, so its commands are `/<caller>:<name>` too) with `match --branch <branch>",
     )
     const matched = files.find(
-      (f) => f.path === "skills/create-tickets/SKILL.md",
+      (f) => f.path === "flows/claude/create-tickets/flow.md",
     )
     for (const line of [
       "match <ID>",
@@ -268,7 +337,9 @@ describe("dev flows", () => {
   })
 
   it("links the issue by its bare id and keeps a closed issue closed", () => {
-    const remote = files.find((f) => f.path === "skills/sync-remote/SKILL.md")
+    const remote = files.find(
+      (f) => f.path === "flows/claude/sync/references/remote.md",
+    )
     expect(remote?.content).toContain(
       "> Issue: [<ID>](<issue URL>) <issue title>",
     )
@@ -278,9 +349,10 @@ describe("dev flows", () => {
 
   it("picks the PR's issue link form from finish.issueOnMerge", () => {
     const main =
-      files.find((f) => f.path === "skills/sync/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/sync/flow.md")?.content ?? ""
     const remote =
-      files.find((f) => f.path === "skills/sync-remote/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/sync/references/remote.md")
+        ?.content ?? ""
     expect(main).toMatch(/configure\.ts" get finish\.issueOnMerge --optional/)
     expect(main).toContain("(`null` reads as `close`)")
     // close (or unset) and tracker: the closing form at track
@@ -298,7 +370,8 @@ describe("dev flows", () => {
 
   it("leaves the issue to sync's close-out only with finish.issueOnMerge close", () => {
     const run =
-      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/references/run.md")
+        ?.content ?? ""
     expect(run).toContain(
       "`--leave-issue` when `<issueOnMerge>` is `tracker` or `leave`",
     )
@@ -306,7 +379,8 @@ describe("dev flows", () => {
 
   it("never cancels an issue close only looked up, and keeps one other pull requests used", () => {
     const run =
-      files.find((f) => f.path === "skills/cancel-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/cancel/references/run.md")
+        ?.content ?? ""
     expect(run).toContain(
       "keep what turns up as `<candidates>`, never `<issue>`",
     )
@@ -318,45 +392,50 @@ describe("dev flows", () => {
 
   it("refuses on a protected branch in sync, ready, merge, and close", () => {
     const skill = (id: string) =>
-      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+      files.find((f) => f.path === flowPath(id))?.content ?? ""
     expect(skill("sync")).toContain(
       "because the branch is in the config's `repo.protectedBranches`",
     )
-    for (const id of ["ready", "finish", "cancel-run"]) {
+    for (const id of ["ready", "finish", "cancel/references/run"]) {
       expect(skill(id), id).toMatch(
         /configure\.ts" get repo\.protectedBranches --optional/,
       )
     }
     expect(skill("ready")).toContain("Refusing to ready <branch>")
     expect(skill("finish")).toContain("Refusing to merge from <branch")
-    expect(skill("cancel-run")).toContain("one of `<protected>`")
+    expect(skill("cancel/references/run")).toContain("one of `<protected>`")
   })
 
   it("never reads a failed lookup as none, clean, or no issue", () => {
     const skill = (id: string) =>
-      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+      files.find((f) => f.path === flowPath(id))?.content ?? ""
     const main = skill("sync")
     expect(main).toContain("**A failed read is not an absence.**")
     expect(main).toContain("On `search skipped`, plan no issue")
     expect(main).not.toContain("On `search skipped`, plan a new issue")
     expect(main).toContain("Sync files no issue on a failed lookup.")
     expect(main).toContain("Sync won't guess there's none")
-    expect(skill("sync-local")).toContain("A read that failed is never clean.")
-    expect(skill("sync-local")).not.toContain("then treat it as `clean`")
-    expect(skill("sync-report")).toContain(
+    expect(skill("sync/references/local")).toContain(
+      "A read that failed is never clean.",
+    )
+    expect(skill("sync/references/local")).not.toContain(
+      "then treat it as `clean`",
+    )
+    expect(skill("sync/references/report")).toContain(
       "Couldn't read whether <branch> still merges cleanly",
     )
   })
 
   it("adds no attribution of its own to commits or the PR block", () => {
     const main =
-      files.find((f) => f.path === "skills/sync/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/sync/flow.md")?.content ?? ""
     expect(main).toContain("**Add no attribution of your own.**")
     expect(main).toContain(
       "neither adding what they don't ask for nor stripping what they do",
     )
     const local =
-      files.find((f) => f.path === "skills/sync-local/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/sync/references/local.md")
+        ?.content ?? ""
     expect(local).toContain(
       "with no attribution beyond what those instructions require",
     )
@@ -364,7 +443,8 @@ describe("dev flows", () => {
 
   it("files a sync sub-issue by the ticket rules, and assigns on sync when asked", () => {
     const remote =
-      files.find((f) => f.path === "skills/sync-remote/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/sync/references/remote.md")
+        ?.content ?? ""
     expect(remote).toMatch(
       /configure\.ts" get tickets\.dueDateRequired tickets\.estimateScale tickets\.blockerMark tickets\.parentFollowsSubIssues tickets\.planningDoc tickets\.assignOnSync --optional/,
     )
@@ -388,17 +468,20 @@ describe("dev flows", () => {
 
   it("commits and pushes without catching up on --no-catch-up", () => {
     const skill = (id: string) =>
-      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+      files.find((f) => f.path === flowPath(id))?.content ?? ""
     expect(skill("sync")).toContain("[--no-catch-up]")
     expect(skill("sync")).toMatch(
       /sync\.ts" survey <mode> --base <base> --pr <pr> \[--error-ref <ref>\]\.\.\. \[--no-catch-up\]/,
     )
-    expect(skill("sync-local")).toContain("**Skip with `--no-catch-up`:**")
+    expect(skill("sync/references/local")).toContain(
+      "**Skip with `--no-catch-up`:**",
+    )
   })
 
   it("ranks recent issues with tickets.ts match in cancel's issue search", () => {
     const run =
-      files.find((f) => f.path === "skills/cancel-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/cancel/references/run.md")
+        ?.content ?? ""
     expect(run).toMatch(
       /tickets\.ts" match --plan <dir>\/match\.json --issues <dir>\/issues\.json/,
     )
@@ -409,7 +492,8 @@ describe("dev flows", () => {
 
   it("reports the stacking tool's link even when submit printed none", () => {
     const report =
-      files.find((f) => f.path === "skills/sync-report/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/sync/references/report.md")
+        ?.content ?? ""
     expect(report).toContain(
       "its `prUrl` op with `<url>` the pull request's URL",
     )
@@ -418,8 +502,8 @@ describe("dev flows", () => {
 
   it("ranks every recent issue with tickets.ts match before judging the rest", () => {
     const main =
-      files.find((f) => f.path === "skills/create-tickets/SKILL.md")?.content ??
-      ""
+      files.find((f) => f.path === "flows/claude/create-tickets/flow.md")
+        ?.content ?? ""
     expect(main).toContain("run its `recentIssues` op once")
     expect(main).toMatch(
       /tickets\.ts" match --plan <dir>\/<plan file> --issues <dir>\/issues\.json/,
@@ -428,10 +512,10 @@ describe("dev flows", () => {
 
   it("chains tickets-to-work to start-work, and start-work to create-tickets", () => {
     const skill = (id: string) =>
-      files.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""
+      files.find((f) => f.path === flowPath(id))?.content ?? ""
     const ticketsToWork = skill("tickets-to-work")
     expect(ticketsToWork).toContain(
-      "Run the `/dev-flows:start-work` skill with `<ID> --yes --run <ID> <flags>`",
+      "Run the start-work flow (read `$DEV_FLOWS_BASE/flows/claude/start-work/flow.md` and follow it, with the same caller, so its commands are `/<caller>:<name>` too) with `<ID> --yes --run <ID> <flags>`",
     )
     // Each start runs in the background, and the next question doesn't wait.
     expect(ticketsToWork).toContain(
@@ -445,10 +529,10 @@ describe("dev flows", () => {
       /first `node "[^"]+\/work\.ts" lock`[\s\S]*createWorkspace[\s\S]*work\.ts" unlock --token <token>`, whether the op worked or failed/,
     )
     expect(startWork).toContain(
-      "run the `/dev-flows:create-tickets` skill with the text and `--yes`",
+      "run the create-tickets flow (read `$DEV_FLOWS_BASE/flows/claude/create-tickets/flow.md` and follow it, with the same caller, so its commands are `/<caller>:<name>` too) with the text and `--yes`",
     )
     expect(startWork).toContain(
-      "Run the `/dev-flows:create-tickets` skill with `match` and the text",
+      "Run the create-tickets flow (read `$DEV_FLOWS_BASE/flows/claude/create-tickets/flow.md` and follow it, with the same caller, so its commands are `/<caller>:<name>` too) with `match` and the text",
     )
     expect(startWork).toContain("/agent-flows/create-tickets")
     expect(startWork).toContain("ids --plan <create-tickets dir>/match.json")
@@ -456,15 +540,20 @@ describe("dev flows", () => {
   })
 
   it("stops on an unknown flag in every skill that takes flags, and only there", () => {
-    const takesFlags = files.filter((f) =>
-      /^argument-hint: .*--/m.test(f.content),
+    const flagged = new Set(
+      wrappers
+        .filter((f) => /^argument-hint: .*--/m.test(f.content))
+        .map((f) => f.flowId),
+    )
+    const takesFlags = files.filter(
+      (f) => flagged.has(f.flowId) && f.path.endsWith("/flow.md"),
     )
     expect(takesFlags.map((f) => f.path)).toEqual([
-      "skills/create-tickets/SKILL.md",
-      "skills/ready/SKILL.md",
-      "skills/start-work/SKILL.md",
-      "skills/sync/SKILL.md",
-      "skills/tickets-to-work/SKILL.md",
+      "flows/claude/create-tickets/flow.md",
+      "flows/claude/ready/flow.md",
+      "flows/claude/start-work/flow.md",
+      "flows/claude/sync/flow.md",
+      "flows/claude/tickets-to-work/flow.md",
     ])
     for (const file of files) {
       expect(file.content.includes(UNKNOWN_FLAGS)).toBe(
@@ -528,10 +617,10 @@ describe("dev flows", () => {
       .filter((f) => f.content.includes("check it hasn't already merged"))
       .map((f) => f.path)
     expect(withParent).toEqual([
-      "skills/evaluate-run/SKILL.md",
-      "skills/finish/SKILL.md",
-      "skills/ready/SKILL.md",
-      "skills/sync-local/SKILL.md",
+      "flows/claude/evaluate/references/run.md",
+      "flows/claude/finish/flow.md",
+      "flows/claude/ready/flow.md",
+      "flows/claude/sync/references/local.md",
     ])
     for (const file of files) {
       expect(file.content).not.toContain("`parent` op when there is one")
@@ -540,8 +629,8 @@ describe("dev flows", () => {
 
   describe("evaluate", () => {
     const run =
-      files.find((f) => f.path === "skills/evaluate-run/SKILL.md")?.content ??
-      ""
+      files.find((f) => f.path === "flows/claude/evaluate/references/run.md")
+        ?.content ?? ""
 
     it("reads the new settings, and fetches the base only when asked", () => {
       expect(run).toContain(
@@ -601,25 +690,27 @@ describe("dev flows", () => {
 
   it("runs evaluate when finish's gate has no current verdict, and gates again", () => {
     const run =
-      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/references/run.md")
+        ?.content ?? ""
     expect(run).toContain(
-      "run the `/dev-flows:evaluate` skill with the argument `record`",
+      "run the evaluate flow (read `$DEV_FLOWS_BASE/flows/claude/evaluate/flow.md` and follow it, with the same caller, so its commands are `/<caller>:<name>` too) with the argument `record`",
     )
     expect(run).toContain("Then run `gate` again, once")
     expect(run).toContain("`stop` otherwise (a `stop` verdict)")
-    expect(run).not.toContain("Run /dev-flows:evaluate on <branch>")
+    expect(run).not.toContain("Run /<caller>:evaluate on <branch>")
   })
 
   it("merges only the commit CI passed on, and cleans up only after", () => {
     const run =
-      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/references/run.md")
+        ?.content ?? ""
     const ci = run.indexOf('ready.ts" ci start --sha <sha>')
     const state = run.indexOf("The `prMergeState` op")
     const merge = run.indexOf(
       "the `prMerge` op with <N>, the method, and `<sha>`",
     )
     const merged = run.indexOf("its state must be merged")
-    const closeOut = run.indexOf("skill with the argument `remote`", merged)
+    const closeOut = run.indexOf("too) with the argument `remote`", merged)
     const remove = run.indexOf("git push origin --delete <branch>")
     expect(ci).toBeGreaterThan(-1)
     expect(state).toBeGreaterThan(ci)
@@ -631,9 +722,10 @@ describe("dev flows", () => {
 
   it("syncs only the pull request and issue with finish.sync remote", () => {
     const main =
-      files.find((f) => f.path === "skills/finish/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/flow.md")?.content ?? ""
     const run =
-      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/references/run.md")
+        ?.content ?? ""
     expect(main).toMatch(
       /finish\.deployLogLines finish\.sync finish\.ciTimeout/,
     )
@@ -649,7 +741,8 @@ describe("dev flows", () => {
 
   it("waits finish.deployTimeout, tails failed steps' logs, and keeps skipped steps apart", () => {
     const run =
-      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/references/run.md")
+        ?.content ?? ""
     expect(run).toContain("or `<deployTimeout>` minutes have gone by")
     expect(run).not.toContain("or 30 minutes have gone by")
     expect(run).toContain(
@@ -661,9 +754,10 @@ describe("dev flows", () => {
 
   it("waits finish.ciTimeout for CI, and gates on blocking reviewers and a clean tree", () => {
     const main =
-      files.find((f) => f.path === "skills/finish/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/flow.md")?.content ?? ""
     const run =
-      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/references/run.md")
+        ?.content ?? ""
     expect(main).toMatch(
       /finish\.ciTimeout finish\.blockingReviewers finish\.requireClean finish\.runReady --optional/,
     )
@@ -683,12 +777,13 @@ describe("dev flows", () => {
 
   it("runs ready loop from finish when ready never ran on the branch, unless skipped", () => {
     const main =
-      files.find((f) => f.path === "skills/finish/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/flow.md")?.content ?? ""
     const run =
-      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/references/run.md")
+        ?.content ?? ""
     const ready =
-      files.find((f) => f.path === "skills/ready/SKILL.md")?.content ?? ""
-    expect(main).toContain(
+      files.find((f) => f.path === "flows/claude/ready/flow.md")?.content ?? ""
+    expect(wrapper("finish")).toContain(
       'argument-hint: "[stack | branch] [squash | merge | rebase] [no-ready]"',
     )
     expect(main).toMatch(/finish\.requireClean finish\.runReady --optional/)
@@ -698,7 +793,7 @@ describe("dev flows", () => {
     expect(main.slice(decide)).toContain("Not with the `no-ready` argument")
     // Ready replaces finish's own sync, before the CI wait.
     const loop = run.indexOf(
-      "run the `/dev-flows:ready` skill with the argument `loop` in place of the sync below",
+      "run the ready flow (read `$DEV_FLOWS_BASE/flows/claude/ready/flow.md` and follow it, with the same caller, so its commands are `/<caller>:<name>` too) with the argument `loop` in place of the sync below",
     )
     expect(loop).toBeGreaterThan(-1)
     expect(run.indexOf('ready.ts" ci start --sha <sha>')).toBeGreaterThan(loop)
@@ -710,7 +805,8 @@ describe("dev flows", () => {
 
   it("reads code-scanning alerts, works past rollups, and stops on no progress", () => {
     const run =
-      files.find((f) => f.path === "skills/ready-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/ready/references/run.md")
+        ?.content ?? ""
     expect(run).toContain("its findings are the `codeScanningAlerts` op's")
     expect(run).toContain("| **Code scanning** |")
     expect(run).toContain("never fix a check in `rollupFailures`")
@@ -721,13 +817,14 @@ describe("dev flows", () => {
 
   it("bookends ready's publish with sync local and sync remote", () => {
     const run =
-      files.find((f) => f.path === "skills/ready-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/ready/references/run.md")
+        ?.content ?? ""
     const local = run.indexOf(
-      "Run the `/dev-flows:sync` skill with the argument `local`",
+      "Run the sync flow (read `$DEV_FLOWS_BASE/flows/claude/sync/flow.md` and follow it, with the same caller, so its commands are `/<caller>:<name>` too) with the argument `local`",
     )
     const ready = run.indexOf("the `prReady` op")
     const remote = run.indexOf(
-      "Run the `/dev-flows:sync` skill with the argument `remote`",
+      "Run the sync flow (read `$DEV_FLOWS_BASE/flows/claude/sync/flow.md` and follow it, with the same caller, so its commands are `/<caller>:<name>` too) with the argument `remote`",
     )
     const ci = run.indexOf('ready.ts" ci start --sha <sha>')
     expect(local).toBeGreaterThan(-1)
@@ -756,7 +853,7 @@ describe("dev flows", () => {
   })
 
   it("lists a recheck: report hook's open findings in ready's report", () => {
-    const report = files.find((f) => f.path.endsWith("ready-run/SKILL.md"))
+    const report = files.find((f) => f.path.endsWith("ready/references/run.md"))
     expect(report?.content).toContain("**Open findings:**")
   })
 
@@ -780,9 +877,10 @@ describe("dev flows", () => {
 
   it("passes the pull request to ready's hooks, and runs beforeFixPush between a fix batch's commit and its push", () => {
     const main =
-      files.find((f) => f.path === "skills/ready/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/ready/flow.md")?.content ?? ""
     const run =
-      files.find((f) => f.path === "skills/ready-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/ready/references/run.md")
+        ?.content ?? ""
     for (const point of ["ready.before", "ready.beforePublish"]) {
       expect(main).toContain(
         `run ${point} --flow ready --mode <mode> --base <mergeBase> --pr <pr>\``,
@@ -806,17 +904,18 @@ describe("dev flows", () => {
 
   it("tells sync's after hooks what the run did, and finish's whether it merged and on which commit", () => {
     const sync =
-      files.find((f) => f.path === "skills/sync/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/sync/flow.md")?.content ?? ""
     expect(sync).toContain(
       "run after --flow sync --mode <mode> --pr <the pull request's number> --issue <the branch's issue id> --result <result> [--issue-filed] --outcome",
     )
     expect(sync).toContain("`noop` (neither: the no-op gate, or nothing to do)")
 
     const merge =
-      files.find((f) => f.path === "skills/finish/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/flow.md")?.content ?? ""
     expect(merge).toContain("[--merged --merge-commit <landed>] --outcome")
     const run =
-      files.find((f) => f.path === "skills/finish-run/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/finish/references/run.md")
+        ?.content ?? ""
     const merged = run.indexOf("its state must be merged")
     const commit = run.indexOf("### Merge commit")
     const closeOut = run.indexOf("### Close out")
@@ -831,8 +930,8 @@ describe("dev flows", () => {
 
   it("gives evaluate's scan hooks the scope and the evaluation it follows", () => {
     const run =
-      files.find((f) => f.path === "skills/evaluate-run/SKILL.md")?.content ??
-      ""
+      files.find((f) => f.path === "flows/claude/evaluate/references/run.md")
+        ?.content ?? ""
     expect(run).toContain(
       "--scope <full or delta, as the scope above says> --since <since> --pr <the PR's number>`",
     )
@@ -841,7 +940,8 @@ describe("dev flows", () => {
 
   it("runs preview's afterOpen hooks on the page it opened, in a browser it can drive", () => {
     const skill =
-      files.find((f) => f.path === "skills/preview/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/preview/flow.md")?.content ??
+      ""
     expect(skill).toContain(
       "run preview.afterOpen --flow preview --mode <mode> --url <target>`",
     )
@@ -853,7 +953,8 @@ describe("dev flows", () => {
 
   it("shows a prototype's mockup wherever the session can, outside the working tree unless kept", () => {
     const skill =
-      files.find((f) => f.path === "skills/prototype/SKILL.md")?.content ?? ""
+      files.find((f) => f.path === "flows/claude/prototype/flow.md")?.content ??
+      ""
     expect(skill).toContain(
       'configure.ts" get prototype.style prototype.show --optional`',
     )

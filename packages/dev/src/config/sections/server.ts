@@ -62,7 +62,7 @@ export const server: SectionSpec = {
   path: "server",
   name: "Dev server",
   purpose:
-    "How the repo's dev server starts and where it serves, so dev-flows can start one for a worktree (for preview, or on its own), and stop it once nothing needs it",
+    "How the repo's dev server starts and where it serves, so the commands can start one for a worktree (for preview, or on its own), and stop it once nothing needs it",
   fields: [
     {
       key: "command",
@@ -73,7 +73,7 @@ export const server: SectionSpec = {
     {
       key: "url",
       description:
-        "Where the dev server serves, when it's always the same for everyone (the port the repo's dev script fixes, not one you picked on your machine). Leave it unset when each worktree gets its own port: dev-flows reads the URL the server prints, or the port this checkout's server listens on. When it's set and another checkout's server holds it, dev-flows says so rather than use the other checkout's server",
+        "Where the dev server serves, when it's always the same for everyone (the port the repo's dev script fixes, not one you picked on your machine). Leave it unset when each worktree gets its own port: the flows read the URL the server prints, or the port this checkout's server listens on. When it's set and another checkout's server holds it, the flows say so rather than use the other checkout's server",
       example: "http://localhost:3000",
       pattern: LOCAL_URL,
     },
@@ -81,20 +81,20 @@ export const server: SectionSpec = {
       key: "timeout",
       type: "number",
       description:
-        "Seconds dev-flows waits for a server it started to answer (default 120). It goes on running past that",
+        "Seconds the commands wait for a server it started to answer (default 120). It goes on running past that",
       example: 180,
     },
     {
       key: "idleTimeout",
       type: "number",
       description:
-        "Minutes a server dev-flows started may go with nothing connected to it (no page open on it) before it's stopped (default 240; 0: never). One is also stopped once its worktree is deleted, whatever this says",
+        "Minutes a server the commands started may go with nothing connected to it (no page open on it) before it's stopped (default 240; 0: never). One is also stopped once its worktree is deleted, whatever this says",
       example: 60,
     },
     {
       key: "ports",
       description:
-        "A range of ports (`3001-3099`) to give each worktree's server its own: dev-flows picks one nothing listens on, keeps the same one for a worktree while it's free, and passes it to `command` as `$PORT` and `{port}`. The server's URL is then `url` on that port (`http://localhost:<port>` with no `url`). Leave it unset when the repo's dev script picks its own port",
+        "A range of ports (`3001-3099`) to give each worktree's server its own: the commands pick one nothing listens on, keeps the same one for a worktree while it's free, and passes it to `command` as `$PORT` and `{port}`. The server's URL is then `url` on that port (`http://localhost:<port>` with no `url`). Leave it unset when the repo's dev script picks its own port",
       example: "3001-3099",
       pattern: PORT_RANGE,
     },

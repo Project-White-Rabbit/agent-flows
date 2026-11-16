@@ -1,0 +1,20 @@
+{
+  "plugin": "dev-flows-base",
+  "contract": 1,
+  "hosts": {
+    "claude": [
+      "cancel",
+      "configure",
+      "create-tickets",
+      "evaluate",
+      "finish",
+      "preview",
+      "prototype",
+      "ready",
+      "server",
+      "start-work",
+      "sync",
+      "tickets-to-work"
+    ]
+  }
+}

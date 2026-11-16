@@ -121,6 +121,7 @@ The Codex file gets a `name:` frontmatter with the usage line, `# $acme:deploy`,
 | `{{skill-ref:phase}}` / `{{dispatch-ref:phase}}` | Where a phase lives (a section, sub-skill, or reference), with mode and argument forwarding for dispatch |
 | `{{branches}}` / `{{branches:prompt}}` / `{{whens}}` | User-choice options and runtime routing lines, each with its destination |
 | `{{tool:id}}` / `{{command:id}}` | Tool name with the host's prefix / command invocation |
+| `{{flow:id}}` | Another flow, for prose that runs it: its skill, or on a base target its file |
 | `{{table:name:cols}}` / `{{list:name:col}}` | Tabular data from `flow.tables` |
 | `{{argsToken}}` and target tokens | Defined by the target (preset tokens: `cmd`, `editor`, `pluginRoot`, `pluginDirLookup`, `askUser`, `askVerb`, `askVerbCap`, `askNoun`) |
 
@@ -155,6 +156,25 @@ const kit = createFlowKit({
 ```
 
 Optional fields: `subSkillTool` (the tool one skill uses to call another), `dispatchRef` (how prose names a sibling skill), and `phaseReferences` (under `split-chain`, emit phases as reference files rather than separate skills).
+
+### Base targets
+
+`baseTarget(host, options)` renders a host's flows as plain instruction files instead of skills, for a plugin that ships the workflows while other plugins ship the commands people type:
+
+```ts
+import { baseTarget, claudeCode, createFlowKit } from "@agent-flows/core"
+
+const kit = createFlowKit({
+  targets: {
+    claude: baseTarget(claudeCode({ plugin: "acme-base" }), {
+      rootVar: "ACME_BASE",
+      flowsDir: "flows/claude",
+    }),
+  },
+})
+```
+
+Write each flow to `flows/claude/<id>/flow.md`; its phases land in `references/` beside it, always split-chain style. Commands render as `/<caller>:<name>`, `{{pluginRoot}}` as `$ACME_BASE`, and `{{flow:<id>}}` as the other flow's file. A front-end plugin's skill sends the agent to the file as the caller, so the commands it names are the front end's own, and the base updates without the front end being rebuilt. The base has to tell the session where it's installed (dev-flows-base does it with a `SessionStart` hook).
 
 ## Commands
 

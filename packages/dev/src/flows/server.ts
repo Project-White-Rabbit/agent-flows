@@ -4,7 +4,7 @@ import { DEV_COMMANDS, devKit, HOOKS_COMMAND, hooksInvariant } from "./kit.ts"
 /** The `server` command entry, for a flow that only stops this worktree's. */
 export const SERVER_STOP_COMMAND = {
   description:
-    "`stop` stops the dev server dev-flows started in this worktree, if any, and prints what it stopped (with what the repo's `server.stopped` hooks did, as `hooks`)",
+    "`stop` stops the dev server these commands started in this worktree, if any, and prints what it stopped (with what the repo's `server.stopped` hooks did, as `hooks`)",
   args: "<subcommand>",
 }
 
@@ -115,9 +115,9 @@ finish and cancel stop this worktree's.
 
 ### An unwatched server
 
-When it's \`running\` with \`watched\` false, and the server it found is this checkout's (\`ours\` true, or one of \`servers\`), nothing will stop it when its worktree is deleted or it sits idle: someone started it by hand, or an older dev-flows did. In \`adopt\` mode, restart it; otherwise ask the person, {{askUser}}naming its \`command\` and \`pid\`: restart it under the watchdog (it stops, then starts again: what it holds in memory is lost, and a terminal it ran in shows it exited), or leave it as it is.
+When it's \`running\` with \`watched\` false, and the server it found is this checkout's (\`ours\` true, or one of \`servers\`), nothing will stop it when its worktree is deleted or it sits idle: someone started it by hand, or an older version of these commands did. In \`adopt\` mode, restart it; otherwise ask the person, {{askUser}}naming its \`command\` and \`pid\`: restart it under the watchdog (it stops, then starts again: what it holds in memory is lost, and a terminal it ran in shows it exited), or leave it as it is.
 
-To restart: \`{{command:server}} adopt --pid <the pid of the process listening on <url>'s port, from \`servers\`> --command '<it>'\`, with \`--url <url>\` when the config sets no \`server.url\`. \`<it>\` is \`server.command\` when the config sets one (leave \`--command\` out), else the command found as for \`unconfigured\` (ask when it isn't clear; with none, leave the server as it is). For one an older dev-flows started (\`ours\` true), leave \`--pid\` out. It prints what \`start\` prints for \`started\`, \`failed\`, or \`timeout\`, handled the same way, plus \`replaced\`, the server it stopped. A \`failed\` with a \`reason\` stopped nothing (it won't stop a shell, or anything this session runs under): say why, and go on with the server as it is.
+To restart: \`{{command:server}} adopt --pid <the pid of the process listening on <url>'s port, from \`servers\`> --command '<it>'\`, with \`--url <url>\` when the config sets no \`server.url\`. \`<it>\` is \`server.command\` when the config sets one (leave \`--command\` out), else the command found as for \`unconfigured\` (ask when it isn't clear; with none, leave the server as it is). For one an older version started (\`ours\` true), leave \`--pid\` out. It prints what \`start\` prints for \`started\`, \`failed\`, or \`timeout\`, handled the same way, plus \`replaced\`, the server it stopped. A \`failed\` with a \`reason\` stopped nothing (it won't stop a shell, or anything this session runs under): say why, and go on with the server as it is.
 
 ### Report
 

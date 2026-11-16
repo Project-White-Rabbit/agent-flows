@@ -103,14 +103,14 @@ const NO_SHARED_EFFECTS =
 export const HOOK_POINTS: HookPoint[] = [
   {
     id: "hooks.before",
-    when: "At the start of every dev-flows command but configure, before its first step, once its mode is known",
+    when: "At the start of every command but configure, before its first step, once its mode is known",
     effects: `${NO_SHARED_EFFECTS}, since it runs before ready too`,
     failure: "stop",
     example: [{ name: "env", run: "./scripts/sync-worktree-env.sh" }],
   },
   {
     id: "hooks.after",
-    when: "At the end of every dev-flows command but configure, finished or stopped, just before its report, after the command's own `after` hooks",
+    when: "At the end of every command but configure, finished or stopped, just before its report, after the command's own `after` hooks",
     effects:
       "Commands may have side effects outside the checkout (a notification)",
     failure: "report",
@@ -276,7 +276,7 @@ export const HOOK_POINTS: HookPoint[] = [
   {
     id: "server.started",
     flow: "server",
-    when: "Each time a dev server dev-flows starts answers, whichever command started it (server, preview, or server adopt restarting one started by hand), with `{url}` where it serves and `{port}` its port: for what must know the running server's address, such as a git-ignored config file a tool reads it from. A server that comes back on another port runs it again with the new one",
+    when: "Each time a dev server these commands start answers, whichever command started it (server, preview, or server adopt restarting one started by hand), with `{url}` where it serves and `{port}` its port: for what must know the running server's address, such as a git-ignored config file a tool reads it from. A server that comes back on another port runs it again with the new one",
     effects:
       "Commands may write local files the repo ignores (a local config), but not deploy, publish, migrate, or write to a shared service or database",
     failure: "report",
@@ -293,7 +293,7 @@ export const HOOK_POINTS: HookPoint[] = [
   {
     id: "server.stopped",
     flow: "server",
-    when: "Each time a dev server dev-flows started stops while its worktree is still there: server stop (and stop all, for each worktree's), finish and cancel stopping it, the watchdog stopping one nothing has used for `server.idleTimeout` minutes, and a server that exits on its own. `{url}` and `{port}` are where it served. Not when its worktree is deleted, since what it wrote went with it",
+    when: "Each time a dev server these commands started stops while its worktree is still there: server stop (and stop all, for each worktree's), finish and cancel stopping it, the watchdog stopping one nothing has used for `server.idleTimeout` minutes, and a server that exits on its own. `{url}` and `{port}` are where it served. Not when its worktree is deleted, since what it wrote went with it",
     effects:
       "Commands may remove what `server.started` wrote, but not deploy, publish, migrate, or write to a shared service or database",
     failure: "report",

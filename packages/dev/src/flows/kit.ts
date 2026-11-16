@@ -1,14 +1,38 @@
 import {
+  baseTarget,
   claudeCode,
   createFlowKit,
   defineCommandCatalog,
 } from "@agent-flows/core"
 
-export const PLUGIN = "dev-flows"
+/** The plugin that ships every flow and the commands they run, with no skills. */
+export const BASE_PLUGIN = "dev-flows-base"
+
+/** Shell variable holding the base's install directory. */
+export const BASE_ROOT_VAR = "DEV_FLOWS_BASE"
+
+/**
+ * The version of what front ends rely on: each flow's file path, how the
+ * caller is passed, and the flows that exist. Bump it when one of those
+ * changes in a way older front ends can't follow.
+ */
+export const FLOW_CONTRACT = 1
+
+/** Where a host's flows live in the base, relative to its root. */
+export function flowsDir(host: string): string {
+  return `flows/${host}`
+}
 
 export const devKit = createFlowKit({
   targets: {
-    claude: claudeCode({ plugin: PLUGIN }),
+    // The base renders every flow as plain files a front end's skill reads:
+    // Claude Code's conventions, with commands under the caller's name.
+    claude: baseTarget(claudeCode({ plugin: BASE_PLUGIN }), {
+      rootVar: BASE_ROOT_VAR,
+      flowsDir: flowsDir("claude"),
+      generatedNotice:
+        "<!-- Generated from packages/dev/src/flows by `bun run build`. Do not edit by hand. -->",
+    }),
   },
   commands: {
     // Commands are TypeScript run directly by node (type stripping), so the
@@ -62,7 +86,7 @@ export function flowDir(flow: string): string {
  * it. Every config-reading step uses this, so every flow fails the same way.
  */
 export const REQUIRE_CONFIG =
-  "If it exits with status 2 and prints `\"configured\": false`, stop this command here. Relay its `message`: the repo isn't set up for dev-flows yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `{{cmd}}configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead."
+  "If it exits with status 2 and prints `\"configured\": false`, stop this command here. Relay its `message`: the repo isn't set up for these commands yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `{{cmd}}configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead."
 
 /**
  * Prose for a step that takes flags out of the arguments: what to do with one
@@ -116,5 +140,5 @@ export function hooksInvariant(
   const extra = options.extra ? ` ${options.extra}` : ""
   const note = options.note ? ` ${options.note}` : ""
   const points = options.afterPoint ? `${flow}.after after` : "after"
-  return `**Run the repo's hooks around this command.** Skip this when the mode is \`help\`, or when another dev-flows command is running this one (it runs its own). Once the mode is known, before the first step's work: \`{{command:hooks}} run before --flow ${flow} --mode <mode>\`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: \`{{command:hooks}} run ${points} --flow ${flow} --mode <mode>${extra} --outcome <success, when it did its job, else failure>\`, leaving out a flag whose value isn't known yet.${note} ${HOOK_RESULTS} At the end, a \`stop\` can't happen: report the \`failures\`. When \`ran\` lists any hook, say in the report which ran at each point, what any task for you changed, what failed, and every finding a hook's \`open\` left, as open; when no point ran one, leave hooks out of the report.`
+  return `**Run the repo's hooks around this command.** Skip this when the mode is \`help\`, or when another of these commands is running this one (it runs its own). Once the mode is known, before the first step's work: \`{{command:hooks}} run before --flow ${flow} --mode <mode>\`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: \`{{command:hooks}} run ${points} --flow ${flow} --mode <mode>${extra} --outcome <success, when it did its job, else failure>\`, leaving out a flag whose value isn't known yet.${note} ${HOOK_RESULTS} At the end, a \`stop\` can't happen: report the \`failures\`. When \`ran\` lists any hook, say in the report which ran at each point, what any task for you changed, what failed, and every finding a hook's \`open\` left, as open; when no point ran one, leave hooks out of the report.`
 }
