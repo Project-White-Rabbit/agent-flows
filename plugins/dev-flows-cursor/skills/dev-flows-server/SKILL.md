@@ -1,6 +1,6 @@
 ---
 name: dev-flows-server
-description: "Start this worktree's dev server in the background when it isn't running, stop it, list the ones running across the repo's worktrees, or put one started by hand under a watchdog that stops it once its worktree is deleted or nobody uses it. Usage: /dev-flows-server [adopt|stop|list|help]"
+description: "Start this worktree's dev server in the background when it isn't running, stop it, list the ones running across the repo's worktrees, or put one started by hand under a watchdog that stops it once its worktree is deleted or nobody uses it. Usage: /dev-flows-server [up|adopt|restart|stop|down|list|status|help]"
 ---
 
 <!-- Generated: sends /dev-flows-server to the server flow in dev-flows-base. Do not edit by hand. -->

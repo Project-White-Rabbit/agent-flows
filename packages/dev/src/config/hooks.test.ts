@@ -9,6 +9,7 @@ import {
   HOOK_FLOWS,
   HOOK_POINTS,
   oldFlowNames,
+  skipReason,
 } from "./hooks.ts"
 import { SECTIONS } from "./sections/index.ts"
 
@@ -342,5 +343,23 @@ describe("fillVars", () => {
     expect(fillVars("open {url}", { url: "http://localhost:3000/a" })).toBe(
       "open http://localhost:3000/a",
     )
+  })
+})
+
+describe("skipReason with mode aliases", () => {
+  const hook = { name: "seed", run: "true", modes: ["default"] }
+  it("matches a mode under its alias, either way round", () => {
+    expect(
+      skipReason(hook, { flow: "server", mode: "up", changed: () => [] }),
+    ).toBeUndefined()
+    expect(
+      skipReason(
+        { ...hook, modes: ["down"] },
+        { flow: "server", mode: "stop", changed: () => [] },
+      ),
+    ).toBeUndefined()
+    expect(
+      skipReason(hook, { flow: "server", mode: "stop", changed: () => [] }),
+    ).toBe("only in default mode")
   })
 })

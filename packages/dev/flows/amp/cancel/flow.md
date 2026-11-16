@@ -15,7 +15,7 @@ Load phase references only when routing reaches them. Read and follow the linked
 | `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), a failure that stops the command (`stop`), or a hook still running (`running`) |
 | `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
 | `sync.ts <subcommand>` | `issue` prints the issue a sync recorded for the current branch, reading only |
-| `server.ts <subcommand>` | `stop` stops the dev server these commands started in this worktree, if any, and prints what it stopped (with what the repo's `server.stopped` hooks did, as `hooks`) |
+| `server.ts <subcommand>` | `stop` stops the dev server these commands started in this worktree, if any (with `server.up`, through the repo's manager's `server.down`), and prints what it stopped (with what the repo's `server.stopped` hooks did, as `hooks`) |
 | `tickets.ts <subcommand>` | `match` ranks the tracker's recent issues against the branch's work, as create-tickets does, writing only its plan file |
 
 ## Invariants

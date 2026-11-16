@@ -21,7 +21,7 @@ Load phase references only when routing reaches them. Read and follow the linked
 | `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), a failure that stops the command (`stop`), or a hook still running (`running`) |
 | `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
 | `ready.ts <subcommand>` | `last` says whether ready has run on the branch; `ci start` and `ci wait` track the CI pass on the commit about to land: settled, timed out, and what failed |
-| `server.ts <subcommand>` | `stop` stops the dev server these commands started in this worktree, if any, and prints what it stopped (with what the repo's `server.stopped` hooks did, as `hooks`) |
+| `server.ts <subcommand>` | `stop` stops the dev server these commands started in this worktree, if any (with `server.up`, through the repo's manager's `server.down`), and prints what it stopped (with what the repo's `server.stopped` hooks did, as `hooks`) |
 | `evaluate.ts <subcommand>` | `gate --base <ref>` says whether `finish.requireEvaluation` lets the branch's recorded evaluation through: `off`, `pass`, `ask`, or `stop` (with `rerun` when a fresh evaluation can settle it) |
 
 ## Invariants

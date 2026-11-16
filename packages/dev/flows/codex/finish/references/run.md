@@ -90,7 +90,7 @@ Only after the host said merged. When `above` is more than 0, keep it: the pull 
 
 ### Stop the dev server
 
-Only after the host said merged: the work is done, so the dev server `$<caller>:server` started for it isn't needed. `node "$DEV_FLOWS_BASE/src/commands/server.ts" stop`. It stops only one `$<caller>:server` started in this worktree (and any it started for worktrees that are gone, as `reaped`), never one the person started by hand, and stopping none is fine. It runs the repo's `server.stopped` hooks itself. Keep what it prints for the report, with any hook in its `hooks.failures`.
+Only after the host said merged: the work is done, so the dev server `$<caller>:server` started for it isn't needed. `node "$DEV_FLOWS_BASE/src/commands/server.ts" stop`. It stops only one `$<caller>:server` started in this worktree (and any it started for worktrees that are gone, as `reaped`), never one the person started by hand, and stopping none is fine; with the repo's own server manager (`server.up`), it runs the manager's `server.down` for this worktree instead. It runs the repo's `server.stopped` hooks itself. Keep what it prints for the report, with any hook in its `hooks.failures`.
 
 ### Watch the deployment
 
