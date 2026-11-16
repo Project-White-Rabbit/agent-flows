@@ -241,3 +241,28 @@ describe("front-end.ts", () => {
     expect(check().status).toBe(0)
   })
 })
+
+describe("the Amp front end", () => {
+  it("registers every skill it ships, and nothing else", async () => {
+    const pluginDir = path.resolve(
+      packageDir,
+      "..",
+      "..",
+      "plugins",
+      "dev-flows-amp",
+    )
+    const plugin = await import(path.join(pluginDir, "index.js"))
+    const registered: string[] = []
+    const logs: string[] = []
+    await plugin.default({
+      registerSkill: async ({ path: skill }: { path: string }) => {
+        registered.push(skill)
+      },
+      logger: { log: (line: string) => logs.push(line) },
+    })
+    const folders = fs.readdirSync(path.join(pluginDir, "skills")).sort()
+    expect(registered).toEqual(folders.map((name) => `skills/${name}`))
+    expect(folders).toEqual([...templates.keys()])
+    expect(logs).toEqual([`dev-flows loaded: ${folders.length} skills`])
+  })
+})

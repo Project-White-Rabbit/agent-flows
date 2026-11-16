@@ -26,6 +26,7 @@ export const FRONT_END_DIRS = [
   FRONT_END_DIR,
   "../../plugins/dev-flows-cursor",
   "../../plugins/dev-flows-codex",
+  "../../plugins/dev-flows-amp",
 ]
 
 /**
@@ -39,6 +40,7 @@ export const MANIFESTS = [
   path.join(FRONT_END_DIR, PLUGIN_JSON),
   "../../plugins/dev-flows-cursor/.cursor-plugin/plugin.json",
   "../../plugins/dev-flows-codex/.codex-plugin/plugin.json",
+  "../../plugins/dev-flows-amp/package.json",
 ]
 export const TAG_PREFIX = "agent-flows--v"
 

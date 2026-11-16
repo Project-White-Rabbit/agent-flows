@@ -7,7 +7,7 @@ You are turning an agent plugin (the "front end") into one that runs the dev-flo
 | `claude` | `/<plugin>:sync` | `skills/sync/SKILL.md` | a plugin dependency, installed with the front end |
 | `cursor` | `/<plugin>-sync` | `skills/<plugin>-sync/SKILL.md` | the `dev-flows-base` plugin from the `agent-flows` marketplace, beside the front end |
 | `codex` | `$<plugin>:sync` | `skills/sync/SKILL.md` | `codex plugin marketplace add Project-White-Rabbit/agent-flows`, then `dev-flows-base` from it |
-| `amp` | `<plugin>:sync` | `skills/sync/SKILL.md` | a clone: `git clone https://github.com/Project-White-Rabbit/agent-flows ~/.config/agent-flows/dev-flows-base` |
+| `amp` | `<plugin>:sync` | `skills/sync/SKILL.md` | a clone: `git clone https://github.com/Project-White-Rabbit/agent-flows ~/.config/agent-flows/dev-flows-base` (the same clone holds dev-flows' own Amp plugin, `plugins/dev-flows-amp`) |
 
 Outside Claude Code nothing tells the session where the base is, so the wrappers for the other hosts find it themselves: the newest `dev-flows-base` installed where that host (or any other) keeps plugins, else the clone above.
 

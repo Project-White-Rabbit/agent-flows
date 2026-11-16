@@ -96,14 +96,48 @@ export function renderBase(): GeneratedFile[] {
 
 /**
  * The hosts the dev-flows front end ships for, each a plugin of its own under
- * `plugins/`. Amp's plugins are code that registers skills, so Amp users get
- * the base and write a front end with `front-end.ts --host amp`.
+ * `plugins/`.
  */
 export const DEV_FLOWS_FRONT_ENDS: { host: Host; dir: string }[] = [
   { host: "claude", dir: "dev-flows" },
   { host: "cursor", dir: "dev-flows-cursor" },
   { host: "codex", dir: "dev-flows-codex" },
+  { host: "amp", dir: "dev-flows-amp" },
 ]
+
+/**
+ * An Amp plugin's code: Amp loads only the skills a plugin registers, so the
+ * Amp front end's `index.js` registers each wrapper. Generated with the
+ * skills, so the two can't drift.
+ */
+export function renderAmpPluginIndex(skills: GeneratedFile[]): GeneratedFile {
+  const names = skills.map((file) => file.path.split("/")[1]).sort()
+  const content = `// Generated from packages/dev/src/flows by \`bun run build\`. Do not edit by hand.
+// The dev-flows front end for Amp: registers a skill per flow, and each skill
+// reads its flow from dev-flows-base.
+
+export const description =
+  "Dev workflow commands for any repository: sync, ready, finish, and the rest, from dev-flows-base"
+
+export const SKILL_NAMES = [
+${names.map((name) => `  ${JSON.stringify(name)},`).join("\n")}
+]
+
+export default async function devFlows(amp) {
+  for (const skill of SKILL_NAMES) {
+    await amp.registerSkill({ path: \`skills/\${skill}\` })
+  }
+  amp.logger.log(\`dev-flows loaded: \${SKILL_NAMES.length} skills\`)
+}
+`
+  return {
+    flowId: "plugin",
+    target: "amp",
+    kind: "monolith",
+    path: "index.js",
+    content,
+  }
+}
 
 /** The dev-flows front end for `host`: a wrapper skill for every flow. */
 export function renderDevFlowsFrontEnd(host: Host = "claude"): GeneratedFile[] {

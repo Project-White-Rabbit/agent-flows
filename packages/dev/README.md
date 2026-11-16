@@ -1,6 +1,6 @@
 # @agent-flows/dev
 
-Dev workflow commands for any repository, written as [agent-flows](../core) flows and shipped as plugins: `dev-flows-base` (this package: every flow, as plain files for each host, and the commands they run) and `dev-flows`, the commands people type, for Claude Code ([`plugins/dev-flows`](../../plugins/dev-flows): `/dev-flows:…`), Cursor ([`plugins/dev-flows-cursor`](../../plugins/dev-flows-cursor): `/dev-flows-…`), and Codex ([`plugins/dev-flows-codex`](../../plugins/dev-flows-codex): `$dev-flows:…`). On Claude Code, installing `dev-flows` installs `dev-flows-base` with it; elsewhere, install both. The commands below are written in Claude Code's form. See [How it's built](#how-its-built).
+Dev workflow commands for any repository, written as [agent-flows](../core) flows and shipped as plugins: `dev-flows-base` (this package: every flow, as plain files for each host, and the commands they run) and `dev-flows`, the commands people type, for Claude Code ([`plugins/dev-flows`](../../plugins/dev-flows): `/dev-flows:…`), Cursor ([`plugins/dev-flows-cursor`](../../plugins/dev-flows-cursor): `/dev-flows-…`), Codex ([`plugins/dev-flows-codex`](../../plugins/dev-flows-codex): `$dev-flows:…`), and Amp ([`plugins/dev-flows-amp`](../../plugins/dev-flows-amp): `dev-flows:…`). On Claude Code, installing `dev-flows` installs `dev-flows-base` with it; elsewhere, install both. The commands below are written in Claude Code's form. See [How it's built](#how-its-built).
 
 ## Install
 
@@ -18,7 +18,13 @@ The same flows ship for Cursor, Codex, and Amp: the base renders every flow once
 
 - **Cursor:** install `dev-flows` and `dev-flows-base` from this repository's marketplace (`.cursor-plugin/marketplace.json`). `dev-flows` is [`plugins/dev-flows-cursor`](../../plugins/dev-flows-cursor).
 - **Codex:** `codex plugin marketplace add Project-White-Rabbit/agent-flows`, then install `dev-flows` and `dev-flows-base` from it (`.agents/plugins/marketplace.json`). `dev-flows` is [`plugins/dev-flows-codex`](../../plugins/dev-flows-codex).
-- **Amp:** `git clone https://github.com/Project-White-Rabbit/agent-flows ~/.config/agent-flows/dev-flows-base`, and write a front end for your Amp plugin with `front-end.ts --host amp` (below).
+- **Amp:** one clone holds both the base and `dev-flows` ([`plugins/dev-flows-amp`](../../plugins/dev-flows-amp)); link the front end into Amp's plugins, then run `plugins: reload` from Amp's command palette (or start a new session). `git pull` in the clone updates both.
+
+  ```
+  git clone https://github.com/Project-White-Rabbit/agent-flows ~/.config/agent-flows/dev-flows-base
+  mkdir -p ~/.config/amp/plugins
+  ln -s ~/.config/agent-flows/dev-flows-base/plugins/dev-flows-amp ~/.config/amp/plugins/dev-flows
+  ```
 
 Each command finds the base itself (no startup hook tells these hosts where it is): the newest `dev-flows-base` where that host, or any other, installs plugins, else the clone at `~/.config/agent-flows/dev-flows-base`.
 
@@ -579,7 +585,7 @@ The workflows ship once, in `dev-flows-base`, and the commands people type ship 
 
 ## Releasing
 
-The version lives in `.claude-plugin/plugin.json`, because that's what Claude Code compares: an installed plugin updates only when the version changes, so a change merged without a bump never reaches anyone. `dev-flows-base` and every `dev-flows` front end share one version, in each host's manifest (`.claude-plugin`, `.cursor-plugin`, `.codex-plugin`): `bun run bump` sets them all, and CI fails when any differs.
+The version lives in `.claude-plugin/plugin.json`, because that's what Claude Code compares: an installed plugin updates only when the version changes, so a change merged without a bump never reaches anyone. `dev-flows-base` and every `dev-flows` front end share one version, in each host's manifest (`.claude-plugin`, `.cursor-plugin`, `.codex-plugin`, and the Amp front end's `package.json`): `bun run bump` sets them all, and CI fails when any differs.
 
 - **Bump it in every PR that changes the plugin:** `bun run bump patch` (or `minor`, `major`) in `packages/dev`. Patch for fixes and wording, minor for new commands, sections, or fields, major when a change breaks existing configs or habits. It bumps from the latest of `main` and the released versions, not from the file, so re-running it (say, after another PR took the next version and you rebased) lands on the right number.
 - **CI rejects a PR whose version won't ship.** The `plugin-version` check fails when `packages/dev` or a `plugins/dev-flows*` front end changed (test files aside) and the version isn't past `main`'s current one, or is already released, e.g. two PRs that both bumped to the same version. Run it locally with `bun run check-version origin/main`.
@@ -601,6 +607,6 @@ The version lives in `.claude-plugin/plugin.json`, because that's what Claude Co
 | `.claude-plugin/plugin.json` | The `dev-flows-base` manifest and version. The repo-root `.claude-plugin/marketplace.json` points here |
 | `.cursor-plugin/plugin.json`, `.codex-plugin/plugin.json` | The base's Cursor and Codex manifests, at the same version. The repo-root `.cursor-plugin/marketplace.json` and `.agents/plugins/marketplace.json` point here |
 | `../../plugins/dev-flows/` | The `dev-flows` front end: its manifest (which depends on `dev-flows-base`) and generated `skills/`, one per flow |
-| `../../plugins/dev-flows-cursor/`, `../../plugins/dev-flows-codex/` | The `dev-flows` front end for Cursor and for Codex: a manifest and generated `skills/` each |
+| `../../plugins/dev-flows-cursor/`, `../../plugins/dev-flows-codex/`, `../../plugins/dev-flows-amp/` | The `dev-flows` front end for Cursor, Codex, and Amp: a manifest and generated `skills/` each (for Amp, `package.json` and a generated `index.js` that registers the skills) |
 
 `bun run validate` typechecks, tests, and fails when a generated file is stale or a file in a generated directory isn't generated any more.
