@@ -300,6 +300,11 @@ export type IntegrationSpec = SectionSpec & {
   /** Ops this integration can run as code: see `Adapter`. */
   adapters?: Record<string, Adapter>
   /**
+   * Defined in the repo's config rather than shipped (see `custom.ts`): its
+   * entry holds the definition under `custom`.
+   */
+  custom?: true
+  /**
    * How to tell this session runs inside the tool, for an app that hosts the
    * agent (a workspace app). When several integrations provide a capability,
    * the one the session runs in comes first and is marked `here`, so the same

@@ -10,6 +10,12 @@
 //   errors, and a write can never introduce an unknown section.
 
 import { CAPABILITIES } from "./capabilities.ts"
+import {
+  CUSTOM_KEY,
+  customIntegrations,
+  definesCustom,
+  isCustomPath,
+} from "./custom.ts"
 import { checkHooks } from "./hooks.ts"
 import { freeInstanceName, INSTANCE_KEY, INSTANCE_NAME } from "./instances.ts"
 import { checkProjects } from "./projects.ts"
@@ -340,6 +346,9 @@ function checkEntry(
     if (instance && key === INSTANCE_KEY) {
       continue
     }
+    if (key === CUSTOM_KEY && "custom" in spec && spec.custom) {
+      continue
+    }
     if (key === USE_KEY && "provides" in spec) {
       issues.push(...checkUse(spec, fieldValue, `${where}.${key}`))
       continue
@@ -403,10 +412,14 @@ export type Check = { issues: string[]; warnings: string[] }
 /** Errors that make a (migrated) config unusable, and warnings that don't. */
 export function checkConfig(
   config: RawConfig,
-  registry: SectionSpec[] = SECTIONS,
+  builtIn: SectionSpec[] = SECTIONS,
 ): Check {
   const issues: string[] = []
   const warnings: string[] = []
+  // The config's own integrations join the registry, checked like the rest.
+  const custom = customIntegrations(config, builtIn)
+  issues.push(...custom.issues)
+  const registry = [...builtIn, ...custom.specs]
   const known = new Map(registry.map((s) => [s.path, s]))
   const containers = containerPaths(registry)
 
@@ -430,7 +443,11 @@ export function checkConfig(
     }
     for (const child of Object.keys(value)) {
       const path = `${container}.${child}`
-      if (!known.has(path) && !containers.includes(path)) {
+      if (
+        !known.has(path) &&
+        !containers.includes(path) &&
+        !custom.claimed.includes(path)
+      ) {
         warnings.push(`unknown section "${path}" (${UNKNOWN_NOTE})`)
       }
     }
@@ -567,7 +584,13 @@ export function checkPatch(
     ...Object.keys(patch.sections ?? {}),
     ...(patch.skip ?? []),
   ]) {
-    if (!known.has(path)) {
+    const value = patch.sections?.[path]
+    // A custom integration's entry (or removing one) is the team's to write.
+    const custom =
+      isCustomPath(path) &&
+      !(patch.skip ?? []).includes(path) &&
+      (value === null || definesCustom(value))
+    if (!known.has(path) && !custom) {
       issues.push(`unknown section "${path}" (known: ${paths})`)
     }
   }
@@ -755,7 +778,14 @@ export function overlay(
     return { config: own, mode, own, overridden: [], issues }
   }
   const sections: Record<string, SectionEntry> = {}
-  for (const spec of registry) {
+  // Custom integrations the override defines or changes are laid over too.
+  const paths = new Set([
+    ...registry.map((s) => s.path),
+    ...customIntegrations(shared, registry).claimed,
+    ...customIntegrations(own, registry).claimed,
+  ])
+  for (const path of paths) {
+    const spec = { path }
     const value = getAt(own, spec.path)
     if (value === undefined) {
       continue

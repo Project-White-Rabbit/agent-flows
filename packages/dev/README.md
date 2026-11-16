@@ -145,6 +145,47 @@ Configure keeps other personal values out too: it detects the `upstream` remote'
 
 A capability can be **exclusive** (`exclusive: true` on its spec): at most one entry may be used for it, and the config is invalid with two. `stacking` is, since two stacking tools would each record a different parent for the same branch.
 
+### Custom integrations
+
+A tool this plugin doesn't ship (an in-house deploy script, a tracker of your own, an internal CI) can still fill a capability, defined in the config itself rather than in the plugin. An entry at `integrations.<id>`, where `<id>` is no built-in integration's (lowercase letters, digits, and `-`), with a `custom` object is a custom integration:
+
+```json
+"integrations": {
+  "acme-deploy": {
+    "custom": {
+      "name": "Acme Deploy",
+      "purpose": "Our deploy pipeline",
+      "access": {
+        "cli": { "bin": "acme", "auth": ["acme", "whoami"] },
+        "api": { "base": "https://deploy.acme.dev/api", "token": ["ACME_DEPLOY_TOKEN"] }
+      },
+      "provides": {
+        "deployments": {
+          "deployment": {
+            "cli": "`acme deploy status --app {app} --sha <sha> --json`, mapped to the op's shape",
+            "api": "`curl -fsSL -H \"Authorization: Bearer {token}\" \"https://deploy.acme.dev/api/apps/{app}/deployments?sha=<sha>\"`"
+          }
+        }
+      },
+      "fields": [{ "key": "app", "description": "The app's name in Acme Deploy", "required": true }]
+    },
+    "app": "web"
+  }
+}
+```
+
+It conforms to the same capability contracts the built-in integrations implement. `configure.ts capabilities [<capability>...]` prints them: each capability's ops with the contract each must meet, its levels, whether it's exclusive, and the built-in integrations that provide it. Once the config is checked, the entry joins the registry, so `configure.ts integrations deployments` returns it exactly like a built-in one, with its values, how this machine reaches it, its filled-in ops, and its `level`; flows can't tell the difference. The rules, checked on every read and write (the write prints each break and refuses):
+
+- **`custom`** takes `name` (required), `purpose`, `access`, `provides` (required), and `fields`, nothing else.
+- **`access`** is the same as a built-in's: `mcp` (`{"server"}`, the name its tools show up under), `cli` (`{"bin", "auth"}`, `auth` a command starting with `bin` that exits 0 only when signed in), and `api` (`{"base", "token"}`, `token` the environment variables that may hold the token). Leave it out for ops that need no access of their own (a URL shape, a repo script).
+- **`provides`** names capabilities that exist, and under each, only ops that capability declares. An op is a string (the same however it's reached), an object of one way per access kind the integration declares (`{"cli": "...", "api": "..."}`), or `{"unsupported": "<why>"}`. An op it leaves out reads as unsupported, so flows skip what needs it and say so. A `script` variant isn't written here: it comes from an adapter (below).
+- **`{token}`** goes only in an `api` variant, and becomes a shell expression for wherever the token lives, as for a built-in.
+- **`{field}`** names one of `fields`, or a value the entry sets (each value the entry sets is a field too). One that may be unset needs a default, `{field|default}`; required ones are enforced.
+- **Values** are strings of letters, digits, and `_ . @ : / + = , ~ -`, since ops run as shell commands from a committed file.
+- **`use`** works as for any integration, and an exclusive capability stays exclusive across built-in and custom entries alike. A custom integration is configured once, not as a list of instances.
+
+A repo **adapter** works for a custom id too: `.agent-flows/adapters/acme-deploy.ts` adds a `script` variant to the ops it covers (even one the config leaves out), run by `adapter.ts run acme-deploy <op>`. `configure.ts token acme-deploy --env NAME` records where its token is, and `get integrations.acme-deploy.app` reads its values. `configure.ts show` lists the custom ones as `custom`, and `/dev-flows:configure` offers to define one when the team uses a tool no built-in integration covers. A tool more than one repo would use is worth [adding to the plugin](#adding-an-integration) instead, where detection and the registry tests cover it.
+
 ### Stacking on GitHub
 
 A repo that stacks plain pull requests, each based on the branch below it, without a stacking tool, opts GitHub into `stacking`: `"github": {"owner": "acme", "repo": "web", "use": {"sourceControl": "write", "stacking": true}}`. It's off unless `use` names it, and can't be on next to Graphite (configure recommends it only when no other stacking integration is configured or detected and open pull requests are based on other branches). Its ops are adapters in [`src/integrations/github/stack-adapter.ts`](src/integrations/github/stack-adapter.ts), `gh` and git only:
@@ -484,7 +525,7 @@ The file is made of **sections**: objects of fields at a dotted path (`repo`, `i
 - **Configure is idempotent.** Configured values win over detected ones, `skipped` remembers sections the team declined, and writes are normalized (registry order) and skipped when nothing changed. A second run with nothing new reports "up to date" and touches nothing.
 - **Reads go through one door.** Flows read with `configure.ts get <path>...` (`get repo.baseBranch`) or `configure.ts integrations <capability>...`. When the file is missing, invalid, or doesn't set what's asked, it exits 2 with `{"configured": false}` and the skill sends you to `/dev-flows:configure` instead of guessing; `get <path>... --optional` reads an unset optional setting as `null` instead. An unknown path or capability is a hard error, and tests check every `get` and `integrations` call in the generated skills against the registries. The exceptions are `sync` and `ready`, whose fields all have defaults: `sync.ts` reads `sync` itself, over the format recorded for the branch, and the survey prints the result as `format`; `ready.ts plan` reads `ready` and prints it as `commands`.
 - **Forward compatible.** `version` is the format: older files are migrated forward on read (`MIGRATIONS` in `src/config/config.ts`), and a file from a newer plugin is rejected with "upgrade the plugin" rather than misread. Sections and fields this plugin doesn't know are warnings, never errors, and writes keep them, so teammates on different plugin versions don't break each other. The exception is a format change itself: once anyone writes the new `version`, teammates on an older plugin get "upgrade the plugin" until they update. Version 2 (`services` renamed to `integrations`, with instance lists) is one, so update the whole team to 0.2 together. Version 6 moves `preview`'s `command`, `url`, and `timeout` to their own `server` section, which the server command reads.
-- **Strict where it's known.** Known fields are type-checked (`string`, `boolean`, `string[]`, `number[]`), required fields are enforced, and a write can only touch sections in the registry.
+- **Strict where it's known.** Known fields are type-checked (`string`, `boolean`, `string[]`, `number[]`), required fields are enforced, and a write can only touch sections in the registry, or a [custom integration](#custom-integrations)'s entry.
 
 ### Adding an integration
 
