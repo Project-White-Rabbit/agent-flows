@@ -1,6 +1,6 @@
 ---
 description: Start this worktree's dev server in the background when it isn't running, stop it, list the ones running across the repo's worktrees, or put one started by hand under a watchdog that stops it once its worktree is deleted or nobody uses it.
-argument-hint: "[adopt|stop|list|help]"
+argument-hint: "[up|adopt|restart|stop|down|list|status|help]"
 ---
 
 <!-- Generated: sends /__FRONT_END_PLUGIN__:server to the server flow in dev-flows-base. Do not edit by hand. -->

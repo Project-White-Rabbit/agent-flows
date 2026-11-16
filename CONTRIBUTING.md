@@ -31,4 +31,4 @@ The repo is a Bun workspace. Each package lives under `packages/`; `@agent-flows
 
 ### The `dev-flows` and `dev-flows-base` plugins
 
-Bump the plugins' version in every PR that changes `packages/dev` or `plugins/dev-flows` (`bun run bump patch` in `packages/dev` sets both); CI rejects the PR otherwise. Merging releases it. See [Releasing in the plugin README](packages/dev/README.md#releasing).
+Bump the plugins' version in every PR that changes `packages/dev` or a `plugins/dev-flows*` front end (`bun run bump patch` in `packages/dev` sets every manifest: the base's and each front end's, for Claude Code, Cursor, Codex, and Amp); CI rejects the PR otherwise. Merging releases it. See [Releasing in the plugin README](packages/dev/README.md#releasing).

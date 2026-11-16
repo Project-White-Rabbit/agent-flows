@@ -10,6 +10,12 @@
 //   errors, and a write can never introduce an unknown section.
 
 import { CAPABILITIES } from "./capabilities.ts"
+import {
+  CUSTOM_KEY,
+  customIntegrations,
+  definesCustom,
+  isCustomPath,
+} from "./custom.ts"
 import { checkHooks } from "./hooks.ts"
 import { freeInstanceName, INSTANCE_KEY, INSTANCE_NAME } from "./instances.ts"
 import { checkProjects } from "./projects.ts"
@@ -340,6 +346,9 @@ function checkEntry(
     if (instance && key === INSTANCE_KEY) {
       continue
     }
+    if (key === CUSTOM_KEY && "custom" in spec && spec.custom) {
+      continue
+    }
     if (key === USE_KEY && "provides" in spec) {
       issues.push(...checkUse(spec, fieldValue, `${where}.${key}`))
       continue
@@ -373,6 +382,19 @@ function checkEntry(
     if (field.required && entry[field.key] === undefined) {
       issues.push(`${where}.${field.key} is required`)
     }
+    if (entry[field.key] === undefined) {
+      continue
+    }
+    if (field.alternativeTo && entry[field.alternativeTo] !== undefined) {
+      issues.push(
+        `${where}.${field.key} and ${where}.${field.alternativeTo} can't both be set: set one`,
+      )
+    }
+    if (field.needs && entry[field.needs] === undefined) {
+      issues.push(
+        `${where}.${field.key} needs ${where}.${field.needs}: set it too, or remove this`,
+      )
+    }
   }
   return issues
 }
@@ -390,10 +412,14 @@ export type Check = { issues: string[]; warnings: string[] }
 /** Errors that make a (migrated) config unusable, and warnings that don't. */
 export function checkConfig(
   config: RawConfig,
-  registry: SectionSpec[] = SECTIONS,
+  builtIn: SectionSpec[] = SECTIONS,
 ): Check {
   const issues: string[] = []
   const warnings: string[] = []
+  // The config's own integrations join the registry, checked like the rest.
+  const custom = customIntegrations(config, builtIn)
+  issues.push(...custom.issues)
+  const registry = [...builtIn, ...custom.specs]
   const known = new Map(registry.map((s) => [s.path, s]))
   const containers = containerPaths(registry)
 
@@ -417,7 +443,11 @@ export function checkConfig(
     }
     for (const child of Object.keys(value)) {
       const path = `${container}.${child}`
-      if (!known.has(path) && !containers.includes(path)) {
+      if (
+        !known.has(path) &&
+        !containers.includes(path) &&
+        !custom.claimed.includes(path)
+      ) {
         warnings.push(`unknown section "${path}" (${UNKNOWN_NOTE})`)
       }
     }
@@ -554,7 +584,13 @@ export function checkPatch(
     ...Object.keys(patch.sections ?? {}),
     ...(patch.skip ?? []),
   ]) {
-    if (!known.has(path)) {
+    const value = patch.sections?.[path]
+    // A custom integration's entry (or removing one) is the team's to write.
+    const custom =
+      isCustomPath(path) &&
+      !(patch.skip ?? []).includes(path) &&
+      (value === null || definesCustom(value))
+    if (!known.has(path) && !custom) {
       issues.push(`unknown section "${path}" (known: ${paths})`)
     }
   }
@@ -742,7 +778,14 @@ export function overlay(
     return { config: own, mode, own, overridden: [], issues }
   }
   const sections: Record<string, SectionEntry> = {}
-  for (const spec of registry) {
+  // Custom integrations the override defines or changes are laid over too.
+  const paths = new Set([
+    ...registry.map((s) => s.path),
+    ...customIntegrations(shared, registry).claimed,
+    ...customIntegrations(own, registry).claimed,
+  ])
+  for (const path of paths) {
+    const spec = { path }
     const value = getAt(own, spec.path)
     if (value === undefined) {
       continue
@@ -1039,10 +1082,18 @@ export function planConfig(
 export function exampleConfig(registry: SectionSpec[] = SECTIONS): RawConfig {
   const out: RawConfig = { version: CONFIG_VERSION }
   for (const spec of registry) {
+    // A field set in place of another, and what needs it, stay out: the
+    // example shows the usual choice.
+    const left = new Set(
+      spec.fields.filter((f) => f.alternativeTo).map((f) => f.key),
+    )
+    const shown = spec.fields.filter(
+      (f) => !left.has(f.key) && !(f.needs && left.has(f.needs)),
+    )
     setAt(
       out,
       spec.path,
-      Object.fromEntries(spec.fields.map((f) => [f.key, f.example])),
+      Object.fromEntries(shown.map((f) => [f.key, f.example])),
     )
   }
   return normalize(out, registry)

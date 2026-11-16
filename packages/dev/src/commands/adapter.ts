@@ -5,10 +5,10 @@
 
 import { probeAccess, systemProbe } from "../config/access.ts"
 import { getAt, INSTANCE_KEY, instancesOf } from "../config/config.ts"
+import { integrationsFor } from "../config/custom.ts"
 import { readLocal, readToken, tokenFor } from "../config/local.ts"
 import { usesOf, withoutUse } from "../config/use.ts"
 import { loadAdapters } from "../integrations/adapters.ts"
-import { INTEGRATIONS } from "../integrations/index.ts"
 import { loadConfig, NOT_CONFIGURED_EXIT, repoRoot } from "./configure.ts"
 import { isMain, printJson, runMain } from "./lib.ts"
 
@@ -48,16 +48,16 @@ export async function main(argv: string[]): Promise<void> {
   const instance = args.instance
   delete args.instance
 
-  const spec = INTEGRATIONS.find(
-    (s) => s.path === `integrations.${integration}`,
-  )
-  if (!spec) {
-    throw new Error(
-      `unknown integration \`${integration}\` (known: ${INTEGRATIONS.map((s) => s.path.split(".").at(-1)).join(", ")})`,
-    )
-  }
   const root = repoRoot()
   const loaded = loadConfig(root)
+  // The config's custom integrations run their repo adapters like built-ins.
+  const all = integrationsFor(loaded.config)
+  const spec = all.find((s) => s.path === `integrations.${integration}`)
+  if (!spec) {
+    throw new Error(
+      `unknown integration \`${integration}\` (known: ${all.map((s) => s.path.split(".").at(-1)).join(", ")})`,
+    )
+  }
   const entry = loaded.config ? getAt(loaded.config, spec.path) : undefined
   const instances = instancesOf(entry)
   const values = instance

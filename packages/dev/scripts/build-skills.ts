@@ -1,6 +1,7 @@
 // Render the dev-flows-base plugin's flow files and front-end wrapper
-// templates (this package), and the dev-flows front end's wrapper skills
-// (plugins/dev-flows). With --check,
+// templates (this package), and the dev-flows front ends' wrapper skills
+// (plugins/dev-flows, plugins/dev-flows-cursor, plugins/dev-flows-codex,
+// plugins/dev-flows-amp, with the index.js that registers Amp's skills). With --check,
 // write nothing and fail when a generated file is stale or a file in a
 // generated directory isn't generated any more, so CI catches a flow edited
 // without regenerating, generated output edited by hand, or a removed flow
@@ -10,6 +11,8 @@ import fs from "node:fs"
 import path from "node:path"
 import { type GeneratedFile, writeGeneratedFiles } from "@agent-flows/core"
 import {
+  DEV_FLOWS_FRONT_ENDS,
+  renderAmpPluginIndex,
   renderBase,
   renderDevFlowsFrontEnd,
   renderFrontEndTemplates,
@@ -32,11 +35,15 @@ const outputs: Output[] = [
     generatedDirs: ["flows"],
     files: [...renderBase(), ...renderFrontEndTemplates()],
   },
-  {
-    rootDir: path.join(repoDir, "plugins", "dev-flows"),
-    generatedDirs: ["skills"],
-    files: renderDevFlowsFrontEnd(),
-  },
+  ...DEV_FLOWS_FRONT_ENDS.map(({ host, dir }) => {
+    const skills = renderDevFlowsFrontEnd(host)
+    return {
+      rootDir: path.join(repoDir, "plugins", dir),
+      generatedDirs: ["skills"],
+      files:
+        host === "amp" ? [...skills, renderAmpPluginIndex(skills)] : skills,
+    }
+  }),
 ]
 
 function listFiles(dir: string): string[] {

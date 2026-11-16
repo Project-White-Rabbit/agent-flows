@@ -18,10 +18,30 @@ import { isMain } from "../src/commands/lib.ts"
 
 export const PLUGIN_JSON = ".claude-plugin/plugin.json"
 /**
- * The dev-flows front end ships beside the base and is released with it, at
- * the same version, so one tag names both.
+ * The dev-flows front ends ship beside the base and are released with it, at
+ * the same version, so one tag names them all: one plugin per host.
  */
 export const FRONT_END_DIR = "../../plugins/dev-flows"
+export const FRONT_END_DIRS = [
+  FRONT_END_DIR,
+  "../../plugins/dev-flows-cursor",
+  "../../plugins/dev-flows-codex",
+  "../../plugins/dev-flows-amp",
+]
+
+/**
+ * Every manifest that carries the version: the base's and each front end's,
+ * for each host that reads one. They all move together.
+ */
+export const MANIFESTS = [
+  PLUGIN_JSON,
+  ".cursor-plugin/plugin.json",
+  ".codex-plugin/plugin.json",
+  path.join(FRONT_END_DIR, PLUGIN_JSON),
+  "../../plugins/dev-flows-cursor/.cursor-plugin/plugin.json",
+  "../../plugins/dev-flows-codex/.codex-plugin/plugin.json",
+  "../../plugins/dev-flows-amp/package.json",
+]
 export const TAG_PREFIX = "agent-flows--v"
 
 export type Level = "patch" | "minor" | "major"
@@ -108,19 +128,18 @@ function git(args: string[]): string | undefined {
   return result.status === 0 ? result.stdout.trim() : undefined
 }
 
-const MANIFESTS = [PLUGIN_JSON, path.join(FRONT_END_DIR, PLUGIN_JSON)]
-
 function readVersion(manifest = PLUGIN_JSON): string | undefined {
   return JSON.parse(fs.readFileSync(path.join(pkgDir, manifest), "utf8"))
     .version
 }
 
-/** Why the front end's version won't do, or undefined when it matches. */
+/** Why a manifest's version won't do, or undefined when they all match. */
 function lockstepProblem(): string | undefined {
-  const [base, frontEnd] = MANIFESTS.map(readVersion)
-  return base === frontEnd
+  const base = readVersion()
+  const off = MANIFESTS.filter((manifest) => readVersion(manifest) !== base)
+  return off.length === 0
     ? undefined
-    : `plugins/dev-flows is ${frontEnd} but dev-flows-base is ${base}; they release together, so run \`bun run bump <patch|minor|major>\` in packages/dev to set both.`
+    : `${off.map((manifest) => `${manifest} is ${readVersion(manifest)}`).join(", ")}, but dev-flows-base is ${base}; they release together, so run \`bun run bump <patch|minor|major>\` in packages/dev to set them all.`
 }
 
 function versionAt(ref: string): string | undefined {
@@ -143,7 +162,9 @@ function releasedVersions(): string[] {
 
 /** Plugin files that ship and differ between `from` and the working tree. */
 function shippedChangesSince(from: string): string[] {
-  return (git(["diff", "--name-only", from, "--", ".", FRONT_END_DIR]) ?? "")
+  return (
+    git(["diff", "--name-only", from, "--", ".", ...FRONT_END_DIRS]) ?? ""
+  )
     .split("\n")
     .filter(Boolean)
     .filter(shipsToUsers)

@@ -1,0 +1,18 @@
+{
+  "name": "agent-flows",
+  "owner": {
+    "name": "Bitfab"
+  },
+  "plugins": [
+    {
+      "name": "dev-flows",
+      "source": "./plugins/dev-flows-cursor",
+      "description": "Dev workflow commands for any repository (the dev-flows front end for Cursor). Install dev-flows-base with it."
+    },
+    {
+      "name": "dev-flows-base",
+      "source": "./packages/dev",
+      "description": "The dev-flows workflows and their commands, with no skills of its own. Install it beside dev-flows or another front end; not useful alone."
+    }
+  ]
+}

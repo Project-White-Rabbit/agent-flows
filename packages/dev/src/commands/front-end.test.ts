@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import {
+  DEV_FLOWS_FRONT_ENDS,
   renderDevFlowsFrontEnd,
   renderFrontEndTemplates,
 } from "../flows/index.ts"
@@ -50,7 +51,9 @@ function write(dir: string, ...extra: string[]) {
 describe("front-end templates", () => {
   it("fill in to exactly what the build writes for a front end", () => {
     const shipped = renderDevFlowsFrontEnd()
-    expect(renderFrontEndTemplates()).toHaveLength(shipped.length)
+    expect(
+      renderFrontEndTemplates().filter((file) => file.target === "claude"),
+    ).toHaveLength(shipped.length)
     for (const file of shipped) {
       const template = templates.get(file.flowId)
       expect(template, file.flowId).toBeDefined()
@@ -58,6 +61,64 @@ describe("front-end templates", () => {
         file.content,
       )
     }
+  })
+})
+
+describe("front-end templates for other hosts", () => {
+  for (const { host } of DEV_FLOWS_FRONT_ENDS.filter(
+    (f) => f.host !== "claude",
+  )) {
+    it(`fill in to exactly what the build writes for ${host}`, () => {
+      const hostTemplates = readTemplates(packageDir, host)
+      for (const file of renderDevFlowsFrontEnd(host)) {
+        expect(
+          fill(
+            hostTemplates.get(file.flowId) ?? "",
+            "dev-flows",
+            "agent-flows",
+          ),
+          file.flowId,
+        ).toBe(file.content)
+      }
+    })
+  }
+
+  it("writes Cursor wrappers as <plugin>-<flow> skills, leaving its own alone", () => {
+    const dir = frontEnd({ "skills/team-dev-sync/SKILL.md": "our own sync\n" })
+    const result = write(dir, "--host", "cursor", "--exclude", "sync")
+    expect(result.status).toBe(0)
+    const out = JSON.parse(result.stdout)
+    expect(out.own).toEqual(["sync"])
+    const ready = fs.readFileSync(
+      path.join(dir, "skills", "team-dev-ready", "SKILL.md"),
+      "utf8",
+    )
+    expect(ready).toContain("name: team-dev-ready")
+    expect(ready).toContain("# /team-dev-ready")
+    expect(ready).toContain("flows/cursor/ready/flow.md")
+    expect(ready).not.toContain("__FRONT_END")
+    const again = write(dir, "--host", "cursor")
+    expect(again.status).toBe(2)
+    expect(again.stderr).toContain("--exclude sync")
+  })
+
+  it("writes Codex wrappers invoked as $<plugin>:<flow>", () => {
+    const dir = frontEnd()
+    expect(write(dir, "--host", "codex").status).toBe(0)
+    const sync = fs.readFileSync(
+      path.join(dir, "skills", "sync", "SKILL.md"),
+      "utf8",
+    )
+    expect(sync).toContain("name: sync")
+    expect(sync).toContain("# $team-dev:sync")
+    expect(sync).toContain("its commands are `$team-dev:<name>`")
+    expect(sync).toContain("codex plugin marketplace add")
+  })
+
+  it("rejects an unknown host", () => {
+    const result = write(frontEnd(), "--host", "vim")
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain("--host must be one of")
   })
 })
 
@@ -178,5 +239,30 @@ describe("front-end.ts", () => {
     expect(check().status).toBe(1)
     write(dir)
     expect(check().status).toBe(0)
+  })
+})
+
+describe("the Amp front end", () => {
+  it("registers every skill it ships, and nothing else", async () => {
+    const pluginDir = path.resolve(
+      packageDir,
+      "..",
+      "..",
+      "plugins",
+      "dev-flows-amp",
+    )
+    const plugin = await import(path.join(pluginDir, "index.js"))
+    const registered: string[] = []
+    const logs: string[] = []
+    await plugin.default({
+      registerSkill: async ({ path: skill }: { path: string }) => {
+        registered.push(skill)
+      },
+      logger: { log: (line: string) => logs.push(line) },
+    })
+    const folders = fs.readdirSync(path.join(pluginDir, "skills")).sort()
+    expect(registered).toEqual(folders.map((name) => `skills/${name}`))
+    expect(folders).toEqual([...templates.keys()])
+    expect(logs).toEqual([`dev-flows loaded: ${folders.length} skills`])
   })
 })

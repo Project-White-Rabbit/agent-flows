@@ -1,8 +1,12 @@
 import {
+  amp,
   baseTarget,
   claudeCode,
+  codex,
   createFlowKit,
+  cursor,
   defineCommandCatalog,
+  type TargetSpec,
 } from "@agent-flows/core"
 
 /** The plugin that ships every flow and the commands they run, with no skills. */
@@ -23,16 +27,67 @@ export function flowsDir(host: string): string {
   return `flows/${host}`
 }
 
+/** The agent hosts the base renders its flows for. */
+export const HOSTS = ["claude", "cursor", "codex", "amp"] as const
+
+export type Host = (typeof HOSTS)[number]
+
+/**
+ * How each host writes a front end's command, `<caller>` standing for the
+ * front end's plugin name.
+ */
+export const CALLER_CMDS: Record<Host, string> = {
+  claude: "/<caller>:",
+  cursor: "/<caller>-",
+  codex: "$<caller>:",
+  amp: "<caller>:",
+}
+
+/** What each host calls itself, for prose. */
+export const HOST_NAMES: Record<Host, string> = {
+  claude: "Claude Code",
+  cursor: "Cursor",
+  codex: "Codex",
+  amp: "Amp",
+}
+
+/** A host's skill conventions for `plugin`'s skills. */
+export function hostTarget(host: Host, plugin: string): TargetSpec {
+  switch (host) {
+    case "claude":
+      return claudeCode({ plugin })
+    case "cursor":
+      return cursor({ plugin })
+    case "codex":
+      return codex({ plugin })
+    case "amp":
+      return amp({ plugin })
+  }
+}
+
+export function isHost(value: string): value is Host {
+  return (HOSTS as readonly string[]).includes(value)
+}
+
+function hostBase(host: Host): TargetSpec {
+  return baseTarget(hostTarget(host, BASE_PLUGIN), {
+    rootVar: BASE_ROOT_VAR,
+    flowsDir: flowsDir(host),
+    callerCmd: CALLER_CMDS[host],
+    generatedNotice:
+      "<!-- Generated from packages/dev/src/flows by `bun run build`. Do not edit by hand. -->",
+  })
+}
+
 export const devKit = createFlowKit({
   targets: {
-    // The base renders every flow as plain files a front end's skill reads:
-    // Claude Code's conventions, with commands under the caller's name.
-    claude: baseTarget(claudeCode({ plugin: BASE_PLUGIN }), {
-      rootVar: BASE_ROOT_VAR,
-      flowsDir: flowsDir("claude"),
-      generatedNotice:
-        "<!-- Generated from packages/dev/src/flows by `bun run build`. Do not edit by hand. -->",
-    }),
+    // The base renders every flow as plain files a front end's skill reads,
+    // once per host: that host's conventions (how it asks the user, how it
+    // names arguments), with commands under the caller's name.
+    claude: hostBase("claude"),
+    cursor: hostBase("cursor"),
+    codex: hostBase("codex"),
+    amp: hostBase("amp"),
   },
   commands: {
     // Commands are TypeScript run directly by node (type stripping), so the

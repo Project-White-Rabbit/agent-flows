@@ -357,10 +357,33 @@ export const FLOW_MODES: Record<string, string[]> = {
   preview: ["default"],
   prototype: ["default", "design"],
   ready: ["default", "loop", "draft"],
-  server: ["default", "adopt", "stop", "list"],
+  server: [
+    "default",
+    "up",
+    "adopt",
+    "restart",
+    "stop",
+    "down",
+    "list",
+    "status",
+  ],
   "start-work": ["default"],
   sync: ["default", "local", "remote"],
   "tickets-to-work": ["default"],
+}
+
+/**
+ * Modes that are other names for one of their flow's modes, for front ends
+ * that keep their own words (`server up` is `server` with no mode). A hook's
+ * `modes` matches a mode under either name.
+ */
+export const MODE_ALIASES: Record<string, Record<string, string>> = {
+  server: { up: "default", down: "stop", status: "list" },
+}
+
+/** `mode`'s own name, undoing an alias of `flow`'s. */
+export function canonicalMode(flow: string | undefined, mode: string): string {
+  return (flow && MODE_ALIASES[flow]?.[mode]) || mode
 }
 
 export function hookPoint(id: string): HookPoint | undefined {
@@ -643,7 +666,14 @@ export function skipReason(
   if (hook.flows && !(context.flow && hook.flows.includes(context.flow))) {
     return `only around ${hook.flows.join(", ")}`
   }
-  if (hook.modes && !(context.mode && hook.modes.includes(context.mode))) {
+  const mode = context.mode && canonicalMode(context.flow, context.mode)
+  if (
+    hook.modes &&
+    !(
+      mode &&
+      hook.modes.some((each) => canonicalMode(context.flow, each) === mode)
+    )
+  ) {
     return `only in ${hook.modes.join(", ")} mode`
   }
   if (hook.on === "merged") {

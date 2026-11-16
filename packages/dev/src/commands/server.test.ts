@@ -7,18 +7,25 @@ import { CONFIG_VERSION } from "../config/config.ts"
 import {
   adoptPlan,
   type Deps,
+  findManaged,
   findServer,
   isShell,
   type Listener,
+  type ManagedRun,
+  type Manager,
+  managerCommand,
   parseCwds,
   parseEtime,
   parseLsof,
   parsePorts,
   pickPort,
   running,
+  runShell,
   type ServerState,
   type Settings,
   serverHooks,
+  startManaged,
+  stopManaged,
   sweep,
   urlFromLog,
   watchVerdict,
@@ -406,5 +413,179 @@ describe("adopting a server preview didn't start", () => {
     expect(adoptPlan(99, procs, 33)).toEqual({
       refuse: "no process 99 is running",
     })
+  })
+})
+
+describe("a server the repo's own manager runs", () => {
+  function managed(
+    manager: Partial<Manager> & { up: string },
+    overrides: Partial<Settings> = {},
+    live: (url: string) => boolean = () => true,
+  ): ManagedRun {
+    const root = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "server-managed-")),
+    )
+    dirs.push(root)
+    spawnSync("git", ["-C", root, "init", "--quiet"])
+    return {
+      root,
+      log: path.join(root, "up.log"),
+      manager: {
+        down: null,
+        restart: null,
+        status: null,
+        list: null,
+        ...manager,
+      },
+      vars: { branch: "feat/x", worktree: root },
+      settings: {
+        command: null,
+        url: null,
+        ports: null,
+        timeout: 5,
+        idleTimeout: 240,
+        ...overrides,
+      },
+      answers: async (url) => live(url),
+    }
+  }
+
+  it("fills the branch and worktree in, quoted, and the port when there is one", () => {
+    expect(
+      managerCommand("dsm up {branch} --dir {worktree} --port {port}", {
+        branch: "it's",
+        worktree: "/w",
+        port: 3004,
+      }),
+    ).toBe("dsm up 'it'\\''s' --dir '/w' --port 3004")
+    expect(managerCommand("up {port}", { branch: "b", worktree: "/w" })).toBe(
+      "up {port}",
+    )
+  })
+
+  it("waits for the command, not for a daemon it leaves holding its output", async () => {
+    const m = managed({ up: "true" })
+    const started = Date.now()
+    const ran = await runShell(m.root, "(sleep 5 &) ; echo up", {}, 10)
+    expect(ran).toMatchObject({ exitCode: 0, timedOut: false })
+    expect(ran.output.trim()).toBe("up")
+    expect(Date.now() - started).toBeLessThan(4000)
+  })
+
+  it("finds the one running through status, without running up", async () => {
+    const m = managed({
+      up: "touch up-ran",
+      status: "echo bitfab http://localhost:3012",
+    })
+    expect(await findManaged(m)).toMatchObject({
+      status: "running",
+      url: "http://localhost:3012",
+      managed: true,
+      watched: false,
+    })
+    expect(fs.existsSync(path.join(m.root, "up-ran"))).toBe(false)
+  })
+
+  it("counts it stopped when status fails or its URL doesn't answer", async () => {
+    expect(
+      await findManaged(managed({ up: "true", status: "exit 1" })),
+    ).toBeUndefined()
+    expect(
+      await findManaged(
+        managed(
+          { up: "true", status: "echo http://localhost:3012" },
+          {},
+          () => false,
+        ),
+      ),
+    ).toBeUndefined()
+    expect(await findManaged(managed({ up: "true" }))).toBeUndefined()
+  })
+
+  it("starts it with up and reads the URL up printed, with what it's given", async () => {
+    const up =
+      'echo "$BRANCH" > branch.txt; echo "  ● bitfab → http://localhost:3012"'
+    const m = managed({ up })
+    expect(await startManaged(m)).toMatchObject({
+      status: "started",
+      url: "http://localhost:3012",
+      managed: true,
+      command: up,
+      log: m.log,
+    })
+    expect(fs.readFileSync(path.join(m.root, "branch.txt"), "utf8")).toBe(
+      "feat/x\n",
+    )
+  })
+
+  it("takes the URL from status over what up printed, else the config's", async () => {
+    const fromStatus = managed({
+      up: "echo http://localhost:1111",
+      status: "echo http://localhost:2222",
+    })
+    expect((await startManaged(fromStatus)).url).toBe("http://localhost:2222")
+    const fromPort = managed({ up: "true" }, { ports: [3001, 3099] })
+    fromPort.vars.port = 3007
+    expect((await startManaged(fromPort)).url).toBe("http://localhost:3007")
+  })
+
+  it("fails when up fails, or when its URL can't be known", async () => {
+    expect(
+      await startManaged(managed({ up: "echo overmind not found; exit 3" })),
+    ).toMatchObject({
+      status: "failed",
+      exitCode: 3,
+      tail: "overmind not found",
+    })
+    const unknown = await startManaged(managed({ up: "true" }))
+    expect(unknown.status).toBe("failed")
+    expect(unknown.reason).toMatch(/URL isn't known/)
+  })
+
+  it("times out when the URL never answers", async () => {
+    expect(
+      await startManaged(
+        managed(
+          { up: "echo http://localhost:3012" },
+          { timeout: 1 },
+          () => false,
+        ),
+      ),
+    ).toMatchObject({ status: "timeout", url: "http://localhost:3012" })
+  })
+
+  it("restarts it with restart, else down and then up", async () => {
+    const own = managed({
+      up: "touch up-ran; echo http://localhost:3012",
+      restart: "touch restart-ran; echo http://localhost:3012",
+    })
+    expect((await startManaged(own, true)).status).toBe("started")
+    expect(fs.existsSync(path.join(own.root, "restart-ran"))).toBe(true)
+    expect(fs.existsSync(path.join(own.root, "up-ran"))).toBe(false)
+
+    const pair = managed({
+      up: "test -f down-ran && echo http://localhost:3012",
+      down: "touch down-ran",
+    })
+    expect(await startManaged(pair, true)).toMatchObject({
+      status: "started",
+      url: "http://localhost:3012",
+    })
+  })
+
+  it("stops it with down, and says why when it can't", async () => {
+    const m = managed({ up: "true", down: "touch down-ran; echo stopped" })
+    expect(await stopManaged(m, false)).toMatchObject({
+      stopped: [{ worktree: m.root, command: "touch down-ran; echo stopped" }],
+      output: "stopped",
+    })
+    expect(fs.existsSync(path.join(m.root, "down-ran"))).toBe(true)
+    expect((await stopManaged(m, true)).reason).toMatch(/manager's to do/)
+    expect((await stopManaged(managed({ up: "true" }), false)).reason).toMatch(
+      /server.down isn't set/,
+    )
+    expect(
+      await stopManaged(managed({ up: "true", down: "exit 4" }), false),
+    ).toMatchObject({ stopped: [], reason: "server.down exited 4" })
   })
 })
