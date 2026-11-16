@@ -72,7 +72,7 @@ in the system's default browser.
           title: "The dev server",
           body: `The argument, if any, is \`<page>\`.
 
-Run the \`{{cmd}}server\` skill with no arguments: invoke it, don't redo its steps. It finds this checkout's dev server, or starts one, and may ask the person something on the way (which of several servers, whether to restart one started by hand under its watchdog). It ends with the server's \`<url>\` and how it got there (started now, already running, restarted), for the report. When it ends without a \`<url>\` (the server failed, timed out, or the repo has no dev server), stop here and pass on what it said.`,
+Run {{flow:server}} with no arguments: follow it through rather than redoing its steps. It finds this checkout's dev server, or starts one, and may ask the person something on the way (which of several servers, whether to restart one started by hand under its watchdog). It ends with the server's \`<url>\` and how it got there (started now, already running, restarted), for the report. When it ends without a \`<url>\` (the server failed, timed out, or the repo has no dev server), stop here and pass on what it said.`,
           next: "main/page",
         },
         {

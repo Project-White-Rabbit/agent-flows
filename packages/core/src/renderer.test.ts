@@ -2043,15 +2043,27 @@ describe("renderFlow: split-chain (tail-call dispatch)", () => {
     // machinery target-agnostic (the coupling lives in `target.argsToken`, not
     // in render.ts). makeChainFlow's bodies contain no `$ARGUMENTS`, so the only
     // source in the orchestrator is the renderer.
-    const custom = { ...TARGETS.claude, argsToken: "%%ARGS%%" }
+    const custom = { ...TARGETS.claude, argsToken: "$CUSTOM_ARGS" }
     const orchestrator =
       renderFlow(makeChainFlow(), custom).find((f) => f.kind === "orchestrator")
         ?.content ?? ""
-    expect(orchestrator).toContain("Read `%%ARGS%%` first.")
+    expect(orchestrator).toContain("Read `$CUSTOM_ARGS` first.")
     expect(orchestrator).toContain(
-      "forwarding `%%ARGS%%` minus the leading mode keyword (if the user typed one).",
+      "forwarding `$CUSTOM_ARGS` minus the leading mode keyword (if the user typed one).",
     )
     expect(orchestrator).not.toContain("$ARGUMENTS")
+  })
+
+  it("writes an argsToken in plain words as prose, not code", () => {
+    const custom = { ...TARGETS.claude, argsToken: "the user's request" }
+    const orchestrator =
+      renderFlow(makeChainFlow(), custom).find((f) => f.kind === "orchestrator")
+        ?.content ?? ""
+    expect(orchestrator).toContain("Read the user's request first.")
+    expect(orchestrator).toContain(
+      "forwarding the user's request minus the leading mode keyword",
+    )
+    expect(orchestrator).not.toContain("`the user's request`")
   })
 
   it("folds a single-mode inline phase gate under its step heading, not above it", () => {

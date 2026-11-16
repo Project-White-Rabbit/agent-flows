@@ -18,6 +18,7 @@ The repo is a Bun workspace. Each package lives under `packages/`; `@agent-flows
 - **Keep it host-agnostic.** Behavior specific to one host belongs in its target preset or `TargetSpec`, and anything specific to one product belongs in that product's kit configuration, not in the renderer.
 - **Add a test with every change.** Renderer tests assert on rendered markdown; schema tests assert on the validation message. The fixture kit in `packages/core/src/__fixtures__/kit.ts` covers all four presets.
 - **Output changes are breaking.** Users commit generated skills and check them for drift in CI, so changing rendered output for an existing flow forces them to regenerate. Note such changes under "Changed" in the package's `CHANGELOG.md`.
+- **Write it in TypeScript.** Scripts and tooling run on `node` directly (22.18+ strips types), like the rest of the repo; no other languages.
 - **Update the docs.** Add an entry under `[Unreleased]` in the package's `CHANGELOG.md` for user-visible changes, and update the package README when the API or placeholders change.
 
 ## Releasing
@@ -28,6 +29,6 @@ The repo is a Bun workspace. Each package lives under `packages/`; `@agent-flows
 2. Merge to `main`.
 3. The `Release` workflow sees a version that isn't on npm yet, validates, publishes `@agent-flows/core` to npm with provenance, and creates the `core@X.Y.Z` tag and GitHub release.
 
-### The `dev-flows` plugin
+### The `dev-flows` and `dev-flows-base` plugins
 
-Bump the plugin's version in every PR that changes `packages/dev` (`bun run bump patch` in that directory); CI rejects the PR otherwise. Merging releases it. See [Releasing in the plugin README](packages/dev/README.md#releasing).
+Bump the plugins' version in every PR that changes `packages/dev` or `plugins/dev-flows` (`bun run bump patch` in `packages/dev` sets both); CI rejects the PR otherwise. Merging releases it. See [Releasing in the plugin README](packages/dev/README.md#releasing).

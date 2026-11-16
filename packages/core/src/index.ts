@@ -16,7 +16,12 @@ export { createFlowKit, resolveOutputPath } from "./kit.js"
 export type { DiagramOptions } from "./mermaid.js"
 export { describeFlow, renderMermaid } from "./mermaid.js"
 export type { CommandDef, RenderedFile, RenderTarget } from "./render.js"
-export { applyMustacheSections, renderFlow, renderMarkdown } from "./render.js"
+export {
+  applyMustacheSections,
+  entryFrontmatterInput,
+  renderFlow,
+  renderMarkdown,
+} from "./render.js"
 export type {
   Appendix,
   BranchOption,
@@ -42,10 +47,16 @@ export {
   resolvePerTarget,
   resolveTargetableString,
 } from "./schema.js"
-export type { FrontmatterInput, Target, TargetSpec } from "./targets.js"
+export type {
+  BaseTargetOptions,
+  FrontmatterInput,
+  Target,
+  TargetSpec,
+} from "./targets.js"
 export {
   amp,
   ampPluginDirLookup,
+  baseTarget,
   claudeCode,
   claudeFrontmatter,
   claudeSubSkillFrontmatter,

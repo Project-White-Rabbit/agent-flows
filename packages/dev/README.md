@@ -1,6 +1,6 @@
 # @agent-flows/dev
 
-Dev workflow commands for any repository, written as [agent-flows](../core) flows and shipped as the `dev-flows` Claude Code plugin.
+Dev workflow commands for any repository, written as [agent-flows](../core) flows and shipped as two Claude Code plugins: `dev-flows-base` (this package: every flow, as plain files, and the commands they run) and `dev-flows` ([`plugins/dev-flows`](../../plugins/dev-flows): the `/dev-flows:…` commands). Installing `dev-flows` installs `dev-flows-base` with it. See [How it's built](#how-its-built).
 
 ## Install
 
@@ -12,11 +12,11 @@ On Claude Code before 2.1.275, add the marketplace first: `/plugin marketplace a
 
 Before 0.10.0 the plugin was named `agent-flows`, so its commands were `/agent-flows:…`. To move over, run `/plugin uninstall agent-flows@agent-flows`, then install `dev-flows` as above. The repo's `.agent-flows/config.json` carries over unchanged.
 
-Commands run with the `node` already on the machine (22.18+, which runs TypeScript directly). The plugin has no dependencies and no build step.
+Commands run with the `node` already on the machine (22.18+, which runs TypeScript directly). The plugins have no npm dependencies and no build step.
 
 ### Updates
 
-Claude Code doesn't auto-update plugins from this marketplace unless you turn it on: `/plugin` → **Marketplaces** → `agent-flows` → **Enable auto-update**. Otherwise update by hand with `/plugin marketplace update agent-flows`. Either way, a new version takes effect in the next session or after `/reload-plugins`.
+Claude Code doesn't auto-update plugins from this marketplace unless you turn it on: `/plugin` → **Marketplaces** → `agent-flows` → **Enable auto-update** (or, for everyone in a repo, `"autoUpdate": true` on the marketplace's `extraKnownMarketplaces` entry in its `.claude/settings.json`). Auto-update updates `dev-flows-base` too, even when `dev-flows` itself didn't change. Otherwise update by hand: `claude plugin marketplace update agent-flows`, then `claude plugin update dev-flows-base@agent-flows` (updating `dev-flows` doesn't update the base). Either way, a new version takes effect in the next session or after `/reload-plugins`.
 
 ## Commands
 
@@ -501,13 +501,26 @@ That's all. Validation, detection, the plan, `get`, `integrations`, and the conf
 
 A new **capability** goes in `CAPABILITIES`, with at least one provider. Give it ops only when a skill needs them: adding an op means every provider has to implement it. `required: true` makes a section always configured (like `repo`), for settings every flow can rely on. Changing the *shape* of existing data, rather than adding to it, means bumping `CONFIG_VERSION` and adding a migration.
 
+## How it's built
+
+The workflows ship once, in `dev-flows-base`, and the commands people type ship in front-end plugins that read them. `dev-flows` is one front end; a team can ship its own under its own name (with its own commands beside them) and still get every workflow change the day it's released, with nothing to rebuild.
+
+- **The base has no skills.** Each flow renders as a plain file, `flows/claude/<flow>/flow.md`, with its phases as `references/<phase>.md` beside it, loaded only when the flow gets there. Commands in them are written `/<caller>:<name>`, and the scripts they run are under `$DEV_FLOWS_BASE/src/commands/`. Nothing from the base shows up as a command.
+- **A front end is one short skill per flow.** `/dev-flows:sync` finds the base, reads `flows/claude/sync/flow.md`, and follows it as the caller `dev-flows`, so every command the flow names is `/dev-flows:…`. When one flow runs another (ready running sync), it reads that flow's file with the same caller.
+- **The base tells each session where it is.** Its `SessionStart` hook puts the install path and the flow contract in the session's context and exports `DEV_FLOWS_BASE` for shell commands. When the hook didn't run (hooks turned off with `disableAllHooks`), the front end's skill finds the install path in Claude Code's record of installed plugins (`installed_plugins.json`), reads the contract from `flows/manifest.json`, and writes the path in place of `$DEV_FLOWS_BASE` in the flow's commands.
+- **The flow contract** (`FLOW_CONTRACT` in `src/flows/kit.ts`, written to `flows/manifest.json`) is what front ends rely on: each flow's path, how the caller is passed, and which flows exist. It changes only when older front ends couldn't follow the base any more; a front end built for another contract tells the user to update it instead of running.
+- **Updates.** A front end depends on `dev-flows-base` with no version, so it always gets the latest. With auto-update on, a new base reaches every front end in the next session.
+
+`renderFrontEnd({ plugin, marketplace, flows, exclude })` (`src/flows/front-end.ts`) writes a front end's skills; `exclude` leaves out flows the front end has its own version of.
+
 ## Releasing
 
-The version lives in one place, `.claude-plugin/plugin.json`, because that's what Claude Code compares: an installed plugin updates only when the version changes, so a change merged without a bump never reaches anyone.
+The version lives in `.claude-plugin/plugin.json`, because that's what Claude Code compares: an installed plugin updates only when the version changes, so a change merged without a bump never reaches anyone. `dev-flows-base` and `dev-flows` share one version: `bun run bump` sets both, and CI fails when they differ.
 
 - **Bump it in every PR that changes the plugin:** `bun run bump patch` (or `minor`, `major`) in `packages/dev`. Patch for fixes and wording, minor for new commands, sections, or fields, major when a change breaks existing configs or habits. It bumps from the latest of `main` and the released versions, not from the file, so re-running it (say, after another PR took the next version and you rebased) lands on the right number.
-- **CI rejects a PR whose version won't ship.** The `plugin-version` check fails when `packages/dev` changed (test files aside) and the version isn't past `main`'s current one, or is already released, e.g. two PRs that both bumped to the same version. Run it locally with `bun run check-version origin/main`.
+- **CI rejects a PR whose version won't ship.** The `plugin-version` check fails when `packages/dev` or `plugins/dev-flows` changed (test files aside) and the version isn't past `main`'s current one, or is already released, e.g. two PRs that both bumped to the same version. Run it locally with `bun run check-version origin/main`.
 - **Merging releases it.** Users pull from `main` through the marketplace. On each push to `main` with a new version, the release workflow tags the commit `agent-flows--vX.Y.Z` and creates a GitHub release with generated notes. If the version was already released but the plugin changed since (a PR merged without re-running the check against the latest `main`), the release job fails, so it can't go unnoticed; bump and merge to fix it.
+- **Check a flow change end to end before merging it** when it changes how flows read each other, the wrappers, or wording a model has to follow: `bun run e2e` in `packages/dev`. It serves this checkout as a marketplace, installs `dev-flows` from it at local scope, and runs real headless sessions of sync, ready, finish, evaluate, and cancel (on Opus, Sonnet, and Haiku, and with hooks off) in throwaway repos, with a fake `gh` (`scripts/e2e/fake-gh.ts`) as GitHub: CI is `node --test` at the commit, and merges are real. Each run passes when the session loaded its flow, never wrote `<caller>`, and left the pull request where the flow should (opened, ready and green, merged, or closed). It needs a signed-in `claude`, costs about $10 for every run (`--only sync-haiku,cancel-sonnet` for a few; `--list` lists them), and removes everything it installed when it ends. It's manual, not CI: a model's run varies.
 - **The config format has its own version** (`CONFIG_VERSION`), separate from the plugin's. Bump it only when the shape of `.agent-flows/config.json` changes, with a migration.
 
 ## Layout
@@ -517,8 +530,10 @@ The version lives in one place, `.claude-plugin/plugin.json`, because that's wha
 | `src/flows/` | Flow definitions (build time only) |
 | `src/commands/` | Scripts the skills run (`configure.ts`, `sync.ts` for sync's git state and no-op gate, `ready.ts` for ready's scope and its CI passes (settled, timed out, stalled), `hooks.ts` for running the repo's hooks at a point and trying one before it's configured, `server.ts` for a worktree's dev server: finding, starting, watching, adopting, and stopping it, and stopping the ones left by deleted worktrees, `prototype.ts` for serving a worktree's mockup pages, `tickets.ts` for create-tickets' plan checks, table, and planning document, and `work.ts` for what start-work starts, the order tickets-to-work goes in, and the lock starts take to open workspaces one at a time, and `prototype.ts` for prototype's pages folder, its local server, and its `prototype.index` record). Node built-ins only, since nothing is installed at runtime |
 | `src/config/` | The config format: capability registry (`capabilities.ts`), integration and section registry (`sections/`), capability resolution (`integrations.ts`), validation, patching, planning, detection. Runtime code, same rules |
-| `skills/` | Generated skill files. Don't edit them; run `bun run build` |
-| `scripts/` | `build-skills.ts` renders `skills/`; `version.ts` bumps the version and backs the CI version checks |
-| `.claude-plugin/plugin.json` | Plugin manifest and the plugin's version. The repo-root `.claude-plugin/marketplace.json` points here |
+| `flows/` | Generated: each flow as `flows/claude/<flow>/flow.md` plus its phases in `references/`, and `manifest.json` (the flow contract and the flows). Don't edit them; run `bun run build` |
+| `hooks/` | The `SessionStart` hook (`src/commands/session-start.ts`) that tells each session where the base is installed |
+| `scripts/` | `build-skills.ts` renders `flows/` and the front end's `skills/`; `version.ts` bumps both plugins' version and backs the CI version checks |
+| `.claude-plugin/plugin.json` | The `dev-flows-base` manifest and version. The repo-root `.claude-plugin/marketplace.json` points here |
+| `../../plugins/dev-flows/` | The `dev-flows` front end: its manifest (which depends on `dev-flows-base`) and generated `skills/`, one per flow |
 
-`bun run validate` typechecks, tests, and fails when `skills/` is stale.
+`bun run validate` typechecks, tests, and fails when a generated file is stale or a file in a generated directory isn't generated any more.

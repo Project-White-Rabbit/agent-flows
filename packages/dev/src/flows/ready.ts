@@ -243,7 +243,7 @@ Skip when \`skip\` has both \`fix\` and \`checks\`: there's nothing to run for n
           kind: "action",
           title: "Sync (local pass)",
           refName: "sync local",
-          body: `Run the \`{{cmd}}sync\` skill with the argument \`local\`: invoke it, don't redo its steps. It commits pending work (the cleanup included), catches up to the base, and leaves the branch ahead of its remote; \`local\` never pushes, opens a pull request, or touches the issue. The publish step owns the push.
+          body: `Run {{flow:sync}} with the argument \`local\`: follow it through rather than redoing its steps. It commits pending work (the cleanup included), catches up to the base, and leaves the branch ahead of its remote; \`local\` never pushes, opens a pull request, or touches the issue. The publish step owns the push.
 
 When sync stops (a conflict it needs you for, a hook it couldn't satisfy), stop too and pass its message on.
 
@@ -268,13 +268,13 @@ Skip the push when the branch's remote has this exact commit: \`git fetch origin
 
 - **With a stacking integration:** its \`submit\` op. It pushes and opens the pull request as a draft when there's none, and leaves an existing one's title, body, and draft or ready state alone. When it says the branch isn't tracked, run its \`track\` op with \`<parent>\`, then \`submit\` again. When it fails for another reason than a conflict (the tool's own API or sign-in), push anyway with \`git push --force-with-lease -u origin HEAD\` (the stacking tool rebased the branch, and the lease refuses to overwrite work pushed since the last fetch), and say so in the report. Keep the stacking tool's URL for the pull request when it prints one.
 - **Without one:** \`git push -u origin HEAD\`. If it's rejected because the remote branch moved, \`git fetch origin <branch>\`, \`git merge --no-edit origin/<branch>\`, resolve as sync does, and push again. Never force. With the config's \`sync.catchUp\` \`rebase\`, a rejection goes by the next bullet instead.
-- **Without one, when \`git push\` is refused as not a fast-forward and the config's \`sync.catchUp\` is \`rebase\`** (\`{{command:configure}} get sync.catchUp --optional\`; sync rebased the branch): \`{{command:sync}} upstream\`. When its \`missing\` isn't empty, someone pushed to the branch since: run the \`{{cmd}}sync\` skill with \`local\` again (it folds their commits in before rebasing), then push again. Otherwise \`git push --force-with-lease=<branch>:<its remote> -u origin HEAD\`, the lease naming the tip it read; when that's refused, start this bullet over. Never \`--force\`, and never \`--force-with-lease\` without the tip.
+- **Without one, when \`git push\` is refused as not a fast-forward and the config's \`sync.catchUp\` is \`rebase\`** (\`{{command:configure}} get sync.catchUp --optional\`; sync rebased the branch): \`{{command:sync}} upstream\`. When its \`missing\` isn't empty, someone pushed to the branch since: run {{flow:sync}} with \`local\` again (it folds their commits in before rebasing), then push again. Otherwise \`git push --force-with-lease=<branch>:<its remote> -u origin HEAD\`, the lease naming the tip it read; when that's refused, start this bullet over. Never \`--force\`, and never \`--force-with-lease\` without the tip.
 
 ### Pull request
 
 When there's still none (no stacking integration, or one whose \`submit\` didn't open it): the \`prCreate\` op with \`<base>\` \`<parent>\`, a title in the repo's convention (its agent instructions, then the shape of recent subjects on the base, \`git log -20 --format=%s <parent>\`), and an empty body file. The remote sync below writes the body; anything put there now would survive it as text outside sync's block. Quote the title for the shell: single quotes, with any \`'\` written as \`'\\''\`.
 
-Then the \`prMergeability\` op: \`pending\` → wait 3 seconds and ask again, up to 3 times, then treat it as clean; \`conflicting\` or \`behind\` → run the \`{{cmd}}sync\` skill with \`local\` once more, push again, and ask again. Still not clean: stop and show the user what the op returned.
+Then the \`prMergeability\` op: \`pending\` → wait 3 seconds and ask again, up to 3 times, then treat it as clean; \`conflicting\` or \`behind\` → run {{flow:sync}} with \`local\` once more, push again, and ask again. Still not clean: stop and show the user what the op returned.
 
 ### Mark ready
 
@@ -304,7 +304,7 @@ with an \`--ignore-check\` for each entry of \`ignoreChecks\` from 1a of {{skill
           kind: "action",
           title: "Sync (remote pass)",
           refName: "sync remote",
-          body: `Run the \`{{cmd}}sync\` skill with the argument \`remote\`. It refreshes everything outside the git tree against the published state: the pull request's body and title, the issue's description and Status, and the issue's state, which follows the pull request (now \`in review\` once it's ready; still \`in progress\` in \`draft\` mode). It never commits, pushes, or creates a pull request, so the push above has to come first.
+          body: `Run {{flow:sync}} with the argument \`remote\`. It refreshes everything outside the git tree against the published state: the pull request's body and title, the issue's description and Status, and the issue's state, which follows the pull request (now \`in review\` once it's ready; still \`in progress\` in \`draft\` mode). It never commits, pushes, or creates a pull request, so the push above has to come first.
 
 Run it even when the local sync and the publish changed nothing: an already-published pull request can still need its links or issue state refreshed. When it fails, say so in the report and carry on to CI: the remote sync can be re-run on its own.`,
           next: "run/ci",

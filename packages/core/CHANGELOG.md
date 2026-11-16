@@ -4,8 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- `baseTarget(host, { rootVar, flowsDir, generatedNotice? })` turns a host target into a base: each flow renders as a plain `flow.md` with its phases as `references/<phase>.md` (no skills, no frontmatter), commands are written `/<caller>:<name>` for the front-end plugin that sent the agent there, `{{pluginRoot}}` is `$<rootVar>`, and the arguments are named in plain words. Front-end plugins ship a short skill per flow that reads the base's file, so a base updates without rebuilding them.
+- `{{flow:<id>}}` names another flow, for prose that runs it: "the `/acme:<id>` skill" on skill targets, the flow's file on a base target.
+- `TargetSpec` fields `mainFile`, `flowRef`, `entryPreamble`, and `phasePreamble`, which `baseTarget` sets.
+- `entryFrontmatterInput(flow, target)` gives a flow's entry frontmatter fields, for files that stand in for a flow under another name.
+
 ### Changed
 
+- An `argsToken` in plain words (Amp's "the user's request") renders as prose, not inside backticks; a `$`-prefixed one stays code.
 - `{{skill-ref:<phase>}}` and `{{dispatch-ref:<phase>}}` naming a phase in `inlinePhases`, from another unit, render as "the *<Phase Title>* section of the `<flow>` skill" (with phase references: "the *<Phase Title>* section of [the skill](../SKILL.md)"). They used to name a `<flow>-<phase>` skill or `references/<phase>.md` file that is never generated, since an inline phase is part of the orchestrator. Flows that use them render differently: regenerate.
 
 ## [0.1.2]

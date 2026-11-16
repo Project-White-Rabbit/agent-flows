@@ -11,7 +11,7 @@ import {
   type Step,
   TOOL_PLACEHOLDER_RE,
 } from "./schema.js"
-import type { Target } from "./targets.js"
+import type { FrontmatterInput, Target } from "./targets.js"
 
 type TargetName = string
 
@@ -337,7 +337,7 @@ function renderDispatchSuffix(
         const actionVerb = usesPhaseReferences(flow, target)
           ? "read and follow"
           : "invoke"
-        const fwd = `, forwarding \`${target.argsToken}\` minus the leading mode keyword (if the user typed one).`
+        const fwd = `, forwarding ${argsRef(target)} minus the leading mode keyword (if the user typed one).`
         if (singleMode) {
           action = `${actionVerb} ${destination}${fwd}`
         } else if (edge.modes.length === 1) {
@@ -387,7 +387,9 @@ function phaseDestination(
   }
   if (inline) {
     return fromReference
-      ? `the *${title}* section of [the skill](../SKILL.md)`
+      ? target.mainFile === undefined
+        ? `the *${title}* section of [the skill](../SKILL.md)`
+        : `the *${title}* section of [the flow file](../${target.mainFile})`
       : `the *${title}* section`
   }
   const prefix = fromReference ? "./" : "references/"
@@ -438,7 +440,7 @@ function interactiveDefaultDispatchPointer(
   const action = usesPhaseReferences(flow, target)
     ? "read and follow that mode's reference"
     : "invoke that mode's skill"
-  return `**Next:** once the user picks a mode, ${action} from the \`## Dispatch\` section above, forwarding the arguments the user gave with their pick minus the mode keyword. Ignore the dispatch lines' \`${target.argsToken}\` here: this is the no-argument entry, so it is empty and the user's pick is the only source of those arguments.`
+  return `**Next:** once the user picks a mode, ${action} from the \`## Dispatch\` section above, forwarding the arguments the user gave with their pick minus the mode keyword. Ignore the dispatch lines' ${argsRef(target)} here: this is the no-argument entry, so it is empty and the user's pick is the only source of those arguments.`
 }
 
 /**
@@ -513,7 +515,7 @@ function renderEntryDispatch(
     const action = usesPhaseReferences(flow, target)
       ? "read and follow"
       : "invoke"
-    const fwd = `, forwarding \`${target.argsToken}\` minus the leading mode keyword (if the user typed one).`
+    const fwd = `, forwarding ${argsRef(target)} minus the leading mode keyword (if the user typed one).`
     if (singleMode) {
       return `- ${titleCase(action)} ${destination}${fwd}`
     }
@@ -603,11 +605,20 @@ function renderOrchestrator(
     }),
     `# ${s(flow.title, target.name, "flow.title")}`,
   ]
+  if (target.entryPreamble !== undefined) {
+    sections.push(target.entryPreamble)
+  }
 
   pushIntro(sections, flow, target)
   if (usesPhaseReferences(flow, target) && subPhases.length > 0) {
+    // A skill's references sit beside a skill a shim may have redirected to;
+    // a flow file is read straight from its directory, so it has no shim.
+    const shim =
+      target.mainFile === undefined
+        ? " If an installed shim redirected you here, use this worktree skill's directory, not the shim directory or shell working directory."
+        : ""
     sections.push(
-      "Load phase references only when routing reaches them. Read and follow the linked file in this same session, retaining the current mode, arguments, shared rules, and prior results. Resolve links relative to the file containing them. If an installed shim redirected you here, use this worktree skill's directory, not the shim directory or shell working directory. References are ordinary instruction files, not separately invocable skills.",
+      `Load phase references only when routing reaches them. Read and follow the linked file in this same session, retaining the current mode, arguments, shared rules, and prior results. Resolve links relative to the file containing them.${shim} References are ordinary instruction files, not separately invocable skills.`,
     )
   }
   if (Object.keys(flow.commands).length > 0) {
@@ -759,6 +770,9 @@ function renderSubSkill(
     )
   }
   sections.push(`# ${flowTitle}: ${phaseTitle}`)
+  if (usesPhaseReferences(flow, target) && target.phasePreamble !== undefined) {
+    sections.push(target.phasePreamble)
+  }
   if (chain) {
     const preface = renderModePreface(ctx, phase, reachableSteps)
     if (preface !== null) {
@@ -844,6 +858,27 @@ function subSkillAllowedTools(
     return [...tools, target.subSkillTool]
   }
   return tools
+}
+
+/**
+ * The frontmatter fields of a flow's entry file for a target, without its
+ * derived `allowed-tools`. For files that stand in for a flow under another
+ * name, like a front-end plugin's skill that sends the agent to a base's flow.
+ */
+export function entryFrontmatterInput(
+  flow: Flow,
+  target: RenderTarget,
+): FrontmatterInput {
+  return {
+    flowId: flow.id,
+    description: s(
+      flow.frontmatter.description,
+      target.name,
+      "flow.frontmatter.description",
+    ),
+    argumentHint: resolveArgumentHint(flow, target),
+    model: flow.frontmatter.model,
+  }
 }
 
 function resolveArgumentHint(
@@ -1053,6 +1088,9 @@ export function renderMarkdown(flow: Flow, target: RenderTarget): string {
   )
 
   sections.push(`# ${s(flow.title, target.name, "flow.title")}`)
+  if (target.entryPreamble !== undefined) {
+    sections.push(target.entryPreamble)
+  }
 
   if (flow.intro !== undefined) {
     const introStr = s(flow.intro, target.name, "flow.intro")
@@ -1215,6 +1253,15 @@ function applyFlowPlaceholders(
 ): string {
   let result = text
 
+  // `{{flow:flow-id}}`: a noun phrase naming another flow, for prose that
+  // runs it. A skill target names its skill; a base target names the flow's
+  // file, since a base has no skills to invoke.
+  result = result.replace(
+    /\{\{flow:([a-z][a-z0-9-]*)\}\}/g,
+    (_match, flowId: string) =>
+      target.flowRef?.(flowId) ?? `the \`{{cmd}}${flowId}\` skill`,
+  )
+
   // `{{step-ref:phase-id/step-id}}` — renders the step's `refName` (or `title`
   // if unset), a stable name for cross-phase prose references. Unlike
   // `{{step:...}}` it does NOT render a file-local number, so it needs no
@@ -1293,7 +1340,7 @@ function applyFlowPlaceholders(
         return `the *${title}* section`
       }
       const destination = phaseDestination(flow, target, phaseId, unitPhases)
-      return `${destination} with the current mode, forwarding \`${target.argsToken}\` minus the leading mode keyword (if the user typed one)`
+      return `${destination} with the current mode, forwarding ${argsRef(target)} minus the leading mode keyword (if the user typed one)`
     },
   )
 
@@ -1541,7 +1588,7 @@ function renderModesDispatch(
   // lands on the default; otherwise fall to the default and let it consume the
   // arguments (the correct behavior for keyword-dispatch and content-first dev
   // flows, which document no routing of their own).
-  const args = `\`${target.argsToken}\``
+  const args = `${argsRef(target)}`
   const routing =
     flow.defaultMode !== undefined
       ? `Read ${args} first. If its first token is exactly one of the mode names below, run that mode. Otherwise, when this skill documents how to route the remaining arguments (see its intro), follow that; if it doesn't, run \`${flow.defaultMode}\` and treat ${args} as its input. ${follow}`
@@ -2309,11 +2356,21 @@ function applyTokens(text: string, target: RenderTarget, flow: Flow): string {
   const leftovers = result.match(/\{\{[^}]+\}\}/g)
   if (leftovers) {
     throw new Error(
-      `Unresolved placeholder(s): ${leftovers.join(", ")}. Check spelling and namespace (step:, step-ref:, skill-ref:, dispatch-ref:, tool:, command:, table:, list:, branches, branches:).`,
+      `Unresolved placeholder(s): ${leftovers.join(", ")}. Check spelling and namespace (flow:, step:, step-ref:, skill-ref:, dispatch-ref:, tool:, command:, table:, list:, branches, branches:).`,
     )
   }
 
   return result
+}
+
+/**
+ * How prose names the arguments: a shell-style token (`$ARGUMENTS`) as code,
+ * plain words ("the user's request") as they are.
+ */
+function argsRef(target: RenderTarget): string {
+  return target.argsToken.startsWith("$")
+    ? `\`${target.argsToken}\``
+    : target.argsToken
 }
 
 function ensureTrailingNewline(text: string): string {

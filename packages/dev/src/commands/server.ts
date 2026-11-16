@@ -73,7 +73,7 @@ export type ServerHooks = {
 /** A process, as `ps` lists it. */
 export type Proc = { pid: number; ppid: number; command: string }
 
-/** The servers dev-flows started, by the worktree each serves. */
+/** The servers these commands started, by the worktree each serves. */
 export type Registry = Record<string, ServerState>
 
 /** A server dev-flows started, stopped because nothing needs it any more. */
@@ -836,8 +836,8 @@ async function stop(
     ...(stopped.length === 0
       ? {
           reason: all
-            ? "no server dev-flows started is running in this repo"
-            : "no server dev-flows started is running in this worktree",
+            ? "no server these commands started is running in this repo"
+            : "no server these commands started is running in this worktree",
         }
       : {}),
     reaped,
@@ -885,7 +885,7 @@ export function adoptPlan(
     mine.add(p.pid)
   }
   if (mine.has(pid) || isShell(proc.command)) {
-    return { refuse: `process ${pid} isn't one dev-flows can stop safely` }
+    return { refuse: `process ${pid} isn't one these commands can stop safely` }
   }
   let top = proc
   for (;;) {
@@ -946,7 +946,7 @@ async function adopt(
   let replaced: Reaped
   if (state && running(state) && (pid === undefined || pid === state.pid)) {
     if (state.watched) {
-      return fail("dev-flows already watches this checkout's server")
+      return fail("these commands already watch this checkout's server")
     }
     await kill(state)
     replaced = { worktree: root, pid: state.pid, command: state.command }
@@ -1250,21 +1250,24 @@ const USAGE = `Usage: server.ts <subcommand>
                      server.command and server.url
   status [--url <url>]
                      The same, only looking: starts nothing, stops nothing
-  stop [--all]       Stop the server dev-flows started in this worktree (with
-                     --all, every one it started in this repo's worktrees)
-  list               The servers dev-flows started in this repo's worktrees
+  stop [--all]       Stop the server these commands started in this
+                     worktree (with --all, every one they started in this
+                     repo's worktrees)
+  list               The servers these commands started in this repo's
+                     worktrees
   adopt [--pid <pid>] [--command <cmd>] [--url <url>]
                      Restart this checkout's server under the watchdog: the
-                     one an older dev-flows started, or process <pid> (a
+                     one an older version started, or process <pid> (a
                      server started by hand, listening from this checkout)
                      with the tree that started it, up to the shell it runs
                      in (never a shell, or what this runs under). Then starts
                      --command (else server.command) as start does
 
-  Each run but status first stops the servers dev-flows started for worktrees
-  that are gone, and prints them as reaped. Each server it starts runs under a
-  watchdog that stops it once its worktree is deleted, or once nothing has
-  been connected to it for server.idleTimeout minutes (default 240; 0: never).
+  Each run but status first stops the servers these commands started for
+  worktrees that are gone, and prints them as reaped. Each server it starts
+  runs under a watchdog that stops it once its worktree is deleted, or once
+  nothing has been connected to it for server.idleTimeout minutes (default
+  240; 0: never).
   With server.ports, each worktree's server gets its own port from that range,
   as $PORT and {port} in the command. The repo's server.started hooks run each
   time one it started answers, and its server.stopped hooks each time one

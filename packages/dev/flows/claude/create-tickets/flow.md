@@ -1,0 +1,167 @@
+<!-- Generated from packages/dev/src/flows by `bun run build`. Do not edit by hand. -->
+
+# /<caller>:create-tickets
+
+You were sent here by a command of the front-end plugin named in the request (the caller): `<caller>` stands for its name. Commands below are written `/<caller>:<name>`: write and run them with the caller's name in place of `<caller>` (with caller `acme`, `/<caller>:sync` is `/acme:sync`). The arguments are what the caller passed on. `$DEV_FLOWS_BASE` is where these flow files are installed: in a shell it's set, and for reading a file use the path the request or the session start gave. Read flow files (this one's references, and other flows) with your file-reading tool, not a shell command. Text a step gives you to print or say (a usage block, a message) is meant as written: fill in its placeholders and change nothing else.
+
+Turns planning notes into issues in the repo's issue tracker: each planned item becomes one issue, with its action items as a checklist in the description rather than sub-issues (the people doing the work split those out if they want them). Issues that already describe the same work are updated instead of filed twice, and the whole result is shown as one table and filed on one confirmation. Every tracker action goes through the repo's configured integrations (`/<caller>:configure`), so it works with any issue tracker.
+
+In default mode, `--yes` anywhere in the arguments skips the confirmation when nothing needs an answer; the rest is the notes. In `match` mode, `--branch <branch>` says the text describes that branch's work; the rest is the text.
+
+The `tickets.ts` command checks the plan and draws the table; you turn the notes into a plan, match it, show the table, and apply it. Aim for three turns: draft, confirm, apply.
+
+Load phase references only when routing reaches them. Read and follow the linked file in this same session, retaining the current mode, arguments, shared rules, and prior results. Resolve links relative to the file containing them. References are ordinary instruction files, not separately invocable skills.
+
+**CLI commands** available via Bash (paths relative to `$DEV_FLOWS_BASE/src/commands/`):
+
+| Command | Description |
+|---------|-------------|
+| `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), a failure that stops the command (`stop`), or a hook still running (`running`) |
+| `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
+| `tickets.ts <subcommand>` | `match` ranks the tracker's issues against each item and sets the certain matches; `check` checks the plan against the team's rules and prints the table to confirm (or `PROBLEM` lines); `record` saves an issue apply just filed into the plan; `notes` and `planning-line` shape the planning document's section and each issue's link to it |
+
+## Invariants
+
+- **Act through the integrations' ops.** Issues are searched, filed, updated, and linked only through the ops `configure.ts integrations` returns, run as given.
+- **File only what the notes describe.** Don't invent work, and don't split an item into sub-issues the notes don't ask for.
+- **Existing issues keep their title, description, and parent,** apart from the blocker mark on the title, the `> Planning:` line in the description, and a parent the plan moves them to. An update sets only what the plan changes.
+- **Nothing is written before the confirmation** (or `--yes`), and nothing at all in `match` mode.
+- **Run the repo's hooks around this command.** Skip this when the mode is `help`, or when another of these commands is running this one (it runs its own). Once the mode is known, before the first step's work: `node "$DEV_FLOWS_BASE/src/commands/hooks.ts" run before --flow create-tickets --mode <mode>`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: `node "$DEV_FLOWS_BASE/src/commands/hooks.ts" run after --flow create-tickets --mode <mode> --outcome <success, when it did its job, else failure>`, leaving out a flag whose value isn't known yet. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest (with `agent.recheck`, that first runs the hook's check again, and it fails like any check when the task didn't satisfy it); a task you can't do with confidence is a stop: say so, and ask. With `agent.recheck` `report`, the task is a list of findings: fix each one you can with confidence and leave the rest, which is not a stop; the check runs again, and what it still finds comes back in `open` rather than as a failure. `open`, in any call's output, lists those findings by hook (`name`, `output`): keep each for the report, where it's listed as open under its hook's name. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). `running`: a hook was still running when `--max-wait` ran out, and goes on running: run the same command again with `--wait <running.resume>` in place of any `--after`, until the status is another one, relaying `running.name` and how long it has run. When the host limits how long one command runs, add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`. An exit of 2 means bad arguments or an invalid config: relay its message and stop. At the end, a `stop` can't happen: report the `failures`. When `ran` lists any hook, say in the report which ran at each point, what any task for you changed, what failed, and every finding a hook's `open` left, as open; when no point ran one, leave hooks out of the report.
+
+## Modes
+
+Read the arguments you were given first. If its first token is exactly one of the mode names below, run that mode. Otherwise, when this skill documents how to route the remaining arguments (see its intro), follow that; if it doesn't, run `default` and treat the arguments you were given as its input. Follow only the selected mode's path below.
+
+| Mode | Trigger | What it does |
+|------|---------|--------------|
+| `default` | (no argument) | Turn the notes into issues: draft a plan, match it against existing issues, confirm one table, and file it. |
+| `match` | `match` | Only look: draft the plan and find the issues that already describe it. Files and changes nothing. Sync uses it with `--branch`. |
+| `help` | `help` | Show usage and exit. |
+
+## 0. Help shortcut
+
+**Run only when mode is `help`.**
+
+If mode is `help`, print the block below verbatim and exit. No reads, no writes.
+
+> `/<caller>:create-tickets` files issues from planning notes.
+>
+> Usage:
+>   - `/<caller>:create-tickets <notes URL | pasted notes | sentence> [--yes] [--tracker <entry>] [--tracker-project <name>]` -- each planned item becomes one issue, its action items a checklist in the description. Issues that already describe the same work are updated instead, and work closed in the last 90 days is flagged, not filed again. Shows one table and files everything on one confirmation (`--yes` skips it when nothing needs an answer). `--tracker` files in that issue tracker, when the repo has several; `--tracker-project` puts every item the notes give no project in that one. Running it again on the same notes only updates.
+>   - `/<caller>:create-tickets match [--branch <branch>] <text>` -- only find the issues that already describe the work. Files and changes nothing. Sync uses it to find a branch's issue.
+>   - `help` -- show this and exit
+>
+> Priority, labels, estimate, cycle, project, assignee, and due date come from the notes, then the repo's agent instructions, then the issue tracker's config. Names the tracker doesn't know (people, projects, labels, cycles, and blocked-by issues) are reported before anything is filed. The config's `tickets` section adds the team's rules: due dates required at some priorities, the estimates the team sizes work in, a parent ranked by its sub-issues, a blocker mark on titles, and a planning document per cycle that records the notes and links each issue back. New issues are filed in the todo state. It needs an issue tracker (`/<caller>:configure issueTracker`), at `track` to file.
+
+## 1. Read the notes
+
+**Run only when mode is `default` or `match`.**
+
+1. **Issue tracker:** `node "$DEV_FLOWS_BASE/src/commands/configure.ts" integrations issueTracker` prints every entry the repo configured. If it exits with status 2 and prints `"configured": false`, stop this command here. Relay its `message`: the repo isn't set up for these commands yet, its config is invalid (`issues`), or it doesn't set what this command needs (`missing`: config paths, or capabilities with no integration). Tell the user to run `/<caller>:configure` (naming the missing sections or capabilities, if any) and then re-run this command. Don't guess the values instead. Each entry is one configured integration, or one instance of an integration configured more than once (two repositories on one host, told apart by `instance`): its `values`, its `access` (how this machine can reach it), and its `ops`. An op says how that integration does the job, with config values already filled in and `<N>`-style placeholders for you to fill: one string when it's the same however you reach the integration, else one variant per way to reach it. For each op, use the first variant, in the order the op lists them, whose way works here: `script` (an adapter: the op as code, built in or the repo's own; run it, and when it exits 3 it can't run here, so go on to the next), `mcp` when this session has tools from an MCP server whose name contains `access.mcp.server` (tools that are deferred, or from a server still connecting, count: search for them with your tool search before deciding they're missing), `cli` when `access.cli.ready` (installed and signed in), `api` when `access.api.ready` (the variant reads the token from the variable `access.api.token` names; never print or echo a token). Whether a way works is settled by using it, not only by how it looks: when the chosen variant fails because of the way in (the MCP server errors, disconnects, times out, or asks to sign in; the CLI says it isn't signed in or can't connect; the API answers 401, 403, 429, or 5xx, or doesn't answer), go on to the next variant the op lists, and say in the report which way failed and which one did the work. A failure from the integration itself (not found, a rejected value, a conflict, a permission the account lacks on that item) isn't one: the next way would fail the same, so handle it as the op says. Before falling back from a variant that writes (creates, updates, comments, merges), check with the op's read, or the integration's, whether the write landed anyway, so the next way doesn't do it twice. Most ops list MCP, then CLI, then API; one that lists them otherwise does so because that way is more exact. An op given as `unsupported` is one that integration has nothing for: skip what needs it, and say so in the report with its reason. Run the chosen variant as given rather than a tool you know. When no variant of an op works, having tried each whose way looked available, don't improvise one: tell the user what would make it work (connect the MCP server, install the CLI or sign in with `access.cli.auth`, or set the token variable) and treat that action as unavailable. An entry with a `problem` is missing a value only this machine can supply (its ops still show that value's `{placeholder}`): don't run an op that needs it or guess the value; tell the user the problem, which says how to fix it, and treat what needs it as unavailable. An entry's `level`, for a capability that has levels, is how far the team lets flows go with that integration (set by configure, from the capability's levels); never do more with it than its level allows. A capability can have several integrations, and the skill works the same with any of them.
+   - Every entry is searched. Only entries at `level` `track` get issues filed or updated: file in the one `--tracker` names, else the first of those, unless the notes, the user, or the repo's agent instructions name another. An entry at `link` is read-only here.
+   - In default mode with no entry at `track`, stop: `Every issue tracker here is linked only, so create-tickets can't file. Run /<caller>:configure <integration> to track issues, or use /<caller>:create-tickets match to look without filing.`
+2. **The notes**, from the arguments (minus the mode keyword and flags):
+   - **Flags:** `--yes`, `--tracker <entry>`, and `--tracker-project <name>` in default mode, `--branch <branch>` in `match` mode. Any other argument that starts with `--` is a flag this command doesn't take: name it, print the usage block from `help`, and stop, rather than running without it. A `--` inside pasted notes, a quoted value, or a command the notes quote (`git push --force`) is part of that text, not a flag. `--tracker` names an issue-tracker entry (its `instance`, else its `integration`): when it names none at `level` `track`, say so, list the entries at `track`, and stop.
+   - **A URL:** read the page with this session's tools for that site (an MCP server's fetch or read tool; search for deferred ones before deciding there are none), else a plain web fetch. When nothing can read it (it needs a sign-in no tool has), ask the person to paste the page and stop until they do.
+   - **Pasted notes** (often a flat list with no headings, copied from a chat channel or a doc) **or a sentence:** use the text as given.
+   - **Nothing:** ask for the notes or a link, and stop.
+3. **Where the plan goes:** `<dir>` is `git rev-parse --absolute-git-dir` plus `/agent-flows/create-tickets` (create it), so the plan never lands in the tree. The plan is `<dir>/plan.json` in default mode and `<dir>/match.json` in `match` mode, so looking never overwrites a notes plan or the issues it recorded as filed. In default mode, write the notes as you read them, unedited, to `<dir>/notes.md`: the planning document records them as they are.
+4. **The team's rules:** `node "$DEV_FLOWS_BASE/src/commands/configure.ts" get tickets.planningDoc tickets.blockerMark tickets.dueDateRequired tickets.parentFollowsSubIssues tickets.estimateScale tickets.subIssues --optional`. `null` means the team doesn't use that rule (for `subIssues`, `auto`). `tickets.ts check` applies the last five itself; you need them to draft (a blocker, a date to ask for, an estimate on the scale, whether to look for a larger issue to file under) and `planningDoc` to apply.
+
+## 2. Draft the plan
+
+**Run only when mode is `default` or `match`.**
+
+Read the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, and the docs they point to for ranking or filing work): its priority scale, labels, and what an issue should say. Then write the plan:
+
+```json
+{
+  "source": { "title": "Planning, Oct 24", "url": "<the notes' URL; omit for pasted notes>" },
+  "items": [
+    { "key": "sync", "title": "Sync planning with the dev workflow", "priority": "high", "assignee": "Sam", "project": "Dev tools",
+      "description": "What the work is and when it's done.\n\n- [ ] Pick the next task from a coding agent\n- [ ] Post issue changes to chat",
+      "label": "Feature", "defaults": ["project"] },
+    { "key": "bot", "title": "Answer issue questions in chat", "cycle": "next", "blockedBy": ["sync"] },
+    { "key": "login", "title": "Fix login for Acme", "priority": "urgent", "dueDate": "2026-10-30", "blocker": true }
+  ],
+  "options": { "<entry>": { "people": [{ "name": "Sam Lee" }], "projects": ["Dev tools"], "labels": ["Feature"], "cycles": [{ "id": "40", "startsAt": "2026-10-19", "endsAt": "2026-10-26", "current": true }] } },
+  "refs": { "<ID>": { "found": true, "title": "...", "closed": false, "priority": "high", "project": "Dev tools", "subIssues": [] } }
+}
+```
+
+| Field | Rule |
+|---|---|
+| `key` | Short and unique. `parent` and `blockedBy` refer to keys, or to an existing issue's id. |
+| `title` | Plain words saying what the work does, never an issue id. |
+| `description` | What the work is and when it's done, then its action items as a checklist (`- [ ] ...`). |
+| `parent` | Usually left out: each planned item is one issue however many pull requests it takes, and its action items go in its checklist, never into sub-issues. In flat notes with no headings, fold lines into one item when they're clearly parts of the same work; otherwise each line is its own item. Set it only when the notes name an existing issue the work belongs under (matching may add one too, with `"matchedParent": true`). On a matched item, a parent other than the issue's own moves it there. |
+| `priority` | `urgent`, `high`, `medium`, `low`, or `none`, from how the notes rank the work, read through the agent instructions' scale (a team's P0 might be `high`, and its lowest rank, an audit say, `none`). A name from the config's `tickets.ranks` works too (`"P0"`): `check` reads it as the priority it names, and the table shows both (`high (P0)`). On a matched item, set it from how the notes rank the work even when the issue already has it, so an issue the notes moved doesn't keep its old rank. On a new item the notes don't rank, the tracker entry's `values.priority` or the agent instructions' default, listed in `defaults`; with neither, leave it out. With `tickets.parentFollowsSubIssues`, the check raises a parent to its most urgent open sub-issue. |
+| `cycle` | When the work happens: `current`, `next`, a cycle number, or a `YYYY-MM-DD` date inside it, from the notes ("this week", "next week", "after the launch"). Otherwise as the issue fields below say, listed in `defaults`. |
+| `dueDate` | `YYYY-MM-DD`, only from the notes (or the agent instructions or `tickets.dueDateRequired`, when they require one for some work: ask for it at the confirmation). `null` clears a matched issue's date; leaving it out keeps it. |
+| `blocker` | `true` only when the work stops a customer from making progress, and only with `tickets.blockerMark`: the title gets the mark. Work that holds up a teammate or another issue isn't a blocker: use `blockedBy` on the issue it holds up. |
+| `assignee` | The person the notes name (a first name is enough). Leave it out for the person running this. One person per issue. |
+| `project` | The one the notes name for the area, matched against the entry's `values.project` and `values.projects` first, then the tracker's (part of its name is enough when only one project has it), else `--tracker-project`'s, else the entry's `values.project` (listed in `defaults`). A new sub-issue the notes give no project takes its parent's, which the check fills in. |
+| `label` | One label from the set the agent instructions or the entry's `values.labels` give, by the kind of work. Leave it out with no set. |
+| `estimate` | Only when the agent instructions, the entry's `values.estimate`, or `tickets.estimateScale` ask for one: a number on `tickets.estimateScale` when it's set, else on the agent instructions' scale. |
+| `blockedBy` | Only when the notes say one piece of work waits on another. Work that holds up a teammate is not a reason on its own. |
+| `tracker` | The entry to file in (its `instance` or `integration`): the one the notes put the item in, else `--tracker`'s; only when it isn't the first at `track`. |
+| `defaults` | The fields set from a default rather than read from the notes, so the table marks them for checking. |
+| `match`, `existing` | Leave them out: matching sets them. |
+
+Don't invent work the notes don't mention.
+
+**What the tracker knows:** in default mode, run the filing entry's `fieldOptions` op once and put its JSON in the plan's `options`, under the entry's `instance` (else its `integration`); for an item filed in another entry, that entry's too. `tickets.ts check` then reports a person, project, label, or cycle the tracker doesn't have, with the names it does, and checks due dates against when cycles start. When the op is `unsupported` or no variant works here, leave `options` out: names go unchecked, so say so at the confirmation.
+
+**Running again on the same notes:** when the plan file already exists with the same `source`, start from it. Its items with a `match` are issues filed or matched last time; keep those matches, so a re-run only updates.
+
+**In `match` mode** the text is usually one item: draft it as one, unless it plainly lists several pieces of work. With `--branch`, it's that branch's work: judge it against this session and the branch's commits too.
+
+## 3. Find matches
+
+**Run only when mode is `default` or `match`.**
+
+**Rank every issue against the plan.** For each entry, run its `recentIssues` op once (every open issue, and every one closed in the last 90 days), and its `searchIssues` op once per item with the item's title. Write them to `<dir>/issues.json`, under each entry's `instance` (else its `integration`):
+
+```json
+{ "<entry>": { "link": false, "issues": [<recentIssues' issues>], "hits": { "<item key>": ["<ID>", "..."] } } }
+```
+
+`link` is true for an entry at `link`, and `hits` each item's search results by id, best first. When `recentIssues` is `unsupported` or fails, put the issues the searches returned in `issues` instead. Then:
+
+```bash
+node "$DEV_FLOWS_BASE/src/commands/tickets.ts" match --plan <dir>/<plan file> --issues <dir>/issues.json [--notes <dir>/notes.md] [--branch <branch>]
+```
+
+`--notes` in default mode, `--branch` in `match` mode with one. It scores every issue by the words it shares with each item's title and each line and sentence of its description, fuses that with the search's ranking, and prints per item an `ITEM` line, then `CANDIDATE` lines, best first (score, `exact title`, `search #N`, `same notes` when the issue was filed from these notes, `closed`), or `NEW` when nothing comes close. On an item with no `match` it sets one in the plan when it's certain, and prints `MATCH exact title` or `MATCH same notes`: the only open issue with the same title, or one filed from the same notes that clearly outscores the rest, in an entry it can update, claimed by no other item (with `--branch`, also with no pull request attached and no `> Branch:` line naming another branch). Keep those matches, set the item's `tracker` when the issue is in an entry other than the first at `track`, and load `existing` for them as below.
+
+**Judge the rest.** For each item without a match, also run every entry's `searchIssues` op with each checklist line or sentence that names a distinct piece of the work (up to three), since an issue filed under another name may match on one line alone. Judge each candidate, the printed ones and these, against the whole item (its description and checklist, and with `--branch`, the branch's work), not the title alone. Decide without asking:
+
+- **The same work, open:** set `"match": "<ID>"`, then load it with the entry's `getIssue` op and set `existing` from it: `title`, `url`, `priority`, `cycle`, `cycleStart` and `cycleEnd` (when its cycle starts and ends), `dueDate`, `assignee`, `project` (`null` when it has none and the tracker has projects), `parent`, `subIssues` (its open sub-issues: `id`, `title`, `priority`, `cycle`, `cycleStart`, `cycleEnd`, `dueDate`), and `closed: false`. Read its parent too: when it sits under the wrong one, or under none where an open issue covers the work as a whole, set `parent` to move it. With `--branch`, it's a match only when no pull request is attached and its description has no `> Branch:` line naming another branch; otherwise it's someone else's piece of the same work: the next case.
+- **Part of a larger open issue** (it covers the work as a whole, like a project's main issue), or with `--branch`, the same work under another pull request or branch: set `"parent": "<ID>"` and leave `match` out, so the item is filed as a sub-issue of it rather than beside it. For a larger issue the notes don't name, also set `"matchedParent": true`; with `tickets.subIssues` `never`, don't set `parent` for one at all (in `match` mode it prints `new`), and with `ask`, `check` asks before it files there. The same work under another pull request or branch is always a sub-issue, whatever `tickets.subIssues` says.
+- **Closed** (done or canceled in the last 90 days) **and the same work:** it's already done. Drop the item from the plan, and name the issue in the confirmation. With `--branch`, keep the item new and name the closed issue in the result: a closed issue is never a branch's issue.
+- **In an entry at `link`:** never a match, since it can't be updated here. When it's the same work, drop the item and name the issue in the confirmation as already tracked there. With `--branch`, keep the item and list the issue as `also tracked`.
+- **A loose overlap, or nothing fits:** leave the item new. Take a match only when it's clearly the same work.
+
+**Open issues in the item's project:** when an item names a project (or gets one by default), run the entry's `projectIssues` op for it once per project, and for the entry's `values.project` and each of its `values.projects` too, so work filed in a sibling project isn't filed again; judge those issues against the item too, even when the words barely overlap: an issue that covers the work under another name shows up there. When the op is `unsupported`, skip it.
+
+For each candidate you weigh, look at its parent and its open sub-issues (`getIssue`): a parent that already covers the work as a whole is where a new item belongs (`parent`), and an open sub-issue may be the match itself.
+
+**Issues the plan names but doesn't hold:** every `parent` or `blockedBy` that is an issue id rather than a plan key, and with `tickets.parentFollowsSubIssues` the parent of each matched item whose priority the plan raises, load with `getIssue` and record in the plan's `refs` under its id: `found` (false when the tracker has none), `title`, `closed`, `priority`, `project` (`null` for none), and `subIssues` as above. `tickets.ts check` reports one that isn't there.
+
+Two items that match the same issue are one piece of work: merge them into one item. When no variant of `searchIssues` works here, leave every item new and say the search was skipped.
+
+**In `match` mode, stop here.** Write nothing to the tracker. Print one line per item, then stop:
+
+```
+<key>: match <ID> (<title>, <URL>)        the same open work
+<key>: sub-issue of <ID> (<title>, <URL>)  part of a larger issue
+<key>: new                                 nothing describes it yet
+  closed: <ID> (<title>, <URL>)            a closed issue that did the same work (one line each)
+  also tracked: <ID> (<title>, <URL>)      the same work in an entry at link (one line each)
+search skipped: <why>                      only when no variant of searchIssues worked
+```
+
+**Next:**
+
+- Mode `default`: read and follow the [Confirm](references/confirm.md) reference with mode `default`, forwarding the arguments you were given minus the leading mode keyword (if the user typed one).
+- Mode `match`: stop here.

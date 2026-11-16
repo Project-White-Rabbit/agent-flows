@@ -100,7 +100,7 @@ export type IndexEntry = {
 
 const INDEX_HEADER = `# Prototypes
 
-UI mockups made with \`/dev-flows:prototype\`, newest first. Each entry links to where the mockup lives: a hosted page, the design tool, or the page kept in the repo. Entries are updated in place as a mockup changes; text outside them is left alone.
+UI mockups made with the prototype command, newest first. Each entry links to where the mockup lives: a hosted page, the design tool, or the page kept in the repo. Entries are updated in place as a mockup changes; text outside them is left alone.
 `
 
 const FIELDS = [

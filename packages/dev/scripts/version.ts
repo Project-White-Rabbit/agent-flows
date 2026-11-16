@@ -17,6 +17,11 @@ import path from "node:path"
 import { isMain } from "../src/commands/lib.ts"
 
 export const PLUGIN_JSON = ".claude-plugin/plugin.json"
+/**
+ * The dev-flows front end ships beside the base and is released with it, at
+ * the same version, so one tag names both.
+ */
+export const FRONT_END_DIR = "../../plugins/dev-flows"
 export const TAG_PREFIX = "agent-flows--v"
 
 export type Level = "patch" | "minor" | "major"
@@ -103,9 +108,19 @@ function git(args: string[]): string | undefined {
   return result.status === 0 ? result.stdout.trim() : undefined
 }
 
-function readVersion(): string | undefined {
-  return JSON.parse(fs.readFileSync(path.join(pkgDir, PLUGIN_JSON), "utf8"))
+const MANIFESTS = [PLUGIN_JSON, path.join(FRONT_END_DIR, PLUGIN_JSON)]
+
+function readVersion(manifest = PLUGIN_JSON): string | undefined {
+  return JSON.parse(fs.readFileSync(path.join(pkgDir, manifest), "utf8"))
     .version
+}
+
+/** Why the front end's version won't do, or undefined when it matches. */
+function lockstepProblem(): string | undefined {
+  const [base, frontEnd] = MANIFESTS.map(readVersion)
+  return base === frontEnd
+    ? undefined
+    : `plugins/dev-flows is ${frontEnd} but dev-flows-base is ${base}; they release together, so run \`bun run bump <patch|minor|major>\` in packages/dev to set both.`
 }
 
 function versionAt(ref: string): string | undefined {
@@ -128,7 +143,7 @@ function releasedVersions(): string[] {
 
 /** Plugin files that ship and differ between `from` and the working tree. */
 function shippedChangesSince(from: string): string[] {
-  return (git(["diff", "--name-only", from, "--relative", "--", "."]) ?? "")
+  return (git(["diff", "--name-only", from, "--", ".", FRONT_END_DIR]) ?? "")
     .split("\n")
     .filter(Boolean)
     .filter(shipsToUsers)
@@ -145,12 +160,14 @@ function bump(level: string | undefined): void {
     throw new Error(`${PLUGIN_JSON} has no version to bump`)
   }
   const next = nextVersion(from, level)
-  const file = path.join(pkgDir, PLUGIN_JSON)
-  const text = fs.readFileSync(file, "utf8")
-  fs.writeFileSync(
-    file,
-    text.replace(/("version"\s*:\s*)"[^"]*"/, `$1"${next}"`),
-  )
+  for (const manifest of MANIFESTS) {
+    const file = path.join(pkgDir, manifest)
+    const text = fs.readFileSync(file, "utf8")
+    fs.writeFileSync(
+      file,
+      text.replace(/("version"\s*:\s*)"[^"]*"/, `$1"${next}"`),
+    )
+  }
   console.log(`[version] ${current} -> ${next} (${level} past ${from})`)
 }
 
@@ -164,14 +181,16 @@ function check(baseRef: string | undefined): void {
   }
   const changed = shippedChangesSince(mergeBase)
   const head = readVersion()
-  const problem = versionProblem({
-    changed,
-    head,
-    // The base branch's version now, not where this branch started: if
-    // another PR took the next version first, this one has to move past it.
-    base: versionAt(baseRef),
-    released: releasedVersions(),
-  })
+  const problem =
+    lockstepProblem() ??
+    versionProblem({
+      changed,
+      head,
+      // The base branch's version now, not where this branch started: if
+      // another PR took the next version first, this one has to move past it.
+      base: versionAt(baseRef),
+      released: releasedVersions(),
+    })
   if (problem) {
     console.error(`[version] ${problem}`)
     process.exit(1)

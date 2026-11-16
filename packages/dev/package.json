@@ -10,6 +10,7 @@
     "check": "node scripts/build-skills.ts --check",
     "bump": "node scripts/version.ts bump",
     "check-version": "node scripts/version.ts check",
+    "e2e": "node scripts/e2e/e2e.ts",
     "test": "vitest run",
     "tsc": "tsc --noEmit",
     "validate": "bun run tsc && bun run test && bun run check"

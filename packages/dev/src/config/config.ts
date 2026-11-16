@@ -250,7 +250,7 @@ export function migrate(
   if (version > target) {
     return {
       issues: [
-        `config is version ${version}, newer than this plugin understands (${target}); upgrade the dev-flows plugin`,
+        `config is version ${version}, newer than this plugin understands (${target}); update dev-flows-base, the plugin these commands run from`,
       ],
     }
   }

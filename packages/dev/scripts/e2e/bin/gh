@@ -1,0 +1,3 @@
+#!/bin/sh
+# Runs the fake gh (fake-gh.ts) for the e2e runs; it stands first on their PATH.
+exec node "$(dirname "$0")/../fake-gh.ts" "$@"

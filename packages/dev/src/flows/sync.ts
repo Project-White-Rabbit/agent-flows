@@ -59,7 +59,7 @@ export const syncFlow: Flow = devKit.defineFlow({
   title: "{{cmd}}sync",
   frontmatter: {
     description:
-      "Commit, catch up to the base branch, push, and keep the draft PR and its issue in step with the branch. Only for the named dev-flows sync workflow, not generic commit or push requests.",
+      "Commit, catch up to the base branch, push, and keep the draft PR and its issue in step with the branch. Only for this named sync workflow, not generic commit or push requests.",
     argumentHint: {
       deriveFromModes: true,
       suffix:
@@ -200,7 +200,7 @@ These signals are the authority and **override the \`**Next:**\` block below**, 
 5. The PR body's issue line, in any form sync writes it: quoted (\`> Issue:\`) or plain (\`Issue:\`, with \`format.quoteLinks\` false), labeled \`Issue\` or named for the tracker, linking \`<ID>\` with the title after the link, or giving the issue's bare URL. Also the issue link an earlier sync tool put at the top of the body (a line named for the tracker, quoted or not, linking \`<ID>\` with the title after the link, linking \`<ID>: <title>\` as older syncs wrote it, or a bare URL).
 6. Each entry's \`findIssue\` op with \`<branch>\` this branch: it finds the \`> Branch:\` anchor line sync writes into every issue it files or refreshes, and the bare one earlier sync tools wrote. Several matches is an anomaly: take the most recently updated one, and say so in the report.
 7. A ref in recent user messages that is clearly about this work, not a passing mention.
-8. **The same work, filed by someone else.** Only with an entry at \`track\`, which is where a new issue would go. Many issues for a branch's work were filed from planning notes (by \`{{cmd}}create-tickets\`, say), by someone else, or long ago, and carry no \`> Branch:\` line. Draft the new issue first: a 5-10 word title and a 1-3 sentence description of the work, from the PR title and body, then the session, then the commits (if all three are empty, ask: "What are you working on?"). Then run the \`{{cmd}}create-tickets\` skill with \`match --branch <branch> <title>. <description>\`: it searches every issue-tracker entry the way create-tickets does before filing, judges each candidate against this branch's work, and files and changes nothing. Its line for the item decides:
+8. **The same work, filed by someone else.** Only with an entry at \`track\`, which is where a new issue would go. Many issues for a branch's work were filed from planning notes (by \`{{cmd}}create-tickets\`, say), by someone else, or long ago, and carry no \`> Branch:\` line. Draft the new issue first: a 5-10 word title and a 1-3 sentence description of the work, from the PR title and body, then the session, then the commits (if all three are empty, ask: "What are you working on?"). Then run {{flow:create-tickets}} with \`match --branch <branch> <title>. <description>\`: it searches every issue-tracker entry the way create-tickets does before filing, judges each candidate against this branch's work, and files and changes nothing. Its line for the item decides:
    - **\`match <ID>\`:** the same work, open, with no pull request attached: that's this branch's issue. 3d adds the \`> Branch:\` line, so the next sync finds it directly.
    - **\`sub-issue of <ID>\`:** part of a larger open issue, or the same work under another pull request: plan a new issue as a sub-issue of it (\`<parent>\`), so each pull request has its own issue.
    - **\`new\`:** plan a new issue from the draft.
