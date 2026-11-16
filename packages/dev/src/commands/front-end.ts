@@ -1,9 +1,10 @@
 // Writes a front-end plugin's skills from the installed base: one wrapper per
-// flow, sending `/<plugin>:<flow>` to the flow's file in dev-flows-base. The
-// build renders each wrapper once as a template (flows/claude/front-end), with
-// slots for the front end's plugin and marketplace, so this command needs
-// nothing but Node: a front end in another repo runs it from the base the
-// session already has, and FRONT-END.md walks an agent through the rest.
+// flow, sending `/<plugin>:<flow>` (or the host's form of it) to the flow's
+// file in dev-flows-base. The build renders each wrapper once per host as a
+// template (flows/<host>/front-end), with slots for the front end's plugin
+// and marketplace, so this command needs nothing but Node: a front end in
+// another repo runs it from the base the session already has, and
+// FRONT-END.md walks an agent through the rest.
 //
 // A front end can keep its own version of a flow (`--exclude`); this never
 // overwrites a skill it didn't write, and only removes wrappers it wrote.
@@ -19,24 +20,36 @@ import {
   UsageError,
 } from "./lib.ts"
 
-/** Where the base keeps the wrapper templates, relative to its root. */
-export const TEMPLATES_DIR = "flows/claude/front-end"
+/** The hosts a front end can be a plugin for. */
+export const FRONT_END_HOSTS = ["claude", "cursor", "codex", "amp"] as const
+
+export type FrontEndHost = (typeof FRONT_END_HOSTS)[number]
+
+/** Where the base keeps a host's wrapper templates, relative to its root. */
+export function templatesDir(host: FrontEndHost): string {
+  return `flows/${host}/front-end`
+}
 /** Stands for the front end's plugin name in a template. */
 export const PLUGIN_SLOT = "__FRONT_END_PLUGIN__"
 /** Stands for the front end's marketplace in a template. */
 export const MARKETPLACE_SLOT = "__FRONT_END_MARKETPLACE__"
 /** Every wrapper's notice starts with this; nothing else is ever replaced. */
-export const WRAPPER_MARK = "<!-- Generated: sends /"
+export const WRAPPER_MARK = "<!-- Generated: sends "
 
 const NAME = /^[a-z0-9][a-z0-9-]*$/
 
-const USAGE = `Usage: front-end.ts <write|check> --plugin <name> --marketplace <name> --dir <plugin dir> [--exclude <flow,flow>]
+const USAGE = `Usage: front-end.ts <write|check> --plugin <name> --marketplace <name> --dir <plugin dir> [--host <claude|cursor|codex|amp>] [--exclude <flow,flow>]
 
-  write   writes <dir>/skills/<flow>/SKILL.md for every base flow not excluded,
-          and removes wrappers it wrote earlier for flows now excluded or gone
-  check   writes nothing; exits 1 when a wrapper is missing, stale, or left over`
+  write   writes <dir>/skills/<flow>/SKILL.md (on Cursor, skills/<plugin>-<flow>)
+          for every base flow not excluded, and removes wrappers it wrote
+          earlier for flows now excluded or gone
+  check   writes nothing; exits 1 when a wrapper is missing, stale, or left over
+
+  --host  the agent host the front end is a plugin for (default claude)`
 
 export interface FrontEndArgs {
+  /** Default `claude`. */
+  host?: FrontEndHost
   plugin: string
   marketplace: string
   dir: string
@@ -54,12 +67,15 @@ export function fill(
     .replaceAll(MARKETPLACE_SLOT, marketplace)
 }
 
-/** The base's wrapper templates by flow id. */
-export function readTemplates(base: string): Map<string, string> {
-  const dir = path.join(base, TEMPLATES_DIR)
+/** The base's wrapper templates for `host`, by flow id. */
+export function readTemplates(
+  base: string,
+  host: FrontEndHost = "claude",
+): Map<string, string> {
+  const dir = path.join(base, templatesDir(host))
   if (!fs.existsSync(dir)) {
     throw new UsageError(
-      `no wrapper templates in ${dir}: the installed dev-flows-base is older than this command, or ${base} isn't dev-flows-base`,
+      `no ${host} wrapper templates in ${dir}: the installed dev-flows-base is older than this command, or ${base} isn't dev-flows-base`,
     )
   }
   const templates = new Map<string, string>()
@@ -84,11 +100,26 @@ export interface FrontEndPlan {
   missing: string[]
 }
 
+/** The directory under `skills/` a flow's skill is in: on Cursor, `<plugin>-<flow>`. */
+function skillDir(args: FrontEndArgs, flow: string): string {
+  return args.host === "cursor" ? `${args.plugin}-${flow}` : flow
+}
+
+/** The flow a directory under `skills/` is for, undoing `skillDir`. */
+function flowOfSkillDir(args: FrontEndArgs, name: string): string | undefined {
+  if (args.host !== "cursor") {
+    return name
+  }
+  const prefix = `${args.plugin}-`
+  return name.startsWith(prefix) ? name.slice(prefix.length) : undefined
+}
+
 /** The front end's own skill or command named `flow`, when it has one. */
-function ownFile(dir: string, flow: string): string | undefined {
+function ownFile(args: FrontEndArgs, flow: string): string | undefined {
+  const name = skillDir(args, flow)
   return [
-    path.join(dir, "skills", flow, "SKILL.md"),
-    path.join(dir, "commands", `${flow}.md`),
+    path.join(args.dir, "skills", name, "SKILL.md"),
+    path.join(args.dir, "commands", `${name}.md`),
   ].find((file) => fs.existsSync(file) && !isWrapper(file))
 }
 
@@ -126,19 +157,19 @@ export function planFrontEnd(
     missing: [],
   }
   for (const [flow, template] of templates) {
-    const file = path.join(args.dir, "skills", flow, "SKILL.md")
+    const file = path.join(args.dir, "skills", skillDir(args, flow), "SKILL.md")
     if (exclude.has(flow)) {
       if (fs.existsSync(file) && isWrapper(file)) {
         plan.remove.push(file)
       }
-      if (ownFile(args.dir, flow)) {
+      if (ownFile(args, flow)) {
         plan.own.push(flow)
       } else {
         plan.missing.push(flow)
       }
       continue
     }
-    const own = ownFile(args.dir, flow)
+    const own = ownFile(args, flow)
     if (own) {
       throw new UsageError(
         `${own} is the front end's own ${flow}, not a wrapper; pass --exclude ${flow} to keep it, or delete it to use the base's`,
@@ -153,9 +184,14 @@ export function planFrontEnd(
   }
   const skills = path.join(args.dir, "skills")
   if (fs.existsSync(skills)) {
-    for (const flow of fs.readdirSync(skills).sort()) {
-      const file = path.join(skills, flow, "SKILL.md")
-      if (!templates.has(flow) && fs.existsSync(file) && isWrapper(file)) {
+    for (const name of fs.readdirSync(skills).sort()) {
+      const file = path.join(skills, name, "SKILL.md")
+      const flow = flowOfSkillDir(args, name)
+      if (
+        (flow === undefined || !templates.has(flow)) &&
+        fs.existsSync(file) &&
+        isWrapper(file)
+      ) {
         plan.remove.push(file)
       }
     }
@@ -189,7 +225,14 @@ function report(plan: FrontEndPlan, base: string, wrote: boolean): void {
 
 function parse(rest: string[]): FrontEndArgs {
   const flags = parseFlags(rest)
+  const host = flags.get("host") ?? "claude"
+  if (!(FRONT_END_HOSTS as readonly string[]).includes(host)) {
+    throw new UsageError(
+      `--host must be one of ${FRONT_END_HOSTS.join(", ")}: ${host}`,
+    )
+  }
   return {
+    host: host as FrontEndHost,
     plugin: requiredFlag(flags, "plugin"),
     marketplace: requiredFlag(flags, "marketplace"),
     dir: path.resolve(requiredFlag(flags, "dir")),
@@ -207,7 +250,7 @@ function main(): void {
     {
       write: (args: FrontEndArgs) => {
         const base = baseRoot()
-        const plan = planFrontEnd(readTemplates(base), args)
+        const plan = planFrontEnd(readTemplates(base, args.host), args)
         for (const { file, content } of plan.write) {
           fs.mkdirSync(path.dirname(file), { recursive: true })
           fs.writeFileSync(file, content)
@@ -223,7 +266,7 @@ function main(): void {
       },
       check: (args: FrontEndArgs) => {
         const base = baseRoot()
-        const plan = planFrontEnd(readTemplates(base), args)
+        const plan = planFrontEnd(readTemplates(base, args.host), args)
         report(plan, base, false)
         if (plan.write.length + plan.remove.length > 0) {
           process.exitCode = 1

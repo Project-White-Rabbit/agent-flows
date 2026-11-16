@@ -1,0 +1,65 @@
+<!-- Generated from packages/dev/src/flows by `bun run build`. Do not edit by hand. -->
+
+# /<caller>-cancel
+
+You were sent here by a command of the front-end plugin named in the request (the caller): `<caller>` stands for its name. Commands below are written `/<caller>-<name>`: write and run them with the caller's name in place of `<caller>` (with caller `acme`, `/<caller>-sync` is `/acme-sync`). The arguments are what the caller passed on. `$DEV_FLOWS_BASE` is where these flow files are installed: for reading a file use the path the request or the session start gave, and in a shell, when it isn't set, write that path in its place in every command. Read flow files (this one's references, and other flows) with your file-reading tool, not a shell command. Text a step gives you to print or say (a usage block, a message) is meant as written: fill in its placeholders and change nothing else.
+
+Winds down a branch whose work is being abandoned: the destructive sibling of `/<caller>-sync`. It closes the pull request, deletes the remote branch, cancels the issue, stops the dev server `/<caller>-server` started in this worktree, and runs the repo's own teardown (`cancel.after` hooks: a database branch, dev servers, a marker a worktree setup script reads). Every vendor-specific action goes through the repo's configured integrations (`/<caller>-configure`). The local branch and working tree are left alone, for the person (or their workspace app's teardown) to remove.
+
+Load phase references only when routing reaches them. Read and follow the linked file in this same session, retaining the current mode, arguments, shared rules, and prior results. Resolve links relative to the file containing them. References are ordinary instruction files, not separately invocable skills.
+
+**CLI commands** available via Bash (paths relative to `$DEV_FLOWS_BASE/src/commands/`):
+
+| Command | Description |
+|---------|-------------|
+| `hooks.ts <subcommand>` | `run <point>... --flow <flow>` runs the repo's hooks at those points, in order, and prints what to do next: `done`, a task for you (`agent`), a failure that stops the command (`stop`), or a hook still running (`running`) |
+| `configure.ts <subcommand>` | `get <path>... [--optional]` prints configured values (`null` for an unset one with `--optional`); `integrations <capability>... [--optional]` prints the entries configured for a capability, with their values and ops. Both exit 2 when the repo isn't configured for what's asked |
+| `sync.ts <subcommand>` | `issue` prints the issue a sync recorded for the current branch, reading only |
+| `server.ts <subcommand>` | `stop` stops the dev server these commands started in this worktree, if any, and prints what it stopped (with what the repo's `server.stopped` hooks did, as `hooks`) |
+| `tickets.ts <subcommand>` | `match` ranks the tracker's recent issues against the branch's work, as create-tickets does, writing only its plan file |
+
+## Invariants
+
+- **Invoking this command is the authorization for the cleanup.** Don't ask for a second confirmation. The one question it asks is which issue, if any, belongs to the branch when the branch never named one, and in `force` mode it asks nothing.
+- **Act through the integrations' ops.** Pull requests and issues are reached only through the ops `configure.ts integrations` returns, run as given. Plain `git` is fine for the remote branch and everything local.
+- **A failed read is not an absence.** A lookup that errors (sign-in, rate limit, network) stops the command before any write: mistaking it for "no pull request" could delete a branch out from under an open one.
+- **Never touch the local branch or working tree:** no `git branch -D`, no switching branches, no reset or stash. Only what's remote, and what the repo's own hooks tear down.
+- **Change only the issue the branch names,** or one the person picks. An issue another pull request is attached to (open or merged) stays open, and one found only by its `> Branch:` line or a search is asked about, never changed in `force` mode.
+- **Run the repo's hooks around this command.** Skip this when the mode is `help`, or when another of these commands is running this one (it runs its own). Once the mode is known, before the first step's work: `node "$DEV_FLOWS_BASE/src/commands/hooks.ts" run before --flow cancel --mode <mode>`. When the command ends, finished or stopped, just before its report or before telling the user why it stopped: `node "$DEV_FLOWS_BASE/src/commands/hooks.ts" run cancel.after after --flow cancel --mode <mode> --branch <branch> --pr <N> --outcome <success, when it did its job, else failure>`, leaving out a flag whose value isn't known yet. It prints JSON with a `status`. `done`: carry on; `failures`, if any, are hooks that failed at a point that reports them rather than stops, so name them in the report. `agent`: a hook handed you `agent.task` (a prompt from the config, or what a check printed when it exited 2). Do it now, under this command's own rules (the same bar as any fix, and nothing they forbid), then run the same command again with `--after <agent.resume>` for the rest (with `agent.recheck`, that first runs the hook's check again, and it fails like any check when the task didn't satisfy it); a task you can't do with confidence is a stop: say so, and ask. With `agent.recheck` `report`, the task is a list of findings: fix each one you can with confidence and leave the rest, which is not a stop; the check runs again, and what it still finds comes back in `open` rather than as a failure. `open`, in any call's output, lists those findings by hook (`name`, `output`): keep each for the report, where it's listed as open under its hook's name. `stop`: a hook failed (after its fix, when it has one): stop this command and show the user `stop.name` and `stop.output` (the full log is at `stop.log`). `running`: a hook was still running when `--max-wait` ran out, and goes on running: run the same command again with `--wait <running.resume>` in place of any `--after`, until the status is another one, relaying `running.name` and how long it has run. When the host limits how long one command runs, add `--max-wait <a bit under that limit, in seconds>` to every `hooks.ts run`. An exit of 2 means bad arguments or an invalid config: relay its message and stop. At the end, a `stop` can't happen: report the `failures`. When `ran` lists any hook, say in the report which ran at each point, what any task for you changed, what failed, and every finding a hook's `open` left, as open; when no point ran one, leave hooks out of the report.
+
+## Modes
+
+Read the arguments you were given first. If its first token is exactly one of the mode names below, run that mode. Otherwise, when this skill documents how to route the remaining arguments (see its intro), follow that; if it doesn't, run `default` and treat the arguments you were given as its input. Follow only the selected mode's path below.
+
+| Mode | Trigger | What it does |
+|------|---------|--------------|
+| `default` | (no argument) | Close the pull request, delete the remote branch, cancel the issue, and run the repo's teardown. Invoking it is the confirmation, except for an issue found only by search, which it asks about. |
+| `force` | `force` | The same, unattended (a workspace teardown script): it asks nothing, so an issue found only by search is listed and left open. |
+| `help` | `help` | Show usage and exit without closing anything. |
+
+## Dispatch
+
+- Mode `default` or `force`: read and follow the [Run](references/run.md) reference with the current mode (`default` or `force`), forwarding the arguments you were given minus the leading mode keyword (if the user typed one).
+
+## 0. Help shortcut
+
+**Run only when mode is `help`.**
+
+If mode is `help`, print the block below verbatim and exit. No reads, no writes.
+
+> `/<caller>-cancel` winds down a branch whose work is being abandoned. Invoking it is the confirmation.
+>
+> Modes:
+>   - (no arg) -- close what applies, below
+>   - `force` -- the same, unattended (a workspace teardown script): asks nothing
+>   - `help` -- show this and exit
+>
+> What it does, each only when it applies:
+>   - closes the pull request
+>   - deletes the remote branch
+>   - cancels the issue the branch names (left open when another pull request, open or merged, is attached to it)
+>   - when the branch names no issue, looks for one (a `> Branch:` line naming the branch, then a search and create-tickets' ranking of recent issues) and asks which, if any, to cancel or mark done; `force` changes none of them
+>   - stops the dev server `/<caller>-server` started in this worktree
+>   - runs the repo's teardown (`cancel.after` hooks)
+>
+> It never deletes the local branch, switches branches, or touches the working tree. It refuses on the base branch (and the config's `repo.protectedBranches`), on a branch other branches are stacked on, and on a pull request that merged.

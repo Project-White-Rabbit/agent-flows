@@ -16,8 +16,47 @@ function flowPath(id: string): string {
     : `flows/claude/${id}/flow.md`
 }
 
+describe("every host", () => {
+  const all = renderBase()
+  const paths = (host: string) =>
+    all
+      .filter((f) => f.path.startsWith(`flows/${host}/`))
+      .map((f) => f.path.slice(`flows/${host}/`.length))
+
+  it("renders the same flow files for each host, with its own caller prefix", () => {
+    for (const [host, prefix] of [
+      ["cursor", "/<caller>-"],
+      ["codex", "$<caller>:"],
+      ["amp", "<caller>:"],
+    ]) {
+      expect(paths(host), host).toEqual(paths("claude"))
+      const sync = all.find((f) => f.path === `flows/${host}/sync/flow.md`)
+      expect(sync?.content, host).toContain(`# ${prefix}sync`)
+      expect(sync?.content, host).not.toContain("/<caller>:")
+    }
+  })
+
+  it("lists every flow for every host in the manifest", () => {
+    const manifest = JSON.parse(
+      all.find((f) => f.path === "flows/manifest.json")?.content ?? "{}",
+    )
+    expect(Object.keys(manifest.hosts)).toEqual([
+      "claude",
+      "cursor",
+      "codex",
+      "amp",
+    ])
+    for (const flows of Object.values(manifest.hosts)) {
+      expect(flows).toEqual(manifest.hosts.claude)
+    }
+  })
+})
+
 describe("dev flows", () => {
-  const files = renderBase()
+  // The Claude Code base; the other hosts render the same flows (above).
+  const files = renderBase().filter(
+    (f) => f.target === "claude" || f.path === "flows/manifest.json",
+  )
   const wrappers = renderDevFlowsFrontEnd()
   const wrapper = (id: string) =>
     wrappers.find((f) => f.path === `skills/${id}/SKILL.md`)?.content ?? ""

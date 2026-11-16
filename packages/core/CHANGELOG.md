@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - `baseTarget(host, { rootVar, flowsDir, generatedNotice? })` turns a host target into a base: each flow renders as a plain `flow.md` with its phases as `references/<phase>.md` (no skills, no frontmatter), commands are written `/<caller>:<name>` for the front-end plugin that sent the agent there, `{{pluginRoot}}` is `$<rootVar>`, and the arguments are named in plain words. Front-end plugins ship a short skill per flow that reads the base's file, so a base updates without rebuilding them.
+- `baseTarget`'s `callerCmd` option sets how the host writes a front end's command, with `<caller>` for its name (`/<caller>-` on Cursor, `$<caller>:` on Codex, `<caller>:` on Amp; `/<caller>:` by default), so a base can render its flows for every host. The entry preamble no longer says `$<rootVar>` is always set in a shell: when it isn't, the agent writes the path it was given in its place.
 - `{{flow:<id>}}` names another flow, for prose that runs it: "the `/acme:<id>` skill" on skill targets, the flow's file on a base target.
 - `TargetSpec` fields `mainFile`, `flowRef`, `entryPreamble`, and `phasePreamble`, which `baseTarget` sets.
 - `entryFrontmatterInput(flow, target)` gives a flow's entry frontmatter fields, for files that stand in for a flow under another name.

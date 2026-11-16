@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { createFlowKit } from "./kit.js"
 import { entryFrontmatterInput } from "./render.js"
 import type { FlowInput } from "./schema.js"
-import { baseTarget, claudeCode } from "./targets.js"
+import { baseTarget, claudeCode, codex } from "./targets.js"
 
 const claude = claudeCode({ plugin: "acme" })
 const kit = createFlowKit({
@@ -117,5 +117,39 @@ describe("baseTarget", () => {
       argumentHint: "[fast]",
       model: undefined,
     })
+  })
+
+  it("writes another host's caller prefix", () => {
+    const codexKit = createFlowKit({
+      targets: {
+        codex: baseTarget(codex({ plugin: "acme" }), {
+          rootVar: "ACME_BASE",
+          flowsDir: "flows/codex",
+          callerCmd: "$<caller>:",
+        }),
+      },
+    })
+    const [entry] = codexKit.renderProject([
+      {
+        flow: codexKit.defineFlow(chainFlow),
+        outputs: { codex: "flows/codex/ship/flow.md" },
+      },
+    ])
+    expect(entry?.content).toContain("# $<caller>:ship")
+    expect(entry?.content).toContain(
+      "Tell the user to run `$<caller>:configure`",
+    )
+    expect(entry?.content).toContain("`$<caller>:sync` is `$acme:sync`")
+    expect(entry?.content).toContain("$ACME_BASE/flows/codex/sync/flow.md")
+  })
+
+  it("refuses a caller prefix without <caller>", () => {
+    expect(() =>
+      baseTarget(claude, {
+        rootVar: "ACME_BASE",
+        flowsDir: "flows/claude",
+        callerCmd: "/acme:",
+      }),
+    ).toThrow(/must contain <caller>/)
   })
 })

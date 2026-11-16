@@ -15,6 +15,48 @@
       "start-work",
       "sync",
       "tickets-to-work"
+    ],
+    "cursor": [
+      "cancel",
+      "configure",
+      "create-tickets",
+      "evaluate",
+      "finish",
+      "preview",
+      "prototype",
+      "ready",
+      "server",
+      "start-work",
+      "sync",
+      "tickets-to-work"
+    ],
+    "codex": [
+      "cancel",
+      "configure",
+      "create-tickets",
+      "evaluate",
+      "finish",
+      "preview",
+      "prototype",
+      "ready",
+      "server",
+      "start-work",
+      "sync",
+      "tickets-to-work"
+    ],
+    "amp": [
+      "cancel",
+      "configure",
+      "create-tickets",
+      "evaluate",
+      "finish",
+      "preview",
+      "prototype",
+      "ready",
+      "server",
+      "start-work",
+      "sync",
+      "tickets-to-work"
     ]
   }
 }

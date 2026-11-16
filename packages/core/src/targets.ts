@@ -365,9 +365,15 @@ export interface BaseTargetOptions {
   flowsDir: string
   /** Notice on the first line of every generated file. */
   generatedNotice?: string
+  /**
+   * How the host writes a front end's command, with `<caller>` for its name:
+   * `/<caller>:` (Claude Code, the default), `/<caller>-` (Cursor),
+   * `$<caller>:` (Codex), `<caller>:` (Amp).
+   */
+  callerCmd?: string
 }
 
-/** Placeholder the agent fills with the caller's prefix. */
+/** The caller's command prefix on Claude Code. */
 const CALLER_CMD = "/<caller>:"
 
 /**
@@ -387,11 +393,18 @@ export function baseTarget(
     options.generatedNotice ?? "<!-- Generated file. Do not edit by hand. -->"
   const flowFile = (flowId: string) =>
     `${root}/${options.flowsDir}/${flowId}/flow.md`
+  const caller = options.callerCmd ?? CALLER_CMD
+  if (!caller.includes("<caller>")) {
+    throw new Error(
+      `baseTarget: callerCmd must contain <caller>: ${options.callerCmd}`,
+    )
+  }
+  const example = caller.replace("<caller>", "acme")
   return {
     ...host,
     tokens: {
       ...host.tokens,
-      cmd: CALLER_CMD,
+      cmd: caller,
       pluginRoot: root,
       pluginDirLookup: "",
     },
@@ -403,8 +416,8 @@ export function baseTarget(
     phaseReferences: true,
     mainFile: "flow.md",
     flowRef: (flowId) =>
-      `the ${flowId} flow (read \`${flowFile(flowId)}\` and follow it, with the same caller, so its commands are \`${CALLER_CMD}<name>\` too)`,
-    entryPreamble: `You were sent here by a command of the front-end plugin named in the request (the caller): \`<caller>\` stands for its name. Commands below are written \`${CALLER_CMD}<name>\`: write and run them with the caller's name in place of \`<caller>\` (with caller \`acme\`, \`${CALLER_CMD}sync\` is \`/acme:sync\`). The arguments are what the caller passed on. \`${root}\` is where these flow files are installed: in a shell it's set, and for reading a file use the path the request or the session start gave. Read flow files (this one's references, and other flows) with your file-reading tool, not a shell command. Text a step gives you to print or say (a usage block, a message) is meant as written: fill in its placeholders and change nothing else.`,
+      `the ${flowId} flow (read \`${flowFile(flowId)}\` and follow it, with the same caller, so its commands are \`${caller}<name>\` too)`,
+    entryPreamble: `You were sent here by a command of the front-end plugin named in the request (the caller): \`<caller>\` stands for its name. Commands below are written \`${caller}<name>\`: write and run them with the caller's name in place of \`<caller>\` (with caller \`acme\`, \`${caller}sync\` is \`${example}sync\`). The arguments are what the caller passed on. \`${root}\` is where these flow files are installed: for reading a file use the path the request or the session start gave, and in a shell, when it isn't set, write that path in its place in every command. Read flow files (this one's references, and other flows) with your file-reading tool, not a shell command. Text a step gives you to print or say (a usage block, a message) is meant as written: fill in its placeholders and change nothing else.`,
     phasePreamble: `This continues the flow you were following: \`<caller>\`, the arguments, and \`${root}\` mean what they did there.`,
   }
 }

@@ -12,6 +12,16 @@ On Claude Code before 2.1.275, add the marketplace first: `/plugin marketplace a
 
 Before 0.10.0 the plugin was named `agent-flows`, so its commands were `/agent-flows:…`. To move over, run `/plugin uninstall agent-flows@agent-flows`, then install `dev-flows` as above. The repo's `.agent-flows/config.json` carries over unchanged.
 
+### Cursor, Codex, and Amp
+
+The same flows ship for Cursor, Codex, and Amp: the base renders every flow once per host (`flows/<host>/`), in that host's conventions (Cursor's `/dev-flows-sync`, Codex's `$dev-flows:sync`, Amp's `dev-flows:sync`, and each host's way of asking a question). These hosts have no plugin dependencies, so install the base beside the front end:
+
+- **Cursor:** install `dev-flows` and `dev-flows-base` from this repository's marketplace (`.cursor-plugin/marketplace.json`). `dev-flows` is [`plugins/dev-flows-cursor`](../../plugins/dev-flows-cursor).
+- **Codex:** `codex plugin marketplace add Project-White-Rabbit/agent-flows`, then install `dev-flows` and `dev-flows-base` from it (`.agents/plugins/marketplace.json`). `dev-flows` is [`plugins/dev-flows-codex`](../../plugins/dev-flows-codex).
+- **Amp:** `git clone https://github.com/Project-White-Rabbit/agent-flows ~/.config/agent-flows/dev-flows-base`, and write a front end for your Amp plugin with `front-end.ts --host amp` (below).
+
+Each command finds the base itself (no startup hook tells these hosts where it is): the newest `dev-flows-base` where that host, or any other, installs plugins, else the clone at `~/.config/agent-flows/dev-flows-base`.
+
 Commands run with the `node` already on the machine (22.18+, which runs TypeScript directly). The plugins have no npm dependencies and no build step.
 
 ### Updates
@@ -513,7 +523,7 @@ The workflows ship once, in `dev-flows-base`, and the commands people type ship 
 
 `renderFrontEnd({ plugin, marketplace, flows, exclude })` (`src/flows/front-end.ts`) writes a front end's skills; `exclude` leaves out flows the front end has its own version of. The build also writes each wrapper into the base as a template (`flows/claude/front-end/<flow>/SKILL.md`, with slots for the plugin and marketplace), so a front end in another repo can write its skills from the installed base with Node alone: `node "$DEV_FLOWS_BASE/src/commands/front-end.ts" write --plugin <name> --marketplace <marketplace> --dir <plugin dir> [--exclude <flows>]`. It never overwrites a skill it didn't write, removes only wrappers it wrote, and warns about an excluded flow the front end has no command for, since the base's flows call every flow by name; `check` with the same flags writes nothing and exits 1 when the wrappers are stale.
 
-**Building a front end in another repo:** point an agent at [`FRONT-END.md`](FRONT-END.md) (in an installed base, `$DEV_FLOWS_BASE/FRONT-END.md`), for example "Follow $DEV_FLOWS_BASE/FRONT-END.md to make bitfab-dev a dev-flows front end." It walks through choosing which flows the base runs, the `dependencies` entry, the marketplace's `allowCrossMarketplaceDependenciesOn` (Claude Code won't install a dependency from another marketplace without it), writing the wrappers, and getting the team the `agent-flows` marketplace.
+**Building a front end in another repo:** point an agent at [`FRONT-END.md`](FRONT-END.md) (in an installed base, `$DEV_FLOWS_BASE/FRONT-END.md`), for example "Follow $DEV_FLOWS_BASE/FRONT-END.md to make bitfab-dev a dev-flows front end." It walks through choosing which flows the base runs, the `dependencies` entry, the marketplace's `allowCrossMarketplaceDependenciesOn` (Claude Code won't install a dependency from another marketplace without it), writing the wrappers, and getting the team the `agent-flows` marketplace. For a front end on Cursor, Codex, or Amp, `front-end.ts write --host cursor` (or `codex`, `amp`) writes that host's wrappers: Cursor's skills are `skills/<plugin>-<flow>`, and each wrapper finds the base on its own.
 
 ## Releasing
 
@@ -532,11 +542,13 @@ The version lives in `.claude-plugin/plugin.json`, because that's what Claude Co
 | `src/flows/` | Flow definitions (build time only) |
 | `src/commands/` | Scripts the skills run (`configure.ts`, `sync.ts` for sync's git state and no-op gate, `ready.ts` for ready's scope and its CI passes (settled, timed out, stalled), `hooks.ts` for running the repo's hooks at a point and trying one before it's configured, `server.ts` for a worktree's dev server: finding, starting, watching, adopting, and stopping it, and stopping the ones left by deleted worktrees, `prototype.ts` for serving a worktree's mockup pages, `tickets.ts` for create-tickets' plan checks, table, and planning document, and `work.ts` for what start-work starts, the order tickets-to-work goes in, and the lock starts take to open workspaces one at a time, and `prototype.ts` for prototype's pages folder, its local server, and its `prototype.index` record, and `front-end.ts` for writing a front end's wrapper skills from the installed base). Node built-ins only, since nothing is installed at runtime |
 | `src/config/` | The config format: capability registry (`capabilities.ts`), integration and section registry (`sections/`), capability resolution (`integrations.ts`), validation, patching, planning, detection. Runtime code, same rules |
-| `flows/` | Generated: each flow as `flows/claude/<flow>/flow.md` plus its phases in `references/`, `manifest.json` (the flow contract and the flows), and the front-end wrapper templates in `flows/claude/front-end/`. Don't edit them; run `bun run build` |
+| `flows/` | Generated: each flow once per host (`claude`, `cursor`, `codex`, `amp`) as `flows/<host>/<flow>/flow.md` plus its phases in `references/`, `manifest.json` (the flow contract and each host's flows), and each host's front-end wrapper templates in `flows/<host>/front-end/`. Don't edit them; run `bun run build` |
 | `hooks/` | The `SessionStart` hook (`src/commands/session-start.ts`) that tells each session where the base is installed |
-| `scripts/` | `build-skills.ts` renders `flows/` and the front end's `skills/`; `version.ts` bumps both plugins' version and backs the CI version checks |
+| `scripts/` | `build-skills.ts` renders `flows/` and each front end's `skills/`; `version.ts` bumps every plugin manifest's version together and backs the CI version checks |
 | `FRONT-END.md` | The prompt an agent follows to make another plugin a dev-flows front end |
 | `.claude-plugin/plugin.json` | The `dev-flows-base` manifest and version. The repo-root `.claude-plugin/marketplace.json` points here |
+| `.cursor-plugin/plugin.json`, `.codex-plugin/plugin.json` | The base's Cursor and Codex manifests, at the same version. The repo-root `.cursor-plugin/marketplace.json` and `.agents/plugins/marketplace.json` point here |
 | `../../plugins/dev-flows/` | The `dev-flows` front end: its manifest (which depends on `dev-flows-base`) and generated `skills/`, one per flow |
+| `../../plugins/dev-flows-cursor/`, `../../plugins/dev-flows-codex/` | The `dev-flows` front end for Cursor and for Codex: a manifest and generated `skills/` each |
 
 `bun run validate` typechecks, tests, and fails when a generated file is stale or a file in a generated directory isn't generated any more.
