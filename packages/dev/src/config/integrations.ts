@@ -9,6 +9,7 @@ import { INTEGRATIONS } from "../integrations/index.ts"
 import { type AccessReport, accessKey } from "./access.ts"
 import { CAPABILITIES } from "./capabilities.ts"
 import { getAt, INSTANCE_KEY, instancesOf, type RawConfig } from "./config.ts"
+import { integrationsFor } from "./custom.ts"
 import type {
   CapabilitySpec,
   IntegrationSpec,
@@ -229,7 +230,7 @@ export type CapabilityResolution = {
 export function resolveCapability(
   config: RawConfig,
   capability: string,
-  integrations: IntegrationSpec[] = INTEGRATIONS,
+  integrations: IntegrationSpec[] = integrationsFor(config),
   access: Record<string, AccessReport> = {},
   scripts: Record<string, Record<string, LoadedAdapter>> = {},
   /** Paths of the integrations this session runs inside (`runningIn`). */
@@ -306,7 +307,7 @@ export function resolveCapability(
 export function coverage(
   config: RawConfig,
   capabilities: CapabilitySpec[] = CAPABILITIES,
-  integrations: IntegrationSpec[] = INTEGRATIONS,
+  integrations: IntegrationSpec[] = integrationsFor(config),
 ): Record<string, string[]> {
   return Object.fromEntries(
     capabilities.map((c) => [

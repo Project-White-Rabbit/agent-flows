@@ -28,6 +28,7 @@ import {
   sameConfig,
   serializeConfig,
 } from "../config/config.ts"
+import { customIntegrations, integrationsFor } from "../config/custom.ts"
 import { createDetectContext, detectSections } from "../config/detect.ts"
 import { type FormatResult, formatFile } from "../config/format.ts"
 import {
@@ -55,6 +56,7 @@ import {
   writeLocal,
 } from "../config/local.ts"
 import { SECTIONS } from "../config/sections/index.ts"
+import type { SectionSpec } from "../config/types.ts"
 import { type LoadedAdapter, loadAdapters } from "../integrations/adapters.ts"
 import { INTEGRATIONS } from "../integrations/index.ts"
 import { isMain, printJson, readStdin, run, runMain } from "./lib.ts"
@@ -197,9 +199,9 @@ export function loadConfig(root: string): Loaded {
 }
 
 /** Every path `get` accepts: containers, sections, and their fields. */
-export function knownPaths(): Set<string> {
+export function knownPaths(registry: SectionSpec[] = SECTIONS): Set<string> {
   const out = new Set<string>()
-  for (const spec of SECTIONS) {
+  for (const spec of registry) {
     const parts = spec.path.split(".")
     for (let i = 1; i <= parts.length; i++) {
       out.add(parts.slice(0, i).join("."))
@@ -250,7 +252,11 @@ function get(root: string, args: string[]): void {
   if (paths.length === 0) {
     throw new Error("get needs at least one path, e.g. `get repo.baseBranch`")
   }
-  const known = knownPaths()
+  // A custom integration's paths are known once the config defines it.
+  const known = knownPaths([
+    ...SECTIONS,
+    ...customIntegrations(loadConfig(root).draft).specs,
+  ])
   const unknown = paths.filter((p) => !known.has(p))
   if (unknown.length > 0) {
     throw new Error(
@@ -330,7 +336,8 @@ async function integrations(root: string, args: string[]): Promise<void> {
   }
   // Probe only what's configured for the capabilities asked about.
   const ids = names.map((name) => (findCapability(name) as { id: string }).id)
-  const configured = INTEGRATIONS.filter(
+  const all = integrationsFor(config)
+  const configured = all.filter(
     (spec) =>
       getAt(config, spec.path) !== undefined &&
       ids.some((id) => id in spec.provides),
@@ -369,15 +376,7 @@ async function integrations(root: string, args: string[]): Promise<void> {
     (id) =>
       [
         id,
-        resolveCapability(
-          config,
-          id,
-          INTEGRATIONS,
-          access,
-          scripts,
-          here,
-          machine,
-        ),
+        resolveCapability(config, id, all, access, scripts, here, machine),
       ] as const,
   )
   const missing = resolved.filter(([, r]) => r.configured.length === 0)
@@ -413,14 +412,14 @@ function token(root: string, args: string[]): void {
   const [target, kind, value] = args
   // `linear:<instance>`: a token for one instance, over the integration's.
   const [name, instance] = (target ?? "").split(":")
-  const spec = INTEGRATIONS.find(
+  const all = integrationsFor(loadConfig(root).draft)
+  const spec = all.find(
     (s) => s.path === `integrations.${name}` || s.path === name,
   )
   if (!spec?.access.api) {
     throw new Error(
-      `token needs an integration with an API: ${INTEGRATIONS.filter(
-        (s) => s.access.api,
-      )
+      `token needs an integration with an API: ${all
+        .filter((s) => s.access.api)
         .map((s) => s.path.split(".").at(-1))
         .join(", ")}`,
     )
@@ -737,6 +736,12 @@ const HELP = `Usage: configure.ts <command>
                   Exits ${NOT_CONFIGURED_EXIT} with {"configured": false} when the config is
                   missing or invalid, or (without --optional) a capability has
                   no integration.
+  capabilities [<capability>...]
+                  Print {"capabilities": [...]}: each capability's ops and the
+                  contract each op must meet, its levels, and the built-in
+                  integrations that provide it. A custom integration (an
+                  integrations.<id> entry with a "custom" definition) conforms
+                  to these.
   write [--local [--merge | --replace]]
                   Read ${PATCH_SHAPE}
                   on stdin. Each section given replaces its entry (a list of
@@ -767,6 +772,43 @@ const HELP = `Usage: configure.ts <command>
                   and takes an empty patch to just switch.
 `
 
+/**
+ * The contract each capability's providers implement (all of them, or the
+ * ones named): its ops and what each must do, its levels, and which built-in
+ * integrations provide it. What a custom integration conforms to.
+ */
+export function capabilityContracts(names: string[] = []): {
+  id: string
+  name: string
+  purpose: string
+  ops: Record<string, string>
+  levels?: { id: string; description: string }[]
+  defaultLevel?: string
+  exclusive?: true
+  providers: string[]
+}[] {
+  const unknown = names.filter((n) => !findCapability(n))
+  if (unknown.length > 0) {
+    throw new Error(
+      `unknown capability(s): ${unknown.join(", ")} (known: ${CAPABILITIES.map((c) => c.id).join(", ")})`,
+    )
+  }
+  const chosen =
+    names.length > 0
+      ? names.map((n) => findCapability(n) as (typeof CAPABILITIES)[number])
+      : CAPABILITIES
+  return chosen.map((c) => ({
+    id: c.id,
+    name: c.name,
+    purpose: c.purpose,
+    ops: c.ops,
+    ...(c.levels ? { levels: c.levels } : {}),
+    ...(c.defaultLevel ? { defaultLevel: c.defaultLevel } : {}),
+    ...(c.exclusive ? { exclusive: true as const } : {}),
+    providers: providersOf(c.id).map((s) => s.path.split(".").at(-1) as string),
+  }))
+}
+
 /** Suggestions whose command isn't already a hook at that point. */
 export function newHookSuggestions(
   suggestions: HookSuggestion[],
@@ -792,10 +834,18 @@ async function main(): Promise<void> {
   }
   if (command === "show") {
     const loaded = loadConfig(root)
+    const custom = customIntegrations(loaded.draft).claimed.map((p) =>
+      p.slice("integrations.".length),
+    )
     printJson({
       ...loaded,
+      ...(custom.length > 0 ? { custom } : {}),
       ...(loaded.config ? { coverage: coverage(loaded.config) } : {}),
     })
+    return
+  }
+  if (command === "capabilities") {
+    printJson({ capabilities: capabilityContracts(args) })
     return
   }
   if (command === "detect") {
@@ -879,7 +929,7 @@ async function main(): Promise<void> {
     return
   }
   throw new Error(
-    `Unknown command '${command}'. Use show, detect, get, integrations, or write.`,
+    `Unknown command '${command}'. Use show, detect, get, integrations, capabilities, token, or write.`,
   )
 }
 
