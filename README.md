@@ -10,13 +10,17 @@ Write an agent workflow once as typed data. Compile it into skill files for each
 | Package | Description |
 |---|---|
 | [`@agent-flows/core`](packages/core) [![npm](https://img.shields.io/npm/v/@agent-flows/core)](https://www.npmjs.com/package/@agent-flows/core) | Typed flow schema and compiler that renders flows into skill files |
-| [`@agent-flows/dev`](packages/dev) | Dev workflow commands for any repository, shipped as the `dev-flows` Claude Code plugin ([`plugins/dev-flows`](plugins/dev-flows)) over `dev-flows-base`, which holds the workflows |
+| [`@agent-flows/dev`](packages/dev) | Dev workflow commands for any repository, shipped as the `dev-flows` plugin for Claude Code ([`plugins/dev-flows`](plugins/dev-flows)), Cursor ([`plugins/dev-flows-cursor`](plugins/dev-flows-cursor)), and Codex ([`plugins/dev-flows-codex`](plugins/dev-flows-codex)), over `dev-flows-base`, which holds the workflows for every host |
 
 ## Install the plugin
+
+Claude Code (installs `dev-flows-base` with it):
 
 ```
 /plugin install dev-flows --marketplace Project-White-Rabbit/agent-flows
 ```
+
+Cursor: install `dev-flows` and `dev-flows-base` from this repository's marketplace. Codex: `codex plugin marketplace add Project-White-Rabbit/agent-flows`, then install `dev-flows` and `dev-flows-base` from it. Amp, and front ends of your own: see [the plugin README](packages/dev/README.md#cursor-codex-and-amp).
 
 ## Contributing
 

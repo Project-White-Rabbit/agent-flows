@@ -7,10 +7,10 @@ name: Release
 # the repo. Configure the trusted publisher on the @agent-flows/core package on
 # npmjs.com: repo Project-White-Rabbit/agent-flows, workflow release.yml.
 #
-# Also tags each new version of the dev-flows Claude Code plugins as
+# Also tags each new version of the dev-flows plugins as
 # agent-flows--vX.Y.Z with a GitHub release: dev-flows-base
-# (packages/dev/.claude-plugin/plugin.json) and the dev-flows front end
-# (plugins/dev-flows/.claude-plugin/plugin.json), which share one version.
+# (packages/dev/.claude-plugin/plugin.json) and the dev-flows front ends
+# (plugins/dev-flows*, one per host), which share one version.
 # Both ship from the marketplace in this repo, so merging is what releases
 # them; the tag records which commit each version is.
 # If the version is already released but the plugin changed since, the job
