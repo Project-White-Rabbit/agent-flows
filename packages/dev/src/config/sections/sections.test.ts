@@ -1069,3 +1069,33 @@ describe("dev server detection", () => {
     expect(detectServer(checkout({ "README.md": "" }))).toBeUndefined()
   })
 })
+
+describe("a dev server the repo's own manager runs", () => {
+  const config = (server: Record<string, unknown>) => ({
+    version: 2,
+    repo: { baseBranch: "main" },
+    server,
+  })
+
+  it("takes up and its other commands in place of command", () => {
+    expect(
+      checkConfig(
+        config({
+          up: "dsm up -p bitfab",
+          down: "dsm down -p bitfab",
+          restart: "dsm restart -p bitfab",
+          list: "dsm ls",
+        }),
+      ).issues,
+    ).toEqual([])
+  })
+
+  it("refuses up beside command, and the manager's commands without up", () => {
+    expect(
+      checkConfig(config({ command: "bun run dev", up: "dsm up" })).issues,
+    ).toEqual(["server.up and server.command can't both be set: set one"])
+    expect(
+      checkConfig(config({ command: "bun run dev", down: "dsm down" })).issues,
+    ).toEqual(["server.down needs server.up: set it too, or remove this"])
+  })
+})

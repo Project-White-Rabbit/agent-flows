@@ -117,6 +117,14 @@ export type FieldSpec = {
   /** A rule the value as a whole must meet, past its type and pattern: what's wrong, or undefined. */
   check?(value: FieldValue): string | undefined
   /**
+   * Another field of the same entry this one is set in place of: setting both
+   * is an error. The example config leaves this one (and the fields that
+   * `need` it) out, so it shows the usual choice.
+   */
+  alternativeTo?: string
+  /** Another field of the same entry this one only means anything with. */
+  needs?: string
+  /**
    * Why a valid value looks true only for one person or machine (a path in
    * someone's home folder, a Slack DM): a warning, not an error, since the
    * committed config is the team's and the value may still be meant.

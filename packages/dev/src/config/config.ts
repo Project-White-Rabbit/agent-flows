@@ -373,6 +373,19 @@ function checkEntry(
     if (field.required && entry[field.key] === undefined) {
       issues.push(`${where}.${field.key} is required`)
     }
+    if (entry[field.key] === undefined) {
+      continue
+    }
+    if (field.alternativeTo && entry[field.alternativeTo] !== undefined) {
+      issues.push(
+        `${where}.${field.key} and ${where}.${field.alternativeTo} can't both be set: set one`,
+      )
+    }
+    if (field.needs && entry[field.needs] === undefined) {
+      issues.push(
+        `${where}.${field.key} needs ${where}.${field.needs}: set it too, or remove this`,
+      )
+    }
   }
   return issues
 }
@@ -1039,10 +1052,18 @@ export function planConfig(
 export function exampleConfig(registry: SectionSpec[] = SECTIONS): RawConfig {
   const out: RawConfig = { version: CONFIG_VERSION }
   for (const spec of registry) {
+    // A field set in place of another, and what needs it, stay out: the
+    // example shows the usual choice.
+    const left = new Set(
+      spec.fields.filter((f) => f.alternativeTo).map((f) => f.key),
+    )
+    const shown = spec.fields.filter(
+      (f) => !left.has(f.key) && !(f.needs && left.has(f.needs)),
+    )
     setAt(
       out,
       spec.path,
-      Object.fromEntries(spec.fields.map((f) => [f.key, f.example])),
+      Object.fromEntries(shown.map((f) => [f.key, f.example])),
     )
   }
   return normalize(out, registry)
