@@ -25,6 +25,10 @@ const PORT_RANGE: FieldPattern = {
   hint: "a range of ports like `3001-3099`",
 }
 
+/** What a manager command (`server.up` and friends) gets, for its description. */
+const MANAGER_PLACEHOLDERS =
+  "Runs from the repo root, with the branch as `$BRANCH` and `{branch}`, the worktree's path as `$WORKTREE` and `{worktree}` (each shell-quoted), and, with `ports`, the worktree's port as `$PORT` and `{port}`"
+
 /** Script names that start a dev server, most likely first. */
 const DEV_SCRIPTS = ["dev", "start:dev", "serve", "start"]
 
@@ -67,7 +71,7 @@ export const server: SectionSpec = {
     {
       key: "command",
       description:
-        "Command that starts the dev server from the repo root and keeps it running. Dev-flows runs it in the background when this checkout has no server running, its output in a log in the repo's git dir, and waits until it answers",
+        "Command that starts the dev server from the repo root and keeps it running. Dev-flows runs it in the background when this checkout has no server running, its output in a log in the repo's git dir, and waits until it answers. Set `up` instead when a manager of the repo's own runs its servers",
       example: "bun run dev",
     },
     {
@@ -88,7 +92,7 @@ export const server: SectionSpec = {
       key: "idleTimeout",
       type: "number",
       description:
-        "Minutes a server the commands started may go with nothing connected to it (no page open on it) before it's stopped (default 240; 0: never). One is also stopped once its worktree is deleted, whatever this says",
+        "Minutes a server the commands started may go with nothing connected to it (no page open on it) before it's stopped (default 240; 0: never). One is also stopped once its worktree is deleted, whatever this says. Not for a server `up` starts: its manager decides",
       example: 60,
     },
     {
@@ -98,10 +102,41 @@ export const server: SectionSpec = {
       example: "3001-3099",
       pattern: PORT_RANGE,
     },
+    {
+      key: "up",
+      description: `For a repo whose dev servers a manager of its own runs (a daemon, a process manager, a script that starts servers in the background): the command that starts this worktree's server through it and returns once it's started, set instead of \`command\`. Dev-flows then runs no watchdog and stops nothing on its own: the manager owns the server, and \`down\` stops it. The URL comes from \`status\`, else the first URL \`up\` prints, else \`url\` (on the \`ports\` port). ${MANAGER_PLACEHOLDERS}`,
+      example: "dsm up -p bitfab",
+      alternativeTo: "command",
+    },
+    {
+      key: "down",
+      description: `With \`up\`: the command that stops this worktree's server through the manager (\`/<plugin>:server stop\`, and finish and cancel once the work is over). ${MANAGER_PLACEHOLDERS}`,
+      example: "dsm down -p bitfab",
+      needs: "up",
+    },
+    {
+      key: "restart",
+      description: `With \`up\`: the command that restarts this worktree's server through the manager (default: \`down\`, then \`up\`). ${MANAGER_PLACEHOLDERS}`,
+      example: "dsm restart -p bitfab",
+      needs: "up",
+    },
+    {
+      key: "status",
+      description: `With \`up\`: a command that prints this worktree's server URL and exits 0 while it runs, and exits non-zero (or prints no URL) when it doesn't, so a running server is found without starting it again. Without it, \`up\` runs every time (fine for a manager whose \`up\` leaves a running server as it is). ${MANAGER_PLACEHOLDERS}`,
+      example:
+        "node -e 'console.log(require(\"./.bitfab/config.local.json\").serviceUrl)'",
+      needs: "up",
+    },
+    {
+      key: "list",
+      description: `With \`up\`: a command that lists the servers the manager runs across the repo's worktrees, shown as it prints it (\`/<plugin>:server list\`). ${MANAGER_PLACEHOLDERS}`,
+      example: "dsm ls",
+      needs: "up",
+    },
     hookField("server.started"),
     hookField("server.stopped"),
   ],
   detect: detectServer,
   lookup:
-    "Leave it out when the repo has no dev server (a library, a CLI). Detection proposes `command` from a root `dev` (else `start:dev`, `serve`, or a `start` that isn't a production server) script. Set it by hand for a monorepo whose app has its own (`bun run --cwd apps/web dev`), and set `url` when the server always serves the same address and prints none",
+    "Leave it out when the repo has no dev server (a library, a CLI). Detection proposes `command` from a root `dev` (else `start:dev`, `serve`, or a `start` that isn't a production server) script. Set it by hand for a monorepo whose app has its own (`bun run --cwd apps/web dev`), and set `url` when the server always serves the same address and prints none. When the repo's instructions start servers through a manager of their own (a command that starts them in the background and returns, with commands to stop and list them), set `up`, `down`, and the others it has instead of `command`",
 }

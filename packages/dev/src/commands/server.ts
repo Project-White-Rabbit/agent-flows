@@ -21,6 +21,7 @@
 
 import { spawn } from "node:child_process"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { getAt } from "../config/config.ts"
 import { hookPoint } from "../config/hooks.ts"
@@ -76,10 +77,14 @@ export type Proc = { pid: number; ppid: number; command: string }
 /** The servers these commands started, by the worktree each serves. */
 export type Registry = Record<string, ServerState>
 
-/** A server dev-flows started, stopped because nothing needs it any more. */
+/**
+ * A server dev-flows started, stopped because nothing needs it any more; or,
+ * for a server a manager runs (`server.up`), the one its `down` stopped (no
+ * `pid`: the manager knows its processes).
+ */
 export type Reaped = {
   worktree: string
-  pid: number
+  pid?: number
   command: string
   /** Its `server.stopped` hooks, when any ran. */
   hooks?: ServerHooks
@@ -129,10 +134,31 @@ export type ServerResult = {
   port?: number
   /** The repo's `server.started` hooks, when any ran. */
   hooks?: ServerHooks
+  /**
+   * The repo's own manager runs the server (`server.up`): no watchdog, and
+   * dev-flows stops it only through `server.down`.
+   */
+  managed?: boolean
+  /** Why it failed, when no exit code says (a URL that can't be known). */
+  reason?: string
+}
+
+/**
+ * The commands of a manager the repo runs its servers with (`server.up` and
+ * the rest), when it has one.
+ */
+export type Manager = {
+  up: string
+  down: string | null
+  restart: string | null
+  status: string | null
+  list: string | null
 }
 
 export type Settings = {
   command: string | null
+  /** `server.up` and the rest: a manager runs the servers instead. */
+  manager?: Manager | null
   url: string | null
   /** `server.ports`: the range a worktree's port comes from, or none. */
   ports: [number, number] | null
@@ -576,6 +602,11 @@ function choosePort(
     fs.writeFileSync(file, `${JSON.stringify(ports, null, 2)}\n`)
   }
   return port
+}
+
+/** The port this worktree was given from `server.ports` last time, if any. */
+function rememberedPort(dir: string, root: string): number | undefined {
+  return readJson<Record<string, number>>(path.join(dir, "ports.json"))?.[root]
 }
 
 /** Where a recorded server served, for its hooks. */
@@ -1167,12 +1198,377 @@ function settingsOf(root: string, flags: Map<string, string>): Settings {
       `server.ports must be a range of ports like 3001-3099: ${portsText}`,
     )
   }
+  const command = flags.get("command") ?? str("command")
+  const up = str("up")
+  if (str("command") && up) {
+    throw new UsageError(
+      "server.command and server.up can't both be set: set one",
+    )
+  }
   return {
-    command: flags.get("command") ?? str("command"),
+    command,
+    // A --command given here is a server dev-flows runs, whatever the config.
+    manager:
+      up && !flags.has("command")
+        ? {
+            up,
+            down: str("down"),
+            restart: str("restart"),
+            status: str("status"),
+            list: str("list"),
+          }
+        : null,
     url,
     ports,
     timeout,
     idleTimeout,
+  }
+}
+
+/** `text` quoted for a POSIX shell. */
+function shellQuote(text: string): string {
+  return `'${text.replaceAll("'", `'\\''`)}'`
+}
+
+/** What a manager command is given: the branch, the worktree, the port. */
+export type ManagerVars = { branch: string; worktree: string; port?: number }
+
+/** A manager command with `{branch}`, `{worktree}`, and `{port}` filled in. */
+export function managerCommand(command: string, vars: ManagerVars): string {
+  const filled = command
+    .replaceAll("{branch}", shellQuote(vars.branch))
+    .replaceAll("{worktree}", shellQuote(vars.worktree))
+  return vars.port === undefined
+    ? filled
+    : filled.replaceAll("{port}", String(vars.port))
+}
+
+/** The same values as environment variables. */
+function managerEnv(vars: ManagerVars): Record<string, string> {
+  return {
+    BRANCH: vars.branch,
+    WORKTREE: vars.worktree,
+    ...(vars.port === undefined ? {} : { PORT: String(vars.port) }),
+  }
+}
+
+/** This worktree's branch, or its commit when it has none checked out. */
+function branchOf(root: string): string {
+  const branch = run("git", ["branch", "--show-current"], root).stdout.trim()
+  return (
+    branch || run("git", ["rev-parse", "--short", "HEAD"], root).stdout.trim()
+  )
+}
+
+export type ShellRun = {
+  /** Its exit code; null when it ran out of time (and was stopped). */
+  exitCode: number | null
+  timedOut: boolean
+  /** What it printed, stdout and stderr together, without colors. */
+  output: string
+}
+
+/**
+ * Run `command` with `sh` from `root` and wait for it to exit, up to
+ * `seconds`. Its output goes to a file (`log`, else a temporary one), never a
+ * pipe: a manager's `up` may leave a daemon holding its output open, and a
+ * pipe would wait on that daemon rather than on the command.
+ */
+export async function runShell(
+  root: string,
+  command: string,
+  env: Record<string, string>,
+  seconds: number,
+  log?: string,
+): Promise<ShellRun> {
+  const file =
+    log ??
+    path.join(
+      os.tmpdir(),
+      `agent-flows-server-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
+    )
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const out = fs.openSync(file, "w")
+  const child = spawn("sh", ["-c", command], {
+    cwd: root,
+    detached: true,
+    stdio: ["ignore", out, out],
+    env: { ...process.env, ...env },
+  })
+  fs.closeSync(out)
+  const ended = await new Promise<{ code: number | null; timedOut: boolean }>(
+    (resolve) => {
+      const timer = setTimeout(() => {
+        try {
+          process.kill(-(child.pid as number), "SIGTERM")
+        } catch {
+          child.kill("SIGTERM")
+        }
+        resolve({ code: null, timedOut: true })
+      }, seconds * 1000)
+      child.on("exit", (code, signal) => {
+        clearTimeout(timer)
+        resolve({ code: code ?? (signal ? 1 : 0), timedOut: false })
+      })
+      child.on("error", () => {
+        clearTimeout(timer)
+        resolve({ code: 127, timedOut: false })
+      })
+    },
+  )
+  let output = ""
+  try {
+    output = fs.readFileSync(file, "utf8").replace(ANSI, "")
+  } catch {
+    // Nothing printed.
+  }
+  if (!log) {
+    fs.rmSync(file, { force: true })
+  }
+  return { exitCode: ended.code, timedOut: ended.timedOut, output }
+}
+
+/** The last `lines` lines of some output, trimmed. */
+function lastLines(text: string, lines = 30): string {
+  return text.split("\n").slice(-lines).join("\n").trim()
+}
+
+/** How long one look through `server.status` may take, in seconds. */
+const STATUS_SECONDS = 30
+
+/** How a manager's server is run: its commands, what they're given, where to log. */
+export type ManagedRun = {
+  root: string
+  /** Where `up` (or `restart`) writes its output. */
+  log: string
+  manager: Manager
+  vars: ManagerVars
+  settings: Settings
+  /** Whether anything answers at a URL (tests stand in for it). */
+  answers(url: string): Promise<boolean>
+}
+
+/** The URL `server.status` prints while the server runs, if it's set and does. */
+async function managedUrl(m: ManagedRun): Promise<string | undefined> {
+  if (!m.manager.status) {
+    return undefined
+  }
+  const looked = await runShell(
+    m.root,
+    managerCommand(m.manager.status, m.vars),
+    managerEnv(m.vars),
+    Math.min(STATUS_SECONDS, m.settings.timeout),
+  )
+  return looked.exitCode === 0 ? urlFromLog(looked.output) : undefined
+}
+
+/** Where the manager's server serves when nothing it printed says: the config. */
+function configuredUrl(m: ManagedRun): string | undefined {
+  if (m.vars.port !== undefined) {
+    return onPort(m.settings.url, m.vars.port)
+  }
+  return m.settings.url ?? undefined
+}
+
+/**
+ * Whether the manager's server for this worktree runs: `server.status`'s URL,
+ * when it answers. Undefined when it doesn't, or there's no `server.status`.
+ */
+export async function findManaged(
+  m: ManagedRun,
+): Promise<ServerResult | undefined> {
+  const url = await managedUrl(m)
+  if (url && (await m.answers(url))) {
+    return {
+      status: "running",
+      url,
+      servers: [],
+      ours: false,
+      watched: false,
+      managed: true,
+      ...(m.vars.port === undefined ? {} : { port: m.vars.port }),
+    }
+  }
+  return undefined
+}
+
+/**
+ * Start (or, with `restart`, restart) the manager's server for this worktree
+ * and wait until it answers: `server.up` (or `server.restart`, else
+ * `server.down` then `server.up`), then its URL from `server.status`, else
+ * the first URL the command printed, else the config's, until
+ * `server.timeout` runs out.
+ */
+export async function startManaged(
+  m: ManagedRun,
+  restart = false,
+): Promise<ServerResult> {
+  const deadline = Date.now() + m.settings.timeout * 1000
+  const seconds = () => Math.max(1, (deadline - Date.now()) / 1000)
+  const env = managerEnv(m.vars)
+  const base = {
+    servers: [] as Listener[],
+    ours: false,
+    watched: false,
+    managed: true,
+    log: m.log,
+    ...(m.vars.port === undefined ? {} : { port: m.vars.port }),
+  }
+  let command = managerCommand(m.manager.up, m.vars)
+  if (restart && m.manager.restart) {
+    command = managerCommand(m.manager.restart, m.vars)
+  } else if (restart && m.manager.down) {
+    // Stopping nothing is fine: `up` starts it either way.
+    await runShell(
+      m.root,
+      managerCommand(m.manager.down, m.vars),
+      env,
+      seconds(),
+    )
+  }
+  const ran = await runShell(m.root, command, env, seconds(), m.log)
+  const failed = (extra: Partial<ServerResult>): ServerResult => ({
+    status: "failed",
+    url: null,
+    ...base,
+    command,
+    tail: lastLines(ran.output),
+    ...extra,
+  })
+  if (ran.timedOut) {
+    return {
+      status: "timeout",
+      url: null,
+      ...base,
+      command,
+      tail: lastLines(ran.output),
+    }
+  }
+  if (ran.exitCode !== 0) {
+    return failed({ exitCode: ran.exitCode })
+  }
+  const printed = urlFromLog(ran.output)
+  let url: string | undefined
+  while (Date.now() < deadline) {
+    url = (await managedUrl(m)) ?? printed ?? configuredUrl(m)
+    if (!url) {
+      return failed({
+        exitCode: 0,
+        reason:
+          "the server's URL isn't known: the command printed none, and the config sets neither server.status, server.url, nor server.ports",
+      })
+    }
+    if (await m.answers(url)) {
+      const hooks = serverHooks(m.root, "server.started", {
+        url,
+        port: m.vars.port ?? portOf(url),
+      })
+      return {
+        status: "started",
+        url,
+        ...base,
+        command,
+        ...(hooks ? { hooks } : {}),
+      }
+    }
+    await sleep(1000)
+  }
+  return {
+    status: "timeout",
+    url: url ?? null,
+    ...base,
+    command,
+    tail: lastLines(ran.output),
+  }
+}
+
+/** Stop the manager's server for this worktree through `server.down`. */
+export async function stopManaged(
+  m: ManagedRun,
+  all: boolean,
+): Promise<{ stopped: Reaped[]; reason?: string; output?: string }> {
+  if (all) {
+    return {
+      stopped: [],
+      reason:
+        "the repo's own manager (server.up) runs its servers, so stopping every one is the manager's to do; server.list shows them",
+    }
+  }
+  if (!m.manager.down) {
+    return {
+      stopped: [],
+      reason:
+        "server.down isn't set, so these commands can't stop a server the repo's manager runs",
+    }
+  }
+  const url = (await managedUrl(m)) ?? configuredUrl(m) ?? null
+  const command = managerCommand(m.manager.down, m.vars)
+  const ran = await runShell(
+    m.root,
+    command,
+    managerEnv(m.vars),
+    m.settings.timeout,
+  )
+  const output = lastLines(ran.output)
+  if (ran.exitCode !== 0) {
+    return {
+      stopped: [],
+      reason: ran.timedOut
+        ? `server.down was still running after ${m.settings.timeout} seconds`
+        : `server.down exited ${ran.exitCode}`,
+      ...(output ? { output } : {}),
+    }
+  }
+  const hooks = serverHooks(m.root, "server.stopped", {
+    url,
+    port: m.vars.port ?? (url ? portOf(url) : undefined),
+  })
+  return {
+    stopped: [{ worktree: m.root, command, ...(hooks ? { hooks } : {}) }],
+    ...(output ? { output } : {}),
+  }
+}
+
+/** What `server.list` prints, or null when it isn't set or fails. */
+async function listManaged(
+  m: ManagedRun,
+): Promise<{ output: string | null; reason?: string }> {
+  if (!m.manager.list) {
+    return { output: null }
+  }
+  const ran = await runShell(
+    m.root,
+    managerCommand(m.manager.list, m.vars),
+    managerEnv(m.vars),
+    Math.min(STATUS_SECONDS, m.settings.timeout),
+  )
+  return ran.exitCode === 0
+    ? { output: ran.output.trim() }
+    : {
+        output: lastLines(ran.output) || null,
+        reason: `server.list exited ${ran.exitCode ?? "after timing out"}`,
+      }
+}
+
+/** The run `startManaged` and the rest take, for this worktree. */
+function managedRun(
+  dir: string,
+  root: string,
+  settings: Settings,
+  manager: Manager,
+  port: number | undefined,
+): ManagedRun {
+  return {
+    root,
+    log: logFile(dir, root),
+    manager,
+    vars: {
+      branch: branchOf(root),
+      worktree: root,
+      ...(port === undefined ? {} : { port }),
+    },
+    settings,
+    answers,
   }
 }
 
@@ -1262,6 +1658,19 @@ const USAGE = `Usage: server.ts <subcommand>
                      with the tree that started it, up to the shell it runs
                      in (never a shell, or what this runs under). Then starts
                      --command (else server.command) as start does
+  restart [--command <cmd>] [--url <url>] [--timeout <seconds>]
+                     Stop the server these commands started in this worktree
+                     (if any) and start it again, as start does
+
+  With server.up, the repo's own manager runs its servers, and these run its
+  commands instead (from the repo root, with $BRANCH, $WORKTREE, and, with
+  server.ports, $PORT, also as {branch}, {worktree}, and {port}): start runs
+  server.status and, when the URL it prints answers, prints running; else
+  server.up, then waits until the URL (server.status's, else the first one
+  server.up printed, else server.url) answers. restart runs server.restart
+  (else server.down, then server.up). stop runs server.down (stop --all is
+  the manager's to do). list adds what server.list prints, as output. No
+  watchdog: the manager decides when its servers stop. Each prints managed.
 
   Each run but status first stops the servers these commands started for
   worktrees that are gone, and prints them as reaped. Each server it starts
@@ -1290,7 +1699,8 @@ export async function main(argv: string[]): Promise<void> {
     command !== "status" &&
     command !== "stop" &&
     command !== "list" &&
-    command !== "adopt"
+    command !== "adopt" &&
+    command !== "restart"
   ) {
     console.log(USAGE)
     process.exitCode = command && command !== "help" ? 1 : 0
@@ -1302,11 +1712,33 @@ export async function main(argv: string[]): Promise<void> {
     const dir = stateDir("server", { cwd: root, shared: true })
     // Where preview kept the one server it started, before this command.
     migrateLegacy(dir, root, stateDir("preview", { cwd: root }))
-    if (command === "stop") {
-      printJson(await stop(dir, root, flags.has("all")))
-      return
-    }
-    if (command === "list") {
+    if (command === "stop" || command === "list") {
+      // Stopping must work whatever else the config gets wrong: finish and
+      // cancel run it once the work is over.
+      let settings: Settings | undefined
+      try {
+        settings = settingsOf(root, flags)
+      } catch {
+        settings = undefined
+      }
+      const manager = settings?.manager
+      const managed =
+        settings && manager
+          ? managedRun(dir, root, settings, manager, rememberedPort(dir, root))
+          : undefined
+      if (command === "stop") {
+        if (managed) {
+          const reaped = await reap(dir, root)
+          printJson({
+            ...(await stopManaged(managed, flags.has("all"))),
+            reaped,
+            managed: true,
+          })
+          return
+        }
+        printJson(await stop(dir, root, flags.has("all")))
+        return
+      }
       const reaped = await reap(dir, root)
       printJson({
         servers: Object.entries(readRegistry(dir)).map(([worktree, s]) => ({
@@ -1314,11 +1746,81 @@ export async function main(argv: string[]): Promise<void> {
           here: worktree === root,
           ...s,
         })),
+        ...(managed ? { managed: true, ...(await listManaged(managed)) } : {}),
         reaped,
       })
       return
     }
     const settings = settingsOf(root, flags)
+    if (settings.manager) {
+      const manager = settings.manager
+      const looking = command === "status"
+      const reaped = looking ? [] : await reap(dir, root)
+      const extra = reaped.length > 0 ? { reaped } : {}
+      let port = rememberedPort(dir, root)
+      if (port === undefined && settings.ports && !looking) {
+        port = choosePort(dir, root, settings.ports)
+        if (port === undefined) {
+          printJson({ ...noFreePort(settings), ...extra })
+          process.exitCode = 1
+          return
+        }
+      }
+      const managed = managedRun(dir, root, settings, manager, port)
+      if (command !== "restart") {
+        const found = await findManaged(managed)
+        if (found || looking) {
+          printJson(
+            found ?? {
+              status: "stopped",
+              url: null,
+              servers: [],
+              ours: false,
+              managed: true,
+            },
+          )
+          return
+        }
+      }
+      // `adopt` has nothing to take over: the manager runs the server.
+      const result = await startManaged(managed, command === "restart")
+      printJson({ ...result, ...extra })
+      if (result.status === "failed" || result.status === "timeout") {
+        process.exitCode = 1
+      }
+      return
+    }
+    if (command === "restart") {
+      const { stopped, reaped } = await stop(dir, root, false)
+      const extra = reaped.length > 0 ? { reaped } : {}
+      const replaced = stopped[0] ? { replaced: stopped[0] } : {}
+      if (!settings.command) {
+        printJson({
+          status: "unconfigured",
+          url: null,
+          servers: [],
+          ours: false,
+          ...replaced,
+          ...extra,
+        })
+        return
+      }
+      const launch = launchSettings(dir, root, {
+        ...settings,
+        command: settings.command,
+      })
+      if (!launch) {
+        printJson({ ...noFreePort(settings), ...replaced, ...extra })
+        process.exitCode = 1
+        return
+      }
+      const result = await start(root, dir, launch)
+      printJson({ ...result, ...replaced, ...extra })
+      if (result.status !== "started") {
+        process.exitCode = 1
+      }
+      return
+    }
     if (command === "adopt") {
       if (!settings.command) {
         throw new UsageError(
