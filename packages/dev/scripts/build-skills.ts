@@ -1,5 +1,6 @@
-// Render the dev-flows-base plugin's flow files (this package) and the
-// dev-flows front end's wrapper skills (plugins/dev-flows). With --check,
+// Render the dev-flows-base plugin's flow files and front-end wrapper
+// templates (this package), and the dev-flows front end's wrapper skills
+// (plugins/dev-flows). With --check,
 // write nothing and fail when a generated file is stale or a file in a
 // generated directory isn't generated any more, so CI catches a flow edited
 // without regenerating, generated output edited by hand, or a removed flow
@@ -8,7 +9,11 @@
 import fs from "node:fs"
 import path from "node:path"
 import { type GeneratedFile, writeGeneratedFiles } from "@agent-flows/core"
-import { renderBase, renderDevFlowsFrontEnd } from "../src/flows/index.ts"
+import {
+  renderBase,
+  renderDevFlowsFrontEnd,
+  renderFrontEndTemplates,
+} from "../src/flows/index.ts"
 
 const check = process.argv.includes("--check")
 const packageDir = path.resolve(import.meta.dirname, "..")
@@ -22,7 +27,11 @@ interface Output {
 }
 
 const outputs: Output[] = [
-  { rootDir: packageDir, generatedDirs: ["flows"], files: renderBase() },
+  {
+    rootDir: packageDir,
+    generatedDirs: ["flows"],
+    files: [...renderBase(), ...renderFrontEndTemplates()],
+  },
   {
     rootDir: path.join(repoDir, "plugins", "dev-flows"),
     generatedDirs: ["skills"],

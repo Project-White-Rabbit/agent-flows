@@ -1,4 +1,9 @@
 import type { FlowOutputs, GeneratedFile } from "@agent-flows/core"
+import {
+  MARKETPLACE_SLOT,
+  PLUGIN_SLOT,
+  TEMPLATES_DIR,
+} from "../commands/front-end.ts"
 import { cancelFlow } from "./cancel.ts"
 import { configureFlow } from "./configure.ts"
 import { createTicketsFlow } from "./create-tickets.ts"
@@ -57,6 +62,22 @@ export function renderManifest(): GeneratedFile {
     path: "flows/manifest.json",
     content: `${JSON.stringify(manifest, null, 2)}\n`,
   }
+}
+
+/**
+ * Every flow's wrapper skill with slots for the front end's plugin and
+ * marketplace, so `front-end.ts` can write a front end's skills from the
+ * installed base with Node alone.
+ */
+export function renderFrontEndTemplates(): GeneratedFile[] {
+  return renderFrontEnd({
+    plugin: PLUGIN_SLOT,
+    marketplace: MARKETPLACE_SLOT,
+    flows: DEV_FLOWS,
+  }).map((file) => ({
+    ...file,
+    path: `${TEMPLATES_DIR}/${file.flowId}/SKILL.md`,
+  }))
 }
 
 /** The base's generated files: every flow, and the manifest. */
