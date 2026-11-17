@@ -55,7 +55,7 @@ If mode is `help`, print the block below verbatim and exit. No reads, no writes.
 >   - `remote` -- remote only: refresh the PR and its issue. No commits, catch-up, or push; never creates a PR.
 >   - `help` -- show this and exit
 >
-> Pass an issue id (`<caller>:sync ENG-123`) to link the branch to that issue. `--tracker <entry>` files a new issue in that issue tracker, when the repo has several, and `--tracker-project <name>` puts the issue in that project. `--leave-issue` (finish passes it unless `finish.issueOnMerge` is `close`) links the issue but never files or changes one. `--no-catch-up` commits and pushes without merging, rebasing, or restacking onto the base. The config's `sync.catchUp` picks merge (the default) or rebase for a branch with no stacking integration.
+> Pass an issue id (`<caller>:sync ENG-123`) to link the branch to that issue. `--tracker <entry>` files a new issue in that issue tracker, when the repo has several, and `--tracker-project <name>` puts the issue in that project. `--leave-issue` (finish passes it unless `finish.issueOnMerge` is `close`) links the issue but never files or changes one. `--no-catch-up` commits and pushes without merging, rebasing, or restacking onto the base. The config's `sync.catchUp` picks merge (the default) or rebase for a branch with no stacking integration, and a stacking integration's restack may follow it too.
 >
 > It refuses on a branch the config's `repo.protectedBranches` lists, and stops rather than guess when a pull request, mergeability, or issue lookup fails.
 >

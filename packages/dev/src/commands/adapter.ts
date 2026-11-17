@@ -132,12 +132,16 @@ export async function main(argv: string[]): Promise<void> {
   const base = loaded.config
     ? getAt(loaded.config, "repo.baseBranch")
     : undefined
+  const catchUp = loaded.config
+    ? getAt(loaded.config, "sync.catchUp")
+    : undefined
   printJson(
     await adapter.run({
       values: withoutUse(values),
       args,
       token,
       ...(typeof base === "string" ? { base } : {}),
+      ...(catchUp === "merge" || catchUp === "rebase" ? { catchUp } : {}),
       fetch: globalThis.fetch,
     }),
   )

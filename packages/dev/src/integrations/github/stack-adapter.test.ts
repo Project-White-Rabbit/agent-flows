@@ -337,6 +337,156 @@ describe("restack", () => {
   })
 })
 
+describe("restack by rebase", () => {
+  const rebasing = (sh: Shell): StackContext => ({
+    ...ctxOf(sh),
+    catchUp: "rebase",
+  })
+  const lease = () =>
+    spawnSync("git", ["config", "--get", "branch.c.stackLease"], {
+      cwd: work,
+      encoding: "utf8",
+    }).stdout.trim()
+
+  /** p moves on by p2 on origin, after c was pushed on p1. */
+  function parentMoves(): string {
+    stackOfTwo()
+    const cRemote = git(work, "rev-parse", "origin/c")
+    git(work, "switch", "-q", "p")
+    commit(work, "p2.txt", "p2\n", "p2")
+    git(work, "push", "-q", "origin", "p")
+    git(work, "switch", "-q", "c")
+    return cRemote
+  }
+
+  it("rebases onto the parent, then submit pushes over exactly the tip it read", async () => {
+    const cRemote = parentMoves()
+    const sh = fakeShell(work, listing([pr(1, "p", "main"), pr(2, "c", "p")]))
+    expect(await restackOp(rebasing(sh))).toEqual({
+      branch: "c",
+      parent: "p",
+      rebased: 1,
+      folded: 0,
+    })
+    expect(git(work, "log", "--format=%s", "origin/p..HEAD")).toBe("c1")
+    expect(git(work, "rev-list", "--merges", "--count", "HEAD")).toBe("0")
+    expect(git(work, "rev-list", "--count", "HEAD..origin/p")).toBe("0")
+    expect(lease()).toBe(cRemote)
+
+    expect(await submitOp(rebasing(sh))).toMatchObject({ forced: true })
+    expect(git(work, "rev-parse", "origin/c")).toBe(
+      git(work, "rev-parse", "HEAD"),
+    )
+    expect(lease()).toBe("")
+    expect(await restackOp(rebasing(sh))).toMatchObject({
+      rebased: 0,
+      folded: 0,
+    })
+  })
+
+  it("folds in commits pushed to the branch from elsewhere before rebasing", async () => {
+    parentMoves()
+    commit(work, "mine.txt", "mine\n", "local work")
+    const other = clone("other")
+    git(other, "switch", "-q", "c")
+    commit(other, "late.txt", "late\n", "pushed from elsewhere")
+    git(other, "push", "-q", "origin", "c")
+    const remote = git(other, "rev-parse", "HEAD")
+    const sh = fakeShell(work, listing([pr(1, "p", "main"), pr(2, "c", "p")]))
+    expect(await restackOp(rebasing(sh))).toMatchObject({
+      rebased: 1,
+      folded: 1,
+    })
+    expect(git(work, "log", "--format=%s", "origin/p..HEAD")).toBe(
+      "pushed from elsewhere\nlocal work\nc1",
+    )
+    expect(lease()).toBe(remote)
+    expect(await submitOp(rebasing(sh))).toMatchObject({ forced: true })
+    expect(git(work, "rev-parse", "origin/c")).toBe(
+      git(work, "rev-parse", "HEAD"),
+    )
+  })
+
+  it("fast-forwards to the remote when the branch has nothing it lacks", async () => {
+    stackOfTwo()
+    const other = clone("other")
+    git(other, "switch", "-q", "c")
+    commit(other, "late.txt", "late\n", "pushed from elsewhere")
+    git(other, "push", "-q", "origin", "c")
+    const remote = git(other, "rev-parse", "HEAD")
+    const sh = fakeShell(work, listing([pr(1, "p", "main"), pr(2, "c", "p")]))
+    expect(await restackOp(rebasing(sh))).toMatchObject({
+      rebased: 0,
+      folded: 1,
+    })
+    expect(git(work, "rev-parse", "HEAD")).toBe(remote)
+    expect(lease()).toBe("")
+  })
+
+  it("leases nothing for a branch origin doesn't have yet", async () => {
+    parentMoves()
+    git(work, "switch", "-q", "-c", "d")
+    commit(work, "d.txt", "d\n", "d1")
+    git(work, "config", "branch.d.stackParent", "c")
+    git(work, "switch", "-q", "c")
+    commit(work, "c2.txt", "c2\n", "c2")
+    git(work, "push", "-q", "origin", "c")
+    git(work, "switch", "-q", "d")
+    const sh = fakeShell(work, listing([pr(1, "p", "main"), pr(2, "c", "p")]))
+    expect(await restackOp(rebasing(sh))).toMatchObject({
+      parent: "c",
+      rebased: 1,
+      folded: 0,
+    })
+    expect(
+      spawnSync("git", ["config", "--get", "branch.d.stackLease"], {
+        cwd: work,
+      }).status,
+    ).not.toBe(0)
+  })
+
+  it("stops on conflicts, saying to continue the rebase", async () => {
+    stackOfTwo()
+    commit(work, "p.txt", "c's\n", "c edits p.txt")
+    git(work, "switch", "-q", "p")
+    commit(work, "p.txt", "p's\n", "p edits p.txt")
+    git(work, "push", "-q", "origin", "p")
+    git(work, "switch", "-q", "c")
+    const sh = fakeShell(work, listing([pr(1, "p", "main"), pr(2, "c", "p")]))
+    await expect(restackOp(rebasing(sh))).rejects.toThrow(
+      /GIT_EDITOR=true git rebase --continue/,
+    )
+    expect(
+      spawnSync("git", ["rev-parse", "-q", "--verify", "REBASE_HEAD"], {
+        cwd: work,
+      }).status,
+    ).toBe(0)
+  })
+
+  it("stops on a conflicting fold, saying how to finish the restack", async () => {
+    parentMoves()
+    commit(work, "same.txt", "mine\n", "local work")
+    const other = clone("other")
+    git(other, "switch", "-q", "c")
+    commit(other, "same.txt", "theirs\n", "pushed from elsewhere")
+    git(other, "push", "-q", "origin", "c")
+    const sh = fakeShell(work, listing([pr(1, "p", "main"), pr(2, "c", "p")]))
+    await expect(restackOp(rebasing(sh))).rejects.toThrow(
+      /git cherry-pick --continue.*git rebase origin\/p/,
+    )
+  })
+
+  it("leaves the default restack a merge", async () => {
+    parentMoves()
+    const sh = fakeShell(work, listing([pr(1, "p", "main"), pr(2, "c", "p")]))
+    expect(await restackOp({ ...ctxOf(sh), catchUp: "merge" })).toMatchObject({
+      merged: 1,
+    })
+    expect(git(work, "rev-list", "--merges", "--count", "HEAD")).toBe("1")
+    expect(lease()).toBe("")
+  })
+})
+
 describe("reparent and submit", () => {
   /** p squash-merged into main on origin, c still on p. */
   function landParent(): { pTip: string; cRemote: string } {

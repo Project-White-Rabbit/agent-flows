@@ -1,7 +1,7 @@
 {
   "name": "dev-flows-base",
   "description": "The dev-flows workflows and the commands they run, with no skills of its own: dev-flows and other front-end plugins read its flows under their own command names. Installed as their dependency.",
-  "version": "0.42.0",
+  "version": "0.43.0",
   "author": {
     "name": "Bitfab"
   },
