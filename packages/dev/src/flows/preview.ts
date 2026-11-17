@@ -31,7 +31,7 @@ export const previewFlow: Flow = devKit.defineFlow({
       "Make sure the dev server runs, then open the page the work changed.",
     help: "Show usage and exit.",
   },
-  intro: `Shows the person what this branch's work looks like, running: it gets this checkout's dev server from \`{{cmd}}server\` (which starts it in the background when it isn't running), works out which page the work changed, and opens it. It opens in the browser of the workspace app this session runs in, beside the agent, when the repo configured one (\`{{cmd}}configure browser\`); else with this session's own browser tools; else in the system's default browser.
+  intro: `Shows the person what this branch's work looks like, running: it gets this checkout's dev server from \`{{cmd}}server\` (which starts it in the background when it isn't running), works out which page the work changed, and opens it. It opens in the browser of the workspace app this session runs in, beside the agent, when the repo configured one (\`{{cmd}}configure browser\`); else with this session's own browser tools; else in the system's default browser. When this session can see that browser, it makes sure the page loaded, reloading while the server finishes starting, rather than leave the person an error page.
 
 It never edits the working tree, commits, or pushes. The server is \`{{cmd}}server\`'s: it stays up for the person to keep using, \`{{cmd}}server stop\` stops it, and a watchdog stops it once its worktree is deleted or nobody uses it.`,
   invariants: [
@@ -88,7 +88,7 @@ Run {{flow:server}} with no arguments: follow it through rather than redoing its
 
 A route with dynamic segments (\`[id]\`, \`:slug\`) needs real values: take them from the session's work, the repo's seed data or fixtures, or a link on the parent page that already answers. When none turns up, use the nearest page without one, and say so. With no page in the change (a back-end change, a config change), \`<target>\` is \`<url>\`, and say which change it serves.
 
-Check it before opening: \`curl -s -o /dev/null -w '%{http_code}' <target>\`. A 404 means the route was read wrong: look again, once. A 5xx is the page failing: open it anyway (its error is worth seeing), and give the server's log or output in the report. A redirect to a sign-in page is fine: a \`preview.afterOpen\` hook may get past it (step 4); else say the person may need to sign in.
+Check it before opening: \`curl -s -o /dev/null -w '%{http_code}' <target>\`. A \`000\` (nothing answered) or a 502, 503, or 504 is the server not ready yet, or restarting after a change: try again every few seconds, for up to a minute, before going on. A 404 means the route was read wrong: look again, once. A 5xx is the page failing: open it anyway (its error is worth seeing), and give the server's log or output in the report. A redirect to a sign-in page is fine: a \`preview.afterOpen\` hook may get past it (step 4); else say the person may need to sign in.
 
 Keep the other pages the change touches, their URLs, for the report.`,
           next: "main/open",
@@ -105,6 +105,19 @@ Keep the other pages the change touches, their URLs, for the report.`,
 3. **The system's default browser.** \`open '<target>'\` on macOS, \`xdg-open '<target>'\` on Linux, \`start "" "<target>"\` on Windows. Skip it when there's no display to open one on (a remote shell, a container, CI).
 
 When none works, give the person \`<target>\` to open themselves.`,
+          next: "main/loaded",
+        },
+        {
+          id: "loaded",
+          kind: "action",
+          title: "Make sure it loaded",
+          body: `When this session can see the browser that opened \`<target>\` (its own browser tools, or the tools it has for the workspace app's browser pane: its CLI, or a skill for it), look at the page there, as the person sees it, before going on: a screenshot, or the page's text and its console. The page loaded when it shows the app's own content (a sign-in page counts). It didn't when it shows an error instead:
+
+- **The page never arrived:** the browser's own error page (can't connect, connection refused or reset, took too long), a blank page, a proxy's 502, 503, or 504, or the framework's "compiling" or "starting" screen. The server was still starting or rebuilding when the page opened. Wait a few seconds and reload it in that same browser, and look again; keep at it for up to a minute.
+- **A stale page:** a failed chunk or module load, or a hot-reload error after the server restarted. Reload once.
+- **The page itself fails:** the framework's error overlay or error page (a build error, an uncaught exception), or a 500 with an error in it. Reload it once, to rule out a rebuild that was under way. When it comes back the same, that is what the work does now, so leave the page showing it, for the person to see, and keep for the report the error's message, where it points (file and line), the console errors, and the server's log lines behind it. Never edit the code to make it go away here: preview doesn't.
+
+When it still hasn't loaded after a minute of reloads, say so in the report, with what the page shows and the server's last log lines. When this session can't see that browser (the system's browser, or none opened), the \`curl\` check in 2 is all there is: say in the report that the page wasn't seen.`,
           next: "main/after-open",
         },
         {
@@ -112,7 +125,7 @@ When none works, give the person \`<target>\` to open themselves.`,
           kind: "action",
           title: "The repo's steps on the page",
           commandCalls: ["hooks"],
-          body: `Run \`{{command:hooks}} run preview.afterOpen --flow preview --mode <mode> --url <target>\`: the repo's own steps for getting the person onto the page (signing in as a test user, picking an account). ${HOOK_RESULTS} A failure here doesn't stop preview: the page is open, so name it in the report.
+          body: `Run \`{{command:hooks}} run preview.afterOpen --flow preview --mode <mode> --url <target>\`: the repo's own steps for getting the person onto the page (signing in as a test user, picking an account). ${HOOK_RESULTS} A failure here doesn't stop preview: the page is open, so name it in the report. When a hook's task leaves the browser on another page (where signing in lands), look at that one as in 4 too.
 
 A task a hook hands you is about the page, so do it in the browser that opened \`<target>\`, and only when this session can drive that one: with this session's browser tools when the page opened there, or with the tools this session has for the workspace app's browser pane (its CLI, or a skill for it) when it opened there. Never open another browser to do it: the person sees the one that opened. When nothing here drives that browser (the system's browser, or none opened), don't do the task: put what it asks in the report for the person to do, and go on with \`--after <agent.resume>\`. A secret the task needs (a test user's password) comes from where the task says (an env file, a variable): type it into the page, never print or echo it, and never make one up.`,
           next: "main/report",
@@ -124,6 +137,7 @@ A task a hook hands you is about the page, so do it in the browser that opened \
           body: `A few lines:
 
 - **Opened:** \`<target>\`, and where (the workspace app's browser, this session's browser tools, the system's browser, or not opened), with why it's the page: the change it shows. Any trouble \`curl\` found (a 5xx and the log lines behind it, a sign-in).
+- **Loaded:** whether the page showed the app's content in that browser, how many reloads it took, or the error it shows (its message, where it points, the console errors, and the server's log lines behind it); or that this session couldn't see that browser.
 - **On the page:** each \`preview.afterOpen\` hook and what it did (signed in as whom), or what it asks the person to do when this session couldn't drive the browser, and any that failed.
 - **Server:** what \`{{cmd}}server\` said: its \`<url>\`, started now or already running, whether its watchdog watches it, any servers it reaped, and \`{{cmd}}configure server\` when the command came from the repo rather than the config.
 - **Also changed:** the other pages the change touches, as URLs, when there are any.`,
