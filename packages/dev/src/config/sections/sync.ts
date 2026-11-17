@@ -52,7 +52,7 @@ export const sync: SectionSpec = {
     {
       key: "catchUp",
       description:
-        "How sync (and ready, through it) catches a branch with no stacking integration up to its base: `merge` (the default: merges the base in, so a push never needs force) or `rebase` (replays the branch's own commits onto the base, for a linear history, first folding in commits pushed to the branch from elsewhere, then pushes with a lease on the remote tip it read). A stacking integration's `restack` decides for stacked branches; GitHub stacking always merges",
+        "How sync (and ready, through it) catches a branch up to its base: `merge` (the default: merges the base in, so a push never needs force) or `rebase` (replays the branch's own commits onto the base, for a linear history, first folding in commits pushed to the branch from elsewhere, then pushes with a lease on the remote tip it read). A stacking integration's `restack` decides for stacked branches; GitHub stacking follows this setting too, rebasing a stacked branch onto its parent and leasing the push the same way",
       example: "rebase",
       pattern: CATCH_UP,
     },

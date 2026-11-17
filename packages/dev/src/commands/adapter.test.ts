@@ -60,12 +60,13 @@ describe("adapter.ts (as a script)", () => {
   it("runs the repo's own adapter in place of the built-in one, and lists it first", () => {
     init({
       "integrations.linear": { teamKey: "ENG", use: { issueTracker: "track" } },
+      sync: { catchUp: "rebase" },
     })
     repoAdapter(`export const adapters = {
   findIssue: {
     args: ["line"],
-    async run({ values, args, base }) {
-      return { issues: [{ identifier: values.teamKey + "-7", line: args.line, base }] }
+    async run({ values, args, base, catchUp }) {
+      return { issues: [{ identifier: values.teamKey + "-7", line: args.line, base, catchUp }] }
     },
   },
   notAnOp: { async run() { return {} } },
@@ -80,7 +81,14 @@ describe("adapter.ts (as a script)", () => {
     ])
     expect(result.status).toBe(0)
     expect(JSON.parse(result.stdout)).toEqual({
-      issues: [{ identifier: "ENG-7", line: "> Branch: `x`", base: "main" }],
+      issues: [
+        {
+          identifier: "ENG-7",
+          line: "> Branch: `x`",
+          base: "main",
+          catchUp: "rebase",
+        },
+      ],
     })
     expect(result.stderr).toContain("Linear has no op `notAnOp`")
 

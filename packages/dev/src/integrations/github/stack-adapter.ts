@@ -3,9 +3,11 @@
 // config, `branch.<branch>.stackParent`, which `git branch -m` carries and
 // `git branch -D` drops; else it's read from the host: its pull request's
 // base, when that base is itself a stacked branch. Catching up merges the
-// parent in, never rebases, so a push never needs force; only moving off a
-// parent that landed replays the branch's own commits, and the push after it
-// may overwrite only the remote tip it replaced.
+// parent in by default, so a push never needs force. With `sync.catchUp`
+// `rebase` it first folds in commits pushed to the branch from elsewhere,
+// then rebases onto the parent; that, and moving off a parent that landed,
+// replay the branch's own commits, and the push after either may overwrite
+// only the remote tip it read.
 //
 // Runtime code: Node built-ins only.
 
@@ -40,8 +42,16 @@ export const systemShell: Shell = {
     new Promise((resolve) => setTimeout(resolve, seconds * 1000)),
 }
 
-/** What every op works from: the shell, the repository, and the base branch. */
-export type StackContext = { sh: Shell; repo: string; base?: string }
+/**
+ * What every op works from: the shell, the repository, the base branch, and
+ * how a restack catches up (`sync.catchUp`; merge when unset).
+ */
+export type StackContext = {
+  sh: Shell
+  repo: string
+  base?: string
+  catchUp?: "merge" | "rebase"
+}
 
 export type OpenPr = {
   number: number
@@ -82,6 +92,7 @@ export function contextOf(input: AdapterInput, sh: Shell): StackContext {
     sh,
     repo: `${input.values.owner}/${input.values.repo}`,
     ...(input.base ? { base: input.base } : {}),
+    ...(input.catchUp ? { catchUp: input.catchUp } : {}),
   }
 }
 
@@ -385,9 +396,11 @@ function parentOrBase(ctx: StackContext, branch: string): string {
   return parent
 }
 
-export async function restackOp(
-  ctx: StackContext,
-): Promise<{ branch: string; parent: string; merged: number }> {
+export type Restack =
+  | { branch: string; parent: string; merged: number }
+  | { branch: string; parent: string; rebased: number; folded: number }
+
+export async function restackOp(ctx: StackContext): Promise<Restack> {
   const branch = currentBranch(ctx.sh)
   const parent = parentOrBase(ctx, branch)
   try {
@@ -397,9 +410,10 @@ export async function restackOp(
       `${(error as Error).message}. When ${parent} merged and its branch was deleted, move ${branch} off it with the reparent op instead`,
     )
   }
-  const behind = Number(
-    git(ctx.sh, ["rev-list", "--count", `HEAD..origin/${parent}`]) ?? "0",
-  )
+  if (ctx.catchUp === "rebase") {
+    return rebaseOnParent(ctx, branch, parent)
+  }
+  const behind = behindOf(ctx.sh, parent)
   if (behind === 0) {
     return { branch, parent, merged: 0 }
   }
@@ -410,6 +424,109 @@ export async function restackOp(
     )
   }
   return { branch, parent, merged: behind }
+}
+
+function behindOf(sh: Shell, parent: string): number {
+  return Number(
+    git(sh, ["rev-list", "--count", `HEAD..origin/${parent}`]) ?? "0",
+  )
+}
+
+/**
+ * origin/<branch>'s tip, fetched, or undefined when origin has no such
+ * branch. Throws when origin can't be asked: a rebase would need force
+ * without knowing what's there.
+ */
+function remoteTip(sh: Shell, branch: string): string | undefined {
+  const listed = sh.run("git", [
+    "ls-remote",
+    "--exit-code",
+    "--heads",
+    "origin",
+    `refs/heads/${branch}`,
+  ])
+  if (listed.status === 2) {
+    return undefined
+  }
+  if (listed.status !== 0) {
+    throw new Error(
+      `couldn't ask origin for ${branch}: ${(listed.stderr || listed.stdout).trim()}. A rebase would need force without knowing what's there`,
+    )
+  }
+  fetch(sh, branch)
+  const tip = revParse(sh, `refs/remotes/origin/${branch}`)
+  if (!tip) {
+    throw new Error(`origin/${branch} is missing after the fetch`)
+  }
+  return tip
+}
+
+/**
+ * The restack with `sync.catchUp` `rebase`: fold in what was pushed to the
+ * branch from elsewhere (each commit of origin/<branch> with no equivalent
+ * change here, cherry-picked oldest first), then rebase onto origin/<parent>,
+ * which replays only the branch's own commits. The remote tip it read is
+ * recorded as the lease `submit` may force over, and nothing pushed since.
+ */
+function rebaseOnParent(
+  ctx: StackContext,
+  branch: string,
+  parent: string,
+): Restack {
+  const remote = remoteTip(ctx.sh, branch)
+  let fastForwarded = 0
+  if (remote && isAncestor(ctx.sh, "HEAD", remote)) {
+    // Nothing here the remote lacks: take its commits as they are.
+    fastForwarded = Number(
+      git(ctx.sh, ["rev-list", "--count", `HEAD..${remote}`]) ?? "0",
+    )
+    if (fastForwarded > 0) {
+      out(ctx.sh, "git", ["merge", "--ff-only", remote])
+    }
+  }
+  const contained = !remote || isAncestor(ctx.sh, remote, "HEAD")
+  const missing = contained
+    ? []
+    : (git(ctx.sh, ["cherry", "HEAD", remote]) ?? "")
+        .split("\n")
+        .filter((line) => line.startsWith("+ "))
+        .map((line) => line.slice(2).trim())
+        // The parent's own, brought in by a merge: the rebase adds them.
+        .filter((sha) => !isAncestor(ctx.sh, sha, `origin/${parent}`))
+  const behind = behindOf(ctx.sh, parent)
+  if (remote && (!contained || behind > 0)) {
+    // The push will replace this tip, which this restack has read.
+    out(ctx.sh, "git", ["config", `branch.${branch}.${LEASE}`, remote])
+  }
+  if (missing.length === 0 && behind === 0) {
+    return { branch, parent, rebased: 0, folded: fastForwarded }
+  }
+  const thenRebase = `then \`git rebase origin/${parent}\` (on conflicts, resolve, \`git add\`, and \`GIT_EDITOR=true git rebase --continue\` until it finishes)`
+  if (missing.length > 0) {
+    let pick = ctx.sh.run("git", ["cherry-pick", ...missing])
+    while (pick.status !== 0) {
+      const picking = revParse(ctx.sh, "CHERRY_PICK_HEAD")
+      const conflicted = git(ctx.sh, ["diff", "--name-only", "--diff-filter=U"])
+      if (!picking || conflicted) {
+        throw new Error(
+          `folding the commits pushed to origin/${branch} from elsewhere into ${branch} stopped${conflicted ? " on conflicts" : ""}: resolve each file, \`git add\` it, then the continue op (\`git cherry-pick --continue\`, or \`git cherry-pick --skip\` for a commit with nothing left to apply) until it finishes, ${thenRebase}. ${(pick.stdout || pick.stderr).trim()}`,
+        )
+      }
+      // The change is already here: nothing left to apply.
+      pick = ctx.sh.run("git", ["cherry-pick", "--skip"])
+    }
+  }
+  const folded = fastForwarded + missing.length
+  if (behind === 0) {
+    return { branch, parent, rebased: 0, folded }
+  }
+  const rebase = ctx.sh.run("git", ["rebase", `origin/${parent}`])
+  if (rebase.status !== 0) {
+    throw new Error(
+      `rebasing ${branch} onto origin/${parent} stopped on conflicts: resolve each file, \`git add\` it, then the continue op (\`GIT_EDITOR=true git rebase --continue\`) until it finishes. ${(rebase.stdout || rebase.stderr).trim()}`,
+    )
+  }
+  return { branch, parent, rebased: behind, folded }
 }
 
 /**
@@ -507,7 +624,7 @@ export async function submitOp(ctx: StackContext): Promise<{
     const lease = git(ctx.sh, ["config", "--get", `branch.${branch}.${LEASE}`])
     if (!lease) {
       throw new Error(
-        `the push of ${branch} was refused: ${(push.stderr || push.stdout).trim()}. When origin/${branch} has commits this branch doesn't, \`git fetch origin ${branch}\` and \`git merge origin/${branch}\`, then submit again. Never force-push it`,
+        `the push of ${branch} was refused: ${(push.stderr || push.stdout).trim()}. When origin/${branch} has commits this branch doesn't, ${ctx.catchUp === "rebase" ? "run the restack op (it folds them in)" : `\`git fetch origin ${branch}\` and \`git merge origin/${branch}\``}, then submit again. Never force-push it`,
       )
     }
     out(ctx.sh, "git", [

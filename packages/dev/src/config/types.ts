@@ -369,6 +369,8 @@ export type AdapterInput = {
   token?: string
   /** The repo's base branch (`repo.baseBranch`), when the config sets it. */
   base?: string
+  /** How a branch catches up to its base or parent (`sync.catchUp`), when the config sets it. */
+  catchUp?: "merge" | "rebase"
   fetch: typeof fetch
 }
 
