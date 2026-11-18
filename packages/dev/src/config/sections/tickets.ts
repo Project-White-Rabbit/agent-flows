@@ -283,6 +283,23 @@ export const tickets: SectionSpec = {
       },
     },
     {
+      key: "linkedWork",
+      description:
+        "What create-tickets (and start-work, which files through it) does with an item whose work an issue in a tracker at `link` (read-only, such as a customer's workspace) already describes: `drop` drops the item and names that issue as already tracked (the default), `file` still files it in the tracker at `track`, linking the read-only issue from its description, so the team's own tracker has the work too",
+      example: "file",
+      pattern: {
+        regex: /^(drop|file)$/,
+        hint: "`drop` or `file`",
+      },
+    },
+    {
+      key: "queueLinked",
+      type: "boolean",
+      description:
+        "start-ticket-queue lists the issues assigned to you in trackers at `link` (read-only) too (default true); false leaves them out, for a team whose work in a read-only tracker is always filed in its own as well",
+      example: false,
+    },
+    {
       key: "assignOnSync",
       type: "boolean",
       description:

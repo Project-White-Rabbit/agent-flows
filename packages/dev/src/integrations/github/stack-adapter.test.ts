@@ -153,7 +153,7 @@ function stackOfTwo(): void {
 }
 
 describe("parent", () => {
-  it("reads the recorded parent first, for any branch name", () => {
+  it("reads the recorded parent of a branch with no pull request, for any branch name", () => {
     git(work, "config", "branch.feat/x.y.stackParent", "base/one")
     git(work, "config", "branch.other.stackParent", "feat/x.y")
     const sh = fakeShell(work, listing([]))
@@ -167,8 +167,59 @@ describe("parent", () => {
       parent: "feat/x.y",
       source: "recorded",
     })
-    // The record answers without asking the host.
-    expect(sh.calls).toEqual([])
+    // The record answers even when the host can't be read.
+    const offline = fakeShell(work, () => ({
+      status: 1,
+      stdout: "",
+      stderr: "HTTP 502",
+    }))
+    expect(findParent(ctxOf(offline), "other")).toEqual({
+      parent: "feat/x.y",
+      source: "recorded",
+    })
+  })
+
+  it("trusts an open pull request retargeted by hand over the record", () => {
+    git(work, "config", "branch.c.stackParent", "p")
+    git(work, "config", "branch.d.stackParent", "p")
+    const prs = [
+      pr(1, "p", "main"),
+      pr(2, "q", "main"),
+      pr(3, "c", "q"),
+      pr(4, "d", "main"),
+    ]
+    const sh = fakeShell(work, listing(prs))
+    expect(findParent(ctxOf(sh), "c")).toEqual({
+      parent: "q",
+      source: "pull request",
+      overrode: "p",
+    })
+    // Retargeted to the base: no longer stacked.
+    expect(findParent(ctxOf(sh), "d")).toBeUndefined()
+  })
+
+  it("keeps a recorded parent that merged, or when the pull request's base isn't a stacked branch", () => {
+    git(work, "config", "branch.c.stackParent", "p")
+    git(work, "config", "branch.w.stackParent", "q")
+    const prs = [pr(2, "c", "main"), pr(3, "q", "main"), pr(4, "w", "release")]
+    const sh = fakeShell(
+      work,
+      listing(prs, (args) =>
+        args.includes("merged") && args.includes("p")
+          ? JSON.stringify([{ number: 1 }])
+          : undefined,
+      ),
+    )
+    // p landed and the host moved c's pull request to main: sync still has
+    // to move c off p.
+    expect(findParent(ctxOf(sh), "c")).toEqual({
+      parent: "p",
+      source: "recorded",
+    })
+    expect(findParent(ctxOf(sh), "w")).toEqual({
+      parent: "q",
+      source: "recorded",
+    })
   })
 
   it("takes the pull request's base only when that base is a stacked branch", () => {
@@ -236,6 +287,7 @@ describe("parent", () => {
       branch: "c",
       parent: "p",
       recorded: true,
+      retargeted: false,
     })
     expect(git(work, "config", "--get", "branch.c.stackParent")).toBe("p")
     expect(await trackOp(ctxOf(sh), "main")).toMatchObject({ recorded: false })
@@ -602,16 +654,55 @@ describe("reparent and submit", () => {
     expect(git(work, "config", "--get", "branch.d.stackParent")).toBe("c")
   })
 
-  it("retargets an existing pull request whose base isn't the parent", async () => {
+  it("follows a pull request retargeted by hand, recording its base instead of moving it back", async () => {
+    stackOfTwo()
+    git(work, "switch", "-q", "-c", "q", "main")
+    git(work, "push", "-q", "-u", "origin", "q")
+    git(work, "switch", "-q", "c")
+    git(work, "config", "branch.c.stackParent", "p")
+    const prs = [pr(1, "p", "main"), pr(2, "c", "q"), pr(3, "q", "main")]
+    const sh = fakeShell(work, listing(prs))
+    expect(await submitOp(ctxOf(sh))).toMatchObject({
+      parent: "q",
+      retargeted: false,
+      overrode: "p",
+    })
+    expect(sh.calls.some((call) => call.startsWith("pr edit"))).toBe(false)
+    expect(git(work, "config", "--get", "branch.c.stackParent")).toBe("q")
+    // Retargeted to the base: the record is cleared.
+    prs[1] = pr(2, "c", "main")
+    expect(await submitOp(ctxOf(sh))).toMatchObject({
+      parent: "main",
+      retargeted: false,
+    })
+    expect(recordedParents(sh).has("c")).toBe(false)
+  })
+
+  it("retargets an existing pull request opened against a branch that isn't stacked", async () => {
     stackOfTwo()
     git(work, "config", "branch.c.stackParent", "p")
+    const sh = fakeShell(
+      work,
+      listing([pr(1, "p", "main"), pr(2, "c", "release")], (args) =>
+        args[1] === "edit" ? "" : undefined,
+      ),
+    )
+    expect(await submitOp(ctxOf(sh))).toMatchObject({ retargeted: true })
+    expect(sh.calls).toContain("pr edit 2 --repo acme/web --base p")
+  })
+
+  it("track moves an open pull request onto the parent it records", async () => {
+    stackOfTwo()
     const sh = fakeShell(
       work,
       listing([pr(1, "p", "main"), pr(2, "c", "main")], (args) =>
         args[1] === "edit" ? "" : undefined,
       ),
     )
-    expect(await submitOp(ctxOf(sh))).toMatchObject({ retargeted: true })
+    expect(await trackOp(ctxOf(sh), "p")).toMatchObject({
+      recorded: true,
+      retargeted: true,
+    })
     expect(sh.calls).toContain("pr edit 2 --repo acme/web --base p")
   })
 })

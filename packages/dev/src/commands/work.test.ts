@@ -289,6 +289,25 @@ describe("queue", () => {
     )
   })
 
+  it("leaves out a read-only tracker's issues only when asked to", () => {
+    const issues = [
+      assigned("ENG-1", { priority: "high" }),
+      assigned("NOAH-2", { priority: "urgent", link: true }),
+    ]
+    expect(queue(issues, []).map((i) => i.id)).toEqual(["NOAH-2", "ENG-1"])
+    expect(
+      queue(issues, [], undefined, { linked: false }).map((i) => i.id),
+    ).toEqual(["ENG-1"])
+  })
+
+  it("counts a workspace in another project of the workspace app as started", () => {
+    const issues = [assigned("ENG-1"), assigned("ENG-2")]
+    const elsewhere = [
+      { integration: "superset", id: "w1", branch: "sam/eng-1-fix-login" },
+    ]
+    expect(queue(issues, elsewhere).map((i) => i.id)).toEqual(["ENG-2"])
+  })
+
   it("leaves out work already started or split up", () => {
     const issues = [
       assigned("ENG-1", { openSubIssues: true }),

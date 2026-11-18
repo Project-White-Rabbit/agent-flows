@@ -13,6 +13,7 @@ import {
   type Listener,
   type ManagedRun,
   type Manager,
+  managedRun,
   managerCommand,
   parseCwds,
   parseEtime,
@@ -24,6 +25,7 @@ import {
   type ServerState,
   type Settings,
   serverHooks,
+  serverTarget,
   startManaged,
   stopManaged,
   sweep,
@@ -587,5 +589,62 @@ describe("a server the repo's own manager runs", () => {
     expect(
       await stopManaged(managed({ up: "true", down: "exit 4" }), false),
     ).toMatchObject({ stopped: [], reason: "server.down exited 4" })
+  })
+})
+
+describe("a server for another branch", () => {
+  function repoWithWorktree(): { main: string; other: string } {
+    const main = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "server-branch-")),
+    )
+    dirs.push(main)
+    const git = (...args: string[]) =>
+      spawnSync("git", ["-C", main, ...args], { encoding: "utf8" })
+    git("init", "--quiet", "--initial-branch", "main")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    git("commit", "--quiet", "--allow-empty", "-m", "base")
+    const other = `${main}-feat`
+    dirs.push(other)
+    git("worktree", "add", "--quiet", "-b", "feat/x", other)
+    return { main, other: fs.realpathSync(other) }
+  }
+
+  it("runs from the worktree that has the branch checked out", () => {
+    const { main, other } = repoWithWorktree()
+    expect(serverTarget(main, undefined)).toEqual({ root: main })
+    expect(serverTarget(main, "feat/x")).toEqual({ root: other })
+    expect(serverTarget(other, "main")).toEqual({ root: main })
+    expect(serverTarget(main, "nowhere")).toEqual({
+      root: main,
+      elsewhere: "nowhere",
+    })
+  })
+
+  it("hands a manager a branch no worktree holds, with no worktree", () => {
+    const { main } = repoWithWorktree()
+    const settings: Settings = {
+      command: null,
+      url: null,
+      ports: null,
+      timeout: 5,
+      idleTimeout: 240,
+    }
+    const manager: Manager = {
+      up: "dsm up {branch}",
+      down: null,
+      restart: null,
+      status: null,
+      list: null,
+    }
+    const dir = path.join(main, ".git", "server")
+    expect(managedRun(dir, main, settings, manager, 3001).vars).toEqual({
+      branch: "main",
+      worktree: main,
+      port: 3001,
+    })
+    const run = managedRun(dir, main, settings, manager, undefined, "feat/y")
+    expect(run.vars).toEqual({ branch: "feat/y", worktree: "" })
+    expect(run.log).toContain("branch-feat-y")
   })
 })

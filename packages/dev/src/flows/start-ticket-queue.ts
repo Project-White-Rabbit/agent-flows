@@ -14,7 +14,7 @@ import { RANKS, STAGES } from "./start-work.ts"
 
 const INPUT_EXAMPLE = `{
   "issues": [
-    { "id": "<ID>", "title": "...", "url": "...", "state": "<workflow state name>", "stage": "todo", "description": "...", "priority": "high", "dueDate": "<YYYY-MM-DD, or null>", "createdAt": "<when it was filed>", "creator": "<who filed it, or null>", "openSubIssues": false, "pullRequests": [], "blocks": false }
+    { "id": "<ID>", "title": "...", "url": "...", "state": "<workflow state name>", "stage": "todo", "description": "...", "priority": "high", "dueDate": "<YYYY-MM-DD, or null>", "createdAt": "<when it was filed>", "creator": "<who filed it, or null>", "openSubIssues": false, "pullRequests": [], "blocks": false, "link": false }
   ],
   "workspaces": [
     { "integration": "<integration or instance>", "id": "...", "name": "...", "branch": "...", "section": "<section, or null>", "current": false }
@@ -99,7 +99,7 @@ An issue with open sub-issues is left out: its sub-issues are the work.
           commandCalls: ["configure", "work"],
           body: `1. **Flags.** Take \`--priority <ranks>\`, \`--limit <n>\`, \`--section <name>\`, \`--section-by-rank\`, and \`--workspaces <entry>\` out of \`{{argsToken}}\`. ${UNKNOWN_FLAGS} Read plain words the same way: "only urgent and P0" is \`--priority urgent,p0\`, "just 5" or "top 5" is \`--limit 5\`, "sort them into sections by priority" is \`--section-by-rank\`. When both \`--section-by-rank\` and \`--section\` are given, \`--section-by-rank\` wins: say once that \`--section\` is ignored.
 2. **Integrations.** \`{{command:configure}} integrations issueTracker workspaces\`. ${REQUIRE_CONFIG} ${USE_INTEGRATIONS} Closing an issue needs its entry at \`level\` \`track\`; at \`link\`, its issues can be started or skipped, not closed.
-3. **The issues.** \`<dir>\` is ${flowDir("start-ticket-queue")} (create it). Run every \`issueTracker\` entry's \`assignedIssues\` op and every \`workspaces\` entry's \`workspaces\` op, and write them to \`<dir>/issues.json\`:
+3. **The issues.** \`<dir>\` is ${flowDir("start-ticket-queue")} (create it). Run every \`issueTracker\` entry's \`assignedIssues\` op and every \`workspaces\` entry's \`workspaces\` op, and write them to \`<dir>/issues.json\`, each issue with \`"link": true\` when its entry is at \`link\` (read-only):
 
    \`\`\`json
    ${INPUT_EXAMPLE.split("\n").join("\n   ")}
@@ -108,10 +108,10 @@ An issue with open sub-issues is left out: its sub-issues are the work.
    ${STAGES}. A workspace's \`section\` is \`null\` when it has none. When no variant of a \`workspaces\` op works here, leave its workspaces out and say so: \`work.ts\` still checks this repo's git worktrees. Then, passing \`--priority\` and \`--limit\` only when given:
 
    \`\`\`bash
-   {{command:work}} list --input <dir>/issues.json [--priority <ranks>] [--limit <n>] [--ranks <names>]
+   {{command:work}} list --input <dir>/issues.json [--priority <ranks>] [--limit <n>] [--ranks <names>] [--no-linked]
    \`\`\`
 
-   ${RANKS}. It reads the config's \`tickets.blockerMark\` itself, and marks an issue whose title has it \`blocker\`. It prints one \`TICKET\` line per issue with no work started yet (no open sub-issues, no pull request, and no workspace or git worktree on its branch), already in the order to go through them, then \`COUNT <n>\` (the issues printed) and \`TOTAL <n>\` (before \`--priority\` and \`--limit\`). Exit code 2 is an unknown \`--priority\` rank (say which ones exist, and stop) or bad input (fix \`issues.json\` and run it again).
+   ${RANKS}. It reads the config's \`tickets.blockerMark\` itself, and marks an issue whose title has it \`blocker\`. It leaves out the issues marked \`link\` when the config's \`tickets.queueLinked\` is false, and with \`--no-linked\` (pass it when the person asks to leave the read-only trackers out this time: "only our own tracker"). It prints one \`TICKET\` line per issue with no work started yet (no open sub-issues, no pull request, and no workspace or git worktree on its branch), already in the order to go through them, then \`COUNT <n>\` (the issues printed) and \`TOTAL <n>\` (before \`--priority\` and \`--limit\`). Exit code 2 is an unknown \`--priority\` rank (say which ones exist, and stop) or bad input (fix \`issues.json\` and run it again).
 
 When \`COUNT\` is 0, say there is nothing waiting and stop; when \`TOTAL\` is above 0, say instead that the filters left out all \`TOTAL\` issues, and stop. Otherwise say how many issues there are, and when \`COUNT\` is less than \`TOTAL\`, how many the filters left out.`,
           next: "main/decide",

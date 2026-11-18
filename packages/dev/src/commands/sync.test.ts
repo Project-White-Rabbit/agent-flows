@@ -9,6 +9,7 @@ import {
   type BranchState,
   branchFile,
   capText,
+  errorRefsInBody,
   gate,
   issueDescription,
   LAST_SYNCED,
@@ -1188,5 +1189,35 @@ describe("issue description", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe("errorRefsInBody", () => {
+  it("reads the refs on a pull request body's error lines, quoted or plain", () => {
+    const body = [
+      "## Summary",
+      "Fixes the login loop (see WEB-9 in the logs).",
+      "> Issue: [ENG-12](https://linear.app/acme/issue/ENG-12) Login loop",
+      "> Sentry: Fixes WEB-4P ([TypeError: x, y and z](https://acme.sentry.io/issues/123/)), WEB-5Q ([Timeout](https://acme.sentry.io/issues/456/))",
+      "Errors: [API-1A](https://acme.sentry.io/issues/789/)",
+      "> **Errors:** https://acme.sentry.io/issues/999/",
+    ].join("\n")
+    expect(errorRefsInBody(body, ["Sentry"])).toEqual([
+      "WEB-4P",
+      "WEB-5Q",
+      "API-1A",
+      "https://acme.sentry.io/issues/999/",
+    ])
+  })
+
+  it("reads only the labels it's given, besides Errors", () => {
+    const body =
+      "> Sentry: Fixes WEB-4P ([title](https://acme.sentry.io/issues/1/))"
+    expect(errorRefsInBody(body)).toEqual([])
+    expect(errorRefsInBody(body, ["sentry"])).toEqual(["WEB-4P"])
+    // An error line whose link text isn't a short id gives its URL.
+    expect(
+      errorRefsInBody("> Errors: Fixes [a crash](https://ph.example/e/7)"),
+    ).toEqual(["https://ph.example/e/7"])
   })
 })

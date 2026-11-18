@@ -3,6 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
+import { CONFIG_VERSION } from "../config/config.ts"
 import {
   actionOf,
   checkPlan,
@@ -11,6 +12,7 @@ import {
   type Plan,
   parentsFirst,
   planIds,
+  readRules,
   recordFiled,
   renderTable,
   summaryLine,
@@ -1042,5 +1044,34 @@ describe("planIds", () => {
         ],
       }),
     ).toEqual(["ENG-1"])
+  })
+})
+
+describe("readRules for read-only trackers", () => {
+  it("reads linkedWork and queueLinked, ignoring values it doesn't know", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "tickets-rules-"))
+    try {
+      spawnSync("git", ["-C", root, "init", "--quiet"])
+      fs.mkdirSync(path.join(root, ".agent-flows"))
+      const write = (tickets: unknown) =>
+        fs.writeFileSync(
+          path.join(root, ".agent-flows", "config.json"),
+          JSON.stringify({
+            version: CONFIG_VERSION,
+            repo: { baseBranch: "main" },
+            tickets,
+          }),
+        )
+      write({ linkedWork: "file", queueLinked: false })
+      expect(readRules(root)).toMatchObject({
+        linkedWork: "file",
+        queueLinked: false,
+      })
+      write({ linkedWork: "sometimes" })
+      expect(readRules(root)).not.toHaveProperty("linkedWork")
+      expect(readRules(root)).not.toHaveProperty("queueLinked")
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
   })
 })
