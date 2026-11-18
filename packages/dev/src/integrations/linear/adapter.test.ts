@@ -280,6 +280,7 @@ describe("linear assignedIssues adapter", () => {
           node("ENG-1", {
             priority: 2,
             dueDate: "2026-11-01",
+            project: { name: "Scenarios" },
             children: { nodes: [{ state: { type: "started" } }] },
           }),
         ],
@@ -327,6 +328,7 @@ describe("linear assignedIssues adapter", () => {
         dueDate: "2026-11-01",
         createdAt: "2026-10-30T14:02:11.000Z",
         creator: "Sam Lee",
+        project: "Scenarios",
         openSubIssues: true,
         pullRequests: [],
         blocks: false,
@@ -337,6 +339,7 @@ describe("linear assignedIssues adapter", () => {
         stage: "in progress",
         priority: "none",
         creator: "Sentry",
+        project: null,
         openSubIssues: false,
         pullRequests: ["https://g/acme/web/pull/4"],
         blocks: true,

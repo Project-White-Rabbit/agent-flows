@@ -7,17 +7,21 @@ import {
   type Assigned,
   agentPrompt,
   branchFor,
+  describeRepository,
   describeReuse,
   describeStart,
   describeTicket,
   gitWorktrees,
   main,
+  namedPaths,
   namesTicket,
   parsePriorities,
+  pickRepository,
   planRename,
   planReuse,
   planStart,
   queue,
+  type Repository,
   releaseLock,
   renameBranch,
   slugify,
@@ -363,6 +367,174 @@ describe("parsePriorities", () => {
   })
 })
 
+describe("pickRepository", () => {
+  const here: Repository = {
+    name: "ai-assistant",
+    remote: "github.com/bitfab/ai-assistant",
+    path: "/code/ai-assistant",
+    current: true,
+  }
+  const noah: Repository = {
+    name: "Noah Server",
+    remote: "github.com/bitfab/noah-server",
+    path: "/code/noah-server",
+  }
+  const web: Repository = { name: "web", remote: null, path: null }
+  const repositories = [here, noah, web]
+  const issue = (title: string, description = "", project?: string) => ({
+    title,
+    description,
+    project,
+  })
+  const none = () => false
+
+  it("takes the only repository there is", () => {
+    expect(pickRepository(issue("Anything"), [here], new Map(), none)).toEqual({
+      repository: here,
+      from: "only",
+    })
+  })
+
+  it("takes the one repository the issue names, by name, folder, or remote", () => {
+    for (const text of [
+      "The scenarios live in noah-server",
+      "See bitfab/noah-server#12",
+      "In Noah Server, add a bottle",
+    ]) {
+      expect(
+        pickRepository(issue("Bottle", text), repositories, new Map(), none),
+      ).toEqual({ repository: noah, from: "named" })
+    }
+  })
+
+  it("doesn't read a longer word or a link as the repository's name", () => {
+    expect(
+      pickRepository(
+        issue(
+          "Bottle",
+          "Like noah-server-legacy did. https://github.com/bitfab/noah-server/pull/3",
+        ),
+        repositories,
+        new Map(),
+        none,
+      ),
+    ).toEqual({ from: "unsure", candidates: [] })
+  })
+
+  it("leaves names under three letters and the branch line out", () => {
+    expect(
+      pickRepository(
+        issue("Fix the web view", "> Branch: `ai-assistant-fix`\n\nIt breaks."),
+        [here, noah, { name: "ui" }],
+        new Map(),
+        none,
+      ),
+    ).toEqual({ from: "unsure", candidates: [] })
+  })
+
+  it("maps the issue's tracker project when it names no one repository", () => {
+    const mapping = new Map([["scenarios", "noah-server"]])
+    expect(
+      pickRepository(
+        issue("Create a bottle", "", "Scenarios"),
+        repositories,
+        mapping,
+        none,
+      ),
+    ).toEqual({ repository: noah, from: "project" })
+    // A repository the issue names wins over its project's.
+    expect(
+      pickRepository(
+        issue("Create a bottle in ai-assistant", "", "Scenarios"),
+        repositories,
+        mapping,
+        none,
+      ),
+    ).toEqual({ repository: here, from: "named" })
+    // A mapping to a repository the integration doesn't list is no answer.
+    expect(
+      pickRepository(
+        issue("Create a bottle", "", "Scenarios"),
+        [here, web],
+        mapping,
+        none,
+      ),
+    ).toEqual({ from: "unsure", candidates: [] })
+  })
+
+  it("takes the checkout that holds the paths the issue names", () => {
+    const exists = (file: string) =>
+      file === "/code/noah-server/src/scenarios/generate.ts"
+    expect(
+      pickRepository(
+        issue(
+          "Bottle",
+          "Change `src/scenarios/generate.ts` and src/bottle.ts.",
+        ),
+        repositories,
+        new Map(),
+        exists,
+      ),
+    ).toEqual({ repository: noah, from: "code" })
+    // Among the repositories it names, when it names several.
+    expect(
+      pickRepository(
+        issue(
+          "Bottle",
+          "Opened in ai-assistant, but src/scenarios/generate.ts is in noah-server.",
+        ),
+        repositories,
+        new Map(),
+        exists,
+      ),
+    ).toEqual({ repository: noah, from: "code" })
+  })
+
+  it("is unsure when two checkouts hold as many of its paths, never defaulting to this one", () => {
+    expect(
+      pickRepository(
+        issue("Bottle", "Change src/index.ts"),
+        repositories,
+        new Map(),
+        () => true,
+      ),
+    ).toEqual({ from: "unsure", candidates: [] })
+    expect(
+      pickRepository(
+        issue("ai-assistant and noah-server both"),
+        repositories,
+        new Map(),
+        none,
+      ),
+    ).toEqual({ from: "unsure", candidates: [here, noah] })
+  })
+
+  it("describes the pick for the TICKET line", () => {
+    expect(describeRepository({ repository: here, from: "named" })).toBe(
+      ' repo="ai-assistant" from=named here',
+    )
+    expect(describeRepository({ repository: noah, from: "project" })).toBe(
+      ' repo="Noah Server" from=project',
+    )
+    expect(describeRepository({ from: "unsure", candidates: [] })).toBe(
+      " repo=?",
+    )
+    expect(
+      describeRepository({ from: "unsure", candidates: [here, noah] }),
+    ).toBe(' repo=? candidates="ai-assistant,Noah Server"')
+  })
+})
+
+describe("namedPaths", () => {
+  it("reads repo-relative paths and leaves links and absolute paths out", () => {
+    expect(
+      namedPaths(
+        "Change `src/a.ts`, ./lib/b.ts. and packages/dev/flows. See https://x.dev/src/c.ts and /etc/hosts.",
+      ),
+    ).toEqual(["src/a.ts", "lib/b.ts", "packages/dev/flows"])
+  })
+})
+
 describe("git worktrees", () => {
   it("reads each branch checked out in a worktree", () => {
     const porcelain = [
@@ -595,6 +767,56 @@ describe("work.ts", () => {
         "Now,Next,Soon,Later,Someday",
       ]),
     ).toContain('section="Next"')
+  })
+
+  it("ends each TICKET line with the repository its work lands in", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-"))
+    execFileSync("git", ["-C", dir, "init", "-q", "-b", "main"])
+    fs.mkdirSync(path.join(dir, ".agent-flows"))
+    fs.writeFileSync(
+      path.join(dir, ".agent-flows", "config.json"),
+      JSON.stringify({
+        version: 2,
+        repo: { baseBranch: "main" },
+        tickets: { repositories: ["Scenarios=noah-server"] },
+      }),
+    )
+    const issue = (id: string, extra: object = {}) => ({
+      id,
+      title: id,
+      url: `https://tracker/${id}`,
+      priority: "high",
+      ...extra,
+    })
+    fs.writeFileSync(
+      path.join(dir, "issues.json"),
+      JSON.stringify({
+        issues: [
+          issue("ENG-1", { project: "Scenarios" }),
+          issue("ENG-2", { description: "Lives in ai-assistant." }),
+          issue("ENG-3"),
+        ],
+        repositories: [
+          { name: "ai-assistant", path: null, current: true },
+          { name: "noah-server", path: null },
+        ],
+      }),
+    )
+    const out = execFileSync(
+      "node",
+      [
+        path.join(import.meta.dirname, "work.ts"),
+        "list",
+        "--input",
+        "issues.json",
+      ],
+      { cwd: dir, encoding: "utf8" },
+    )
+    expect(out.split("\n").slice(0, 3)).toEqual([
+      'TICKET ENG-1 "High" due=none filed=unknown "ENG-1" https://tracker/ENG-1 repo="noah-server" from=project',
+      'TICKET ENG-2 "High" due=none filed=unknown "ENG-2" https://tracker/ENG-2 repo="ai-assistant" from=named here',
+      'TICKET ENG-3 "High" due=none filed=unknown "ENG-3" https://tracker/ENG-3 repo=?',
+    ])
   })
 
   it("exits 2 on bad arguments", () => {

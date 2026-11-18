@@ -154,7 +154,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
       recordNotes:
         "Put the section in the file <section-file> into the planning document titled <title>, in the current cycle (the team's, when cycles aren't documents' homes), creating it with that title when there's none: replace the `## ` section whose `Source:` line contains <key>, or add it at the end, keeping the rest. Prints the document's title and URL",
       assignedIssues:
-        "Every open issue assigned to the current user, all pages: each with its id, title, URL, workflow state, description, priority, due date, when it was filed and who filed it, whether it has open sub-issues, whether a pull request is attached, and whether it blocks another open issue",
+        "Every open issue assigned to the current user, all pages: each with its id, title, URL, workflow state, description, priority, due date, when it was filed and who filed it, its project (the name; none when the tracker has no projects, or the issue is in none), whether it has open sub-issues, whether a pull request is attached, and whether it blocks another open issue",
       createIssue: `File an issue titled <title> with the description <description>, assigned to the current user unless <fields> names an assignee, as a sub-issue of <parent> when one is given, in the workflow state matching <state> when one is given (as for updateIssue; else the tracker's default), with <fields>: whichever of ${ISSUE_FIELDS} the flow sets, leaving out the rest. Prints its id and URL`,
       updateIssue: `Set issue <ID>'s title to <title>, its description to <description>, its workflow state to the one matching <state> (\`todo\`, \`in progress\`, \`in review\`, \`done\`, or \`canceled\`), its parent to <parent> (moving it from the one it has), and <fields> as for createIssue. Anything left out (the title, the description, the state, the parent, or a field) stays as it is`,
       linkBlocked:
@@ -171,6 +171,8 @@ export const CAPABILITIES: CapabilitySpec[] = [
     ops: {
       workspaces:
         "Every open (not archived) workspace of this repository, or of <repository> when one is given (another repository the integration manages, by name): each with its id, name, branch, and sidebar section (none when it has none), and whether this session runs in it",
+      repositories:
+        '`[{"name", "remote", "path", "current"}]`, as JSON: every repository the integration manages on this machine (what some call a project), this one included. `name` is what <repository> takes for it, `remote` its origin as `<host>/<owner>/<repo>` (null when it has none), `path` its main checkout (null when it has none here), and `current` true for this repository',
       renameWorkspace:
         "Rename the workspace <id> to <name>. With <section>, file it in that sidebar section, making the section when there's none yet; with <section> `none`, take it out of every section; with no <section>, leave its section as it is. Its git branch is renamed separately",
       createWorkspace:

@@ -21,6 +21,7 @@ import {
   DATE_TOKENS,
   DEFAULT_RANKS,
   DEFAULT_WORKSPACE_NAME,
+  projectRepositories,
   ranksProblem,
   WORKSPACE_NAME_PLACEHOLDER,
 } from "../config/sections/tickets.ts"
@@ -83,11 +84,25 @@ export type Assigned = {
   createdAt?: string | null
   /** Who filed it, by name. */
   creator?: string | null
+  /** Its tracker project, by name. */
+  project?: string | null
   openSubIssues?: boolean
   pullRequests?: string[]
   blocks?: boolean
   /** It's in a tracker entry at `link` (read-only). */
   link?: boolean
+}
+
+/** A repository as a workspaces integration's `repositories` op returned it. */
+export type Repository = {
+  /** What `--workspaces-repository` takes for it. */
+  name: string
+  /** Its origin, `<host>/<owner>/<repo>`. */
+  remote?: string | null
+  /** Its main checkout on this machine. */
+  path?: string | null
+  /** It's the repository this session runs in. */
+  current?: boolean
 }
 
 /** A workspace as a workspaces integration's `workspaces` op returned it. */
@@ -629,6 +644,126 @@ export function describeTicket(
   return `TICKET ${issue.id} "${rankName(issue.priority, ranks)}" due=${issue.dueDate ?? "none"} filed=${filed}${by}${state}${blocker}${blocks} "${issue.title}" ${issue.url}`
 }
 
+/**
+ * Where an issue's work lands: the repository picked for it and why, or
+ * `unsure` with the ones it might be (none when nothing points anywhere).
+ */
+export type RepositoryPick =
+  | {
+      repository: Repository
+      from: "only" | "named" | "project" | "code"
+    }
+  | { from: "unsure"; candidates: Repository[] }
+
+/** The names an issue may call a repository by, lowercased. */
+function repositoryKeys(repository: Repository): string[] {
+  const base = (p?: string | null) =>
+    p
+      ? (p
+          .replace(/[/\\]+$/, "")
+          .split(/[/\\]/)
+          .pop() ?? "")
+      : ""
+  const remote = repository.remote?.replace(/\.git$/, "") ?? ""
+  const ownerRepo = remote.split("/").slice(-2).join("/")
+  return [
+    repository.name,
+    base(repository.name),
+    base(repository.path),
+    base(remote),
+    ownerRepo.includes("/") ? ownerRepo : "",
+  ]
+    .map((k) => k.trim().toLowerCase())
+    .filter((k, i, all) => k.length >= 3 && all.indexOf(k) === i)
+}
+
+/** The text names the key as a word of its own (`noah-server`, not `noah-server-2`). */
+function names(text: string, key: string): boolean {
+  const escaped = key.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\const SWITCHES = new Set([",
+  )
+  return new RegExp(`(^|[^\\w-])${escaped}($|[^\\w-])`, "i").test(text)
+}
+
+/** The text with its links taken out: where they point is no sign of where the work lands. */
+function withoutUrls(text: string): string {
+  return text.replace(/[a-z][\w+.-]*:\/\/\S+/gi, " ")
+}
+
+/** Repo-relative paths the text names (`src/scenarios/bottle.ts`), links left out. */
+export function namedPaths(text: string): string[] {
+  const found =
+    withoutUrls(text).match(/(?<![\w.@/-])[\w.@-]+(?:\/[\w.@-]+)+/g) ?? []
+  return [
+    ...new Set(
+      found
+        .map((p) => p.replace(/^\.\//, "").replace(/[.]+$/, ""))
+        .filter((p) => /[a-z]/i.test(p)),
+    ),
+  ]
+}
+
+/**
+ * The repository an issue's work lands in, from the issue itself: the one
+ * repository it names; else the one the config maps its tracker project to
+ * (`tickets.repositories`); else the one checkout where the paths it names
+ * exist. With one repository there's nothing to pick. Anything else is
+ * `unsure`, never this one by default: the person is asked.
+ */
+export function pickRepository(
+  issue: Pick<Assigned, "title" | "description" | "project">,
+  repositories: Repository[],
+  mapping: Map<string, string> = new Map(),
+  exists: (file: string) => boolean = fs.existsSync,
+): RepositoryPick {
+  if (repositories.length === 1) {
+    return { repository: repositories[0], from: "only" }
+  }
+  const text = withoutUrls(
+    `${issue.title}\n${withoutLinkLines(issue.description ?? "")}`,
+  )
+  const named = repositories.filter((r) =>
+    repositoryKeys(r).some((key) => names(text, key)),
+  )
+  if (named.length === 1) {
+    return { repository: named[0], from: "named" }
+  }
+  const mapped = issue.project
+    ? mapping.get(issue.project.trim().toLowerCase())
+    : undefined
+  const byProject = mapped
+    ? repositories.find((r) => repositoryKeys(r).includes(mapped.toLowerCase()))
+    : undefined
+  if (byProject) {
+    return { repository: byProject, from: "project" }
+  }
+  const paths = namedPaths(text)
+  const pool = named.length > 0 ? named : repositories
+  const hits = pool
+    .filter((r) => r.path)
+    .map((r) => ({
+      repository: r,
+      count: paths.filter((p) => exists(path.join(r.path as string, p))).length,
+    }))
+    .filter((h) => h.count > 0)
+    .sort((a, b) => b.count - a.count)
+  if (hits.length === 1 || (hits.length > 1 && hits[0].count > hits[1].count)) {
+    return { repository: hits[0].repository, from: "code" }
+  }
+  return { from: "unsure", candidates: named }
+}
+
+/** A pick as the TICKET line's end: `repo="<name>" from=<why> [here]`, or `repo=?`. */
+export function describeRepository(pick: RepositoryPick): string {
+  if (pick.from === "unsure") {
+    const candidates = pick.candidates.map((r) => r.name).join(",")
+    return ` repo=?${candidates ? ` candidates="${candidates}"` : ""}`
+  }
+  const here = pick.repository.current ? " here" : ""
+  return ` repo="${pick.repository.name}" from=${pick.from}${here}`
+}
+
 const SWITCHES = new Set([
   "no-linked",
   "section-by-rank",
@@ -751,9 +886,11 @@ function branchLine(args: Args): void {
 }
 
 function list(args: Args): void {
-  const input = readJson<{ issues?: Assigned[]; workspaces?: Workspace[] }>(
-    requiredFlag(args, "input"),
-  )
+  const input = readJson<{
+    issues?: Assigned[]
+    workspaces?: Workspace[]
+    repositories?: Repository[]
+  }>(requiredFlag(args, "input"))
   const ranks = ranksOf(args)
   const rules = readRules(repoRoot())
   const all = queue(
@@ -769,12 +906,22 @@ function list(args: Args): void {
   if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) {
     throw new UsageError("--limit takes a whole number above 0")
   }
+  const repositories = (input.repositories ?? []).filter(
+    (r) => typeof r?.name === "string" && r.name.trim() !== "",
+  )
+  const mapping = projectRepositories(rules.repositories ?? [])
   const shown = all
     .filter((i) => !priorities || priorities.includes(i.priority ?? "none"))
     .slice(0, limit)
   console.log(
     [
-      ...shown.map((issue) => describeTicket(issue, ranks, rules.blockerMark)),
+      ...shown.map(
+        (issue) =>
+          describeTicket(issue, ranks, rules.blockerMark) +
+          (repositories.length > 0
+            ? describeRepository(pickRepository(issue, repositories, mapping))
+            : ""),
+      ),
       `COUNT ${shown.length}`,
       `TOTAL ${all.length}`,
     ].join("\n"),
@@ -906,8 +1053,8 @@ const USAGE = `Usage: work.ts <command>
                   in place. Prints ADDED <file>, or UNCHANGED when it has one.
   list --input <file> [--priority <names>] [--limit <n>] [--ranks <names>]
        [--no-linked]
-                  The tickets in <file> ({"issues": [...], "workspaces": [...]})
-                  with no work started yet, in the order to pick them up
+                  The tickets in <file> ({"issues": [...], "workspaces": [...],
+                  "repositories": [...]}) with no work started yet, in the order to pick them up
                   (by priority, then the config's tickets.blockerMark in the
                   title, then due date, then blocking other work). A ticket
                   marked "link": true (from a read-only tracker) is left out
@@ -915,8 +1062,18 @@ const USAGE = `Usage: work.ts <command>
                     TICKET <ID> "<rank>" due=<date|none>
                            filed=<date|unknown> [by="<name>"] [<state>]
                            [blocker] [blocks-other-work] "<title>" <url>
+                           [repo="<name>" from=<why> [here] | repo=?
+                            [candidates="<names>"]]
                   then COUNT <n> (printed) and TOTAL <n> (before --priority
-                  and --limit).
+                  and --limit). With "repositories" (the workspaces
+                  integration's, each {"name", "remote", "path", "current"}),
+                  each line ends with the one its work lands in: the one
+                  repository it names (from=named), else the one the
+                  config's tickets.repositories maps its "project" to
+                  (from=project), else the one checkout holding the paths
+                  it names (from=code), or the only one (from=only); "here"
+                  when that's this one. repo=? when it's unclear, with the
+                  repositories it names, if any.
   lock [--wait <seconds>]
                   Take the repo's lock on opening workspaces, shared by all
                   its worktrees, so starts running side by side open one at a

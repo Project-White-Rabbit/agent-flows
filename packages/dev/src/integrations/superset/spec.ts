@@ -168,6 +168,9 @@ export const superset: IntegrationSpec = {
       workspaces: {
         cli: "`superset ws list --local --json`, keeping every one with no `archivedAt`, in every project, not only `{project}`: an issue's workspace can be in another Superset project (the same repository set up twice, or work moved between them), and it still counts as started. With <repository>, the same list. Each has `id`, `name`, `branch`, `projectId`, and `tags` (its sidebar section, empty for none); a workspace whose `projectId` isn't `{project}` has no `section` here, since that project's sections aren't this one's. This session runs in the one whose `id` is `$SUPERSET_WORKSPACE_ID`, or, with that unset, whose `worktreePath` is `git rev-parse --show-toplevel`",
       },
+      repositories: {
+        cli: "`superset projects list --local --json` (a list, or one under `projects`): each project's `name` (else its `id`) as `name`, its `repo` as `remote` (a URL turned into `<host>/<owner>/<repo>`), and its `path`; `current` for the one whose `id` is `{project}`",
+      },
       renameWorkspace: {
         cli: "`superset ws update <id> --local --json --name <name>`, adding `--tag <section>` for a section or `--clear-tags` for `none` (a tag files the workspace in the sidebar section of that name, making it)",
       },

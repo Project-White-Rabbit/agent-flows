@@ -116,6 +116,9 @@ export const worktree: IntegrationSpec = {
       workspaces: {
         cli: "`git worktree list --porcelain` (with <repository>, a path to another repository's checkout, `git -C <repository> worktree list --porcelain`): one workspace per `worktree <path>` block with a `branch refs/heads/<branch>` line. Its id and name are the path, and it has no section. This session runs in the one whose path is `git rev-parse --show-toplevel`",
       },
+      repositories: {
+        cli: "Git manages no list of repositories, so take the checkouts beside this one: this repository's main checkout (the first `worktree` in `git worktree list --porcelain`), and every directory next to it (in its parent directory) with a `.git` directory, not a `.git` file (that's a linked worktree). Each one's `name` and `path` are its path (what <repository> takes), its `remote` is `git -C <path> remote get-url origin` turned into `<host>/<owner>/<repo>` (null when it has none), and `current` is true for the main checkout",
+      },
       renameWorkspace:
         "Nothing to do: a git worktree is known by its path, which stays as it is, and has no name or section of its own",
       createWorkspace: {

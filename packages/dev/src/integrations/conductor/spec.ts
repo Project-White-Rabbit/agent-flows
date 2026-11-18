@@ -171,6 +171,9 @@ export const conductor: IntegrationSpec = {
       workspaces: {
         cli: "`conductor project workspace {projectId} --json --limit 100` (with <repository>, that project's id, as for `createWorkspace`), stepping `--offset` while the response reports `hasMore`: each workspace's id, name, branch, and section. This session runs in the one whose name is `$CONDUCTOR_WORKSPACE_NAME` (a local workspace isn't listed: the CLI sees cloud ones only)",
       },
+      repositories: {
+        cli: "`conductor project list --json` (a list, or one under `projects`, `data`, or `result.projects`): each project's `name` (else its id) as `name`, the repository it names (a URL or `owner/repo`) as `remote`, in the form `<host>/<owner>/<repo>`, and its `path` when it has one (Conductor's projects are cloud ones, so usually null); `current` for the one whose id is `{projectId}`",
+      },
       renameWorkspace: {
         cli: "`conductor workspace rename <id> --name <name>`. For a <section>, find or make it as for `createWorkspace`, then `conductor workspace move <id> --section <section id>`; for `none`, `conductor workspace move <id> --no-section`",
       },

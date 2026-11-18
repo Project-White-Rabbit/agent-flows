@@ -198,6 +198,8 @@ export type Rules = {
   linkedWork?: LinkedWorkRule
   /** start-ticket-queue lists read-only trackers' issues (default true). */
   queueLinked?: boolean
+  /** Each tracker project's repository, as `<project>=<repository>`. */
+  repositories?: string[]
 }
 
 export const LINKED_WORK_RULES = ["drop", "file"] as const
@@ -1254,6 +1256,10 @@ export function readRules(root: string): Rules {
       : {}),
     ...(typeof s.queueLinked === "boolean"
       ? { queueLinked: s.queueLinked }
+      : {}),
+    ...(Array.isArray(s.repositories) &&
+    s.repositories.every((r) => typeof r === "string")
+      ? { repositories: s.repositories as string[] }
       : {}),
   }
 }
