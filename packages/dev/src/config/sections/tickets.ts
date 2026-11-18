@@ -185,6 +185,32 @@ export function ranksFromDoc(text: string): string[] | undefined {
   return undefined
 }
 
+/**
+ * `tickets.repositories` as a lookup: each tracker project, lowercased, to
+ * the repository its work lands in. An entry is `<project>=<repository>`.
+ */
+export function projectRepositories(entries: string[]): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const entry of entries) {
+    const at = entry.lastIndexOf("=")
+    const project = entry.slice(0, at).trim().toLowerCase()
+    const repository = entry.slice(at + 1).trim()
+    if (at > 0 && project && repository) {
+      map.set(project, repository)
+    }
+  }
+  return map
+}
+
+/** What's wrong with `tickets.repositories`, or undefined: no project twice. */
+export function repositoriesProblem(entries: string[]): string | undefined {
+  const projects = entries.map((e) =>
+    e.slice(0, e.lastIndexOf("=")).trim().toLowerCase(),
+  )
+  const twice = projects.find((p, i) => projects.indexOf(p) !== i)
+  return twice === undefined ? undefined : `maps the project \`${twice}\` twice`
+}
+
 /** A tracked doc about how the team prioritizes (`TASK_PRIORITIZATION.md`). */
 const PRIORITIZATION_DOC = /(^|\/)[^/]*priorit[^/]*\.mdx?$/i
 
@@ -300,6 +326,18 @@ export const tickets: SectionSpec = {
       example: false,
     },
     {
+      key: "repositories",
+      type: "string[]",
+      description:
+        "Which repository each tracker project's work lands in, as `<project>=<repository>` (the repository by the name the workspaces integration's `repositories` op gives it): start-ticket-queue opens an issue in that project in that repository, unless the issue names another. A project not listed is decided from the issue itself",
+      example: ["Scenarios=noah-server", "Assistant=ai-assistant"],
+      pattern: {
+        regex: /^[^=]*\S[^=]*=[^=]*\S[^=]*$/,
+        hint: "`<project>=<repository>`, such as `Scenarios=noah-server`",
+      },
+      check: (value: FieldValue) => repositoriesProblem(value as string[]),
+    },
+    {
       key: "assignOnSync",
       type: "boolean",
       description:
@@ -315,6 +353,6 @@ export const tickets: SectionSpec = {
     },
   ],
   lookup:
-    "Leave it out unless the repo's agent instructions say how the team ranks and files work: a planning document per cycle, a mark for customer blockers, due dates required at some priorities, its own names for the priorities (P0, P1, …, read off the doc that maps them to the tracker's), parents ranked by their sub-issues, whether work goes under a larger issue, the estimates the team sizes work in",
+    "Leave it out unless the repo's agent instructions say how the team ranks and files work: a planning document per cycle, a mark for customer blockers, due dates required at some priorities, its own names for the priorities (P0, P1, …, read off the doc that maps them to the tracker's), parents ranked by their sub-issues, whether work goes under a larger issue, the estimates the team sizes work in, which repository a tracker project's work lands in when it isn't this one",
   detect: detectTickets,
 }

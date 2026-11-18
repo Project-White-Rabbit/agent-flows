@@ -79,6 +79,7 @@ query AssignedIssues($filter: IssueFilter!, $after: String) {
         creator { name }
         botActor { name }
         state { name type }
+        project { name }
         children { nodes { state { type } } }
         attachments { nodes { url } }
         relations { nodes { type relatedIssue { state { type } } } }
@@ -286,6 +287,7 @@ type AssignedNode = {
   creator?: { name: string } | null
   botActor?: { name?: string | null } | null
   state: { name: string; type: string }
+  project?: { name: string } | null
   children?: { nodes: { state: { type: string } }[] }
   attachments?: { nodes: { url: string }[] }
   relations?: {
@@ -444,6 +446,7 @@ export const assignedIssues: Adapter = {
         createdAt: node.createdAt ?? null,
         // An issue an integration filed has a bot, not a person, as its author.
         creator: node.creator?.name ?? node.botActor?.name ?? null,
+        project: node.project?.name ?? null,
         openSubIssues: (node.children?.nodes ?? []).some((c) =>
           open(c.state.type),
         ),

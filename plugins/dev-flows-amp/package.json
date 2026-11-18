@@ -1,6 +1,6 @@
 {
   "name": "dev-flows",
-  "version": "0.47.0",
+  "version": "0.48.0",
   "description": "Dev workflow commands for any repository, for Amp: sync, ready, finish, cancel, evaluate, preview, prototype, and the rest. Needs dev-flows-base installed too.",
   "type": "module",
   "main": "index.js",

@@ -190,6 +190,9 @@ export const orca: IntegrationSpec = {
       workspaces: {
         cli: "`orca worktree list --json --repo {repo} --limit 1000` (with <repository>, `id:<that repo's id>`, as for `createWorkspace`), keeping the entries of `result.worktrees` whose `isArchived` is false. Each one's id is its `id` (the whole `<repo id>::<path>` value), its name its `displayName`, its branch its `branch` without `refs/heads/`, and it has no section. This session runs in the one whose `id` is `$ORCA_WORKTREE_ID`, or, with that unset, whose `path` is `git rev-parse --show-toplevel`",
       },
+      repositories: {
+        cli: "`orca repo list --json`: each entry of `result.repos` with its `displayName` (else its `id`) as `name`, its `gitRemoteIdentity.canonicalKey` as `remote` (else its `gitRemoteIdentity.remoteUrl` turned into `<host>/<owner>/<repo>`), and its `path`; `current` for the one `{repo}` selects (`id:<its id>`)",
+      },
       renameWorkspace: {
         cli: "`orca worktree set --json --worktree id:<id> --display-name <name>`. Orca has no sidebar sections, so a <section> doesn't apply: say so when one is given",
       },
