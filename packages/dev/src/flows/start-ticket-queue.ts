@@ -21,10 +21,10 @@ const INPUT_EXAMPLE = `{
   ]
 }`
 
-export const ticketsToWorkFlow: Flow = devKit.defineFlow({
+export const startTicketQueueFlow: Flow = devKit.defineFlow({
   schemaVersion: 1,
-  id: "tickets-to-work",
-  title: "{{cmd}}tickets-to-work",
+  id: "start-ticket-queue",
+  title: "{{cmd}}start-ticket-queue",
   frontmatter: {
     description:
       "Go through your open issues that have no pull request or workspace yet, most urgent first, and start, skip, or close each one.",
@@ -49,7 +49,7 @@ export const ticketsToWorkFlow: Flow = devKit.defineFlow({
     "**Act through the integrations' ops.** Issues are read and closed, and workspaces listed, only through the ops `configure.ts integrations` returns, run as given; workspaces open only through `{{cmd}}start-work`.",
     "**The person decides every issue.** One question per issue, never several in one, never skipped because the answer looks obvious.",
     "**Every start reaches the person.** A start runs in the background, but its result (started, already open, skipped, or failed) is told before the report or in it, and the report waits for every start still running.",
-    hooksInvariant("tickets-to-work"),
+    hooksInvariant("start-ticket-queue"),
   ],
   phases: [
     {
@@ -65,7 +65,7 @@ export const ticketsToWorkFlow: Flow = devKit.defineFlow({
           body: `If the argument is \`help\`, print the block below verbatim and stop.
 
 \`\`\`
-{{cmd}}tickets-to-work  [--priority <ranks>] [--limit <n>]
+{{cmd}}start-ticket-queue  [--priority <ranks>] [--limit <n>]
                               [--section <name> | --section-by-rank]
                               [--workspaces <entry>] [help]
 
@@ -99,7 +99,7 @@ An issue with open sub-issues is left out: its sub-issues are the work.
           commandCalls: ["configure", "work"],
           body: `1. **Flags.** Take \`--priority <ranks>\`, \`--limit <n>\`, \`--section <name>\`, \`--section-by-rank\`, and \`--workspaces <entry>\` out of \`{{argsToken}}\`. ${UNKNOWN_FLAGS} Read plain words the same way: "only urgent and P0" is \`--priority urgent,p0\`, "just 5" or "top 5" is \`--limit 5\`, "sort them into sections by priority" is \`--section-by-rank\`. When both \`--section-by-rank\` and \`--section\` are given, \`--section-by-rank\` wins: say once that \`--section\` is ignored.
 2. **Integrations.** \`{{command:configure}} integrations issueTracker workspaces\`. ${REQUIRE_CONFIG} ${USE_INTEGRATIONS} Closing an issue needs its entry at \`level\` \`track\`; at \`link\`, its issues can be started or skipped, not closed.
-3. **The issues.** \`<dir>\` is ${flowDir("tickets-to-work")} (create it). Run every \`issueTracker\` entry's \`assignedIssues\` op and every \`workspaces\` entry's \`workspaces\` op, and write them to \`<dir>/issues.json\`:
+3. **The issues.** \`<dir>\` is ${flowDir("start-ticket-queue")} (create it). Run every \`issueTracker\` entry's \`assignedIssues\` op and every \`workspaces\` entry's \`workspaces\` op, and write them to \`<dir>/issues.json\`:
 
    \`\`\`json
    ${INPUT_EXAMPLE.split("\n").join("\n   ")}

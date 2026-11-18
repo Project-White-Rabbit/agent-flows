@@ -34,7 +34,7 @@ import { checkUse, USE_KEY, usesOf } from "./use.ts"
 export const CONFIG_PATH = ".agent-flows/config.json"
 
 export { INSTANCE_KEY }
-export const CONFIG_VERSION = 6
+export const CONFIG_VERSION = 7
 
 /** Upgrades from each older version. */
 export const MIGRATIONS: Migration[] = [
@@ -95,21 +95,7 @@ export const MIGRATIONS: Migration[] = [
           typeof p === "string" ? p.replace(/^[^.]+/, renamed) : p,
         )
       }
-      const hooks = config.hooks
-      if (isRecord(hooks)) {
-        for (const point of Object.values(hooks)) {
-          if (!Array.isArray(point)) {
-            continue
-          }
-          for (const hook of point) {
-            if (isRecord(hook) && Array.isArray(hook.flows)) {
-              hook.flows = hook.flows.map((flow: unknown) =>
-                typeof flow === "string" ? renamed(flow) : flow,
-              )
-            }
-          }
-        }
-      }
+      renameHookFlows(config, renamed)
       return config
     },
   },
@@ -172,6 +158,18 @@ export const MIGRATIONS: Migration[] = [
       return config
     },
   },
+  {
+    // tickets-to-work became start-ticket-queue: it starts work on the issues
+    // in your queue in bulk, as start-work does on the ones you name. It has
+    // no section of its own, so only the flows a general hook names follow.
+    from: 6,
+    migrate(config) {
+      renameHookFlows(config, (name) =>
+        name === "tickets-to-work" ? "start-ticket-queue" : name,
+      )
+      return config
+    },
+  },
 ]
 
 /** The fields format 6 moved from `preview` to `server`. */
@@ -185,6 +183,29 @@ const MACHINE_FIELDS = [
 
 /** Flows renamed in format 4, by their old names. */
 const FLOW_RENAMES = { merge: "finish", close: "cancel" } as const
+
+/** Renames the flows each general hook's `flows` filter names. */
+function renameHookFlows(
+  config: RawConfig,
+  renamed: (name: string) => string,
+): void {
+  const hooks = config.hooks
+  if (!isRecord(hooks)) {
+    return
+  }
+  for (const point of Object.values(hooks)) {
+    if (!Array.isArray(point)) {
+      continue
+    }
+    for (const hook of point) {
+      if (isRecord(hook) && Array.isArray(hook.flows)) {
+        hook.flows = hook.flows.map((flow: unknown) =>
+          typeof flow === "string" ? renamed(flow) : flow,
+        )
+      }
+    }
+  }
+}
 
 export type RawConfig = Record<string, unknown>
 

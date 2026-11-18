@@ -23,9 +23,9 @@ import { previewFlow } from "./preview.ts"
 import { prototypeFlow } from "./prototype.ts"
 import { readyFlow } from "./ready.ts"
 import { serverFlow } from "./server.ts"
+import { startTicketQueueFlow } from "./start-ticket-queue.ts"
 import { startWorkFlow } from "./start-work.ts"
 import { syncFlow } from "./sync.ts"
-import { ticketsToWorkFlow } from "./tickets-to-work.ts"
 
 export const DEV_FLOWS = [
   cancelFlow,
@@ -37,9 +37,9 @@ export const DEV_FLOWS = [
   prototypeFlow,
   readyFlow,
   serverFlow,
+  startTicketQueueFlow,
   startWorkFlow,
   syncFlow,
-  ticketsToWorkFlow,
 ]
 
 /** Where each flow lands in the base, relative to its root. */

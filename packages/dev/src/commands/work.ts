@@ -1,6 +1,6 @@
-// The mechanical half of the start-work and tickets-to-work flows: which
+// The mechanical half of the start-work and start-ticket-queue flows: which
 // tickets get a workspace, on which branch, with what prompt, and the order
-// tickets-to-work goes through them in. Everything vendor-specific (reading
+// start-ticket-queue goes through them in. Everything vendor-specific (reading
 // issues, opening workspaces, moving issues) stays in the skills, which reach
 // it through the configured integrations' ops and pass what they read in here
 // as a JSON file.

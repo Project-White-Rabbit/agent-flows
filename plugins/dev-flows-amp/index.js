@@ -15,9 +15,9 @@ export const SKILL_NAMES = [
   "prototype",
   "ready",
   "server",
+  "start-ticket-queue",
   "start-work",
   "sync",
-  "tickets-to-work",
 ]
 
 export default async function devFlows(amp) {

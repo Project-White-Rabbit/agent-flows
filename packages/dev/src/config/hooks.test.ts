@@ -116,10 +116,10 @@ describe("checkHooks", () => {
         "hooks.before",
       ).issues,
     ).toEqual([
-      "hooks.before[a].flows must list flows of cancel, create-tickets, evaluate, finish, preview, prototype, ready, server, start-work, sync, tickets-to-work",
-      "hooks.before[b].flows must list flows of cancel, create-tickets, evaluate, finish, preview, prototype, ready, server, start-work, sync, tickets-to-work",
+      "hooks.before[a].flows must list flows of cancel, create-tickets, evaluate, finish, preview, prototype, ready, server, start-ticket-queue, start-work, sync",
+      "hooks.before[b].flows must list flows of cancel, create-tickets, evaluate, finish, preview, prototype, ready, server, start-ticket-queue, start-work, sync",
       "hooks.before[c].modes must list modes of finish: default",
-      "hooks.before[d].flows must list flows of cancel, create-tickets, evaluate, finish, preview, prototype, ready, server, start-work, sync, tickets-to-work",
+      "hooks.before[d].flows must list flows of cancel, create-tickets, evaluate, finish, preview, prototype, ready, server, start-ticket-queue, start-work, sync",
     ])
     expect(check([{ name: "a", run: "x", flows: ["ready"] }]).issues).toEqual([
       "ready.before[a].flows is only for a general point: this one runs only in ready",
@@ -249,6 +249,11 @@ describe("oldFlowNames", () => {
     expect(
       oldFlowNames("case $AGENT_FLOWS_FLOW in (merge|close) ;; esac"),
     ).toContain('"merge" (now "finish") and "close" (now "cancel")')
+    expect(
+      oldFlowNames(
+        'case "$AGENT_FLOWS_FLOW" in start-work|tickets-to-work) ;; esac',
+      ),
+    ).toContain('"tickets-to-work" (now "start-ticket-queue")')
   })
 
   it("leaves commands that only mention merge or close, or don't test the flow", () => {

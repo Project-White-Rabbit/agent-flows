@@ -371,6 +371,36 @@ describe("migrate", () => {
     })
   })
 
+  it("renames v6's tickets-to-work in the flows a general hook names", () => {
+    expect(
+      migrate({
+        version: 6,
+        hooks: {
+          before: [
+            {
+              name: "env",
+              flows: ["start-work", "tickets-to-work"],
+              run: "./env.sh",
+            },
+          ],
+          after: [{ name: "note", run: "./note.sh" }],
+        },
+      }).config,
+    ).toEqual({
+      version: CONFIG_VERSION,
+      hooks: {
+        before: [
+          {
+            name: "env",
+            flows: ["start-work", "start-ticket-queue"],
+            run: "./env.sh",
+          },
+        ],
+        after: [{ name: "note", run: "./note.sh" }],
+      },
+    })
+  })
+
   it("needs a version", () => {
     expect(migrate({}, [], 1).issues).toEqual([
       "version is required (current: 1)",

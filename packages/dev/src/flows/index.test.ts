@@ -78,12 +78,12 @@ describe("dev flows", () => {
       "flows/claude/ready/flow.md",
       "flows/claude/ready/references/run.md",
       "flows/claude/server/flow.md",
+      "flows/claude/start-ticket-queue/flow.md",
       "flows/claude/start-work/flow.md",
       "flows/claude/sync/flow.md",
       "flows/claude/sync/references/local.md",
       "flows/claude/sync/references/remote.md",
       "flows/claude/sync/references/report.md",
-      "flows/claude/tickets-to-work/flow.md",
       "flows/manifest.json",
     ])
   })
@@ -549,18 +549,20 @@ describe("dev flows", () => {
     )
   })
 
-  it("chains tickets-to-work to start-work, and start-work to create-tickets", () => {
+  it("chains start-ticket-queue to start-work, and start-work to create-tickets", () => {
     const skill = (id: string) =>
       files.find((f) => f.path === flowPath(id))?.content ?? ""
-    const ticketsToWork = skill("tickets-to-work")
-    expect(ticketsToWork).toContain(
+    const startTicketQueue = skill("start-ticket-queue")
+    expect(startTicketQueue).toContain(
       "Run the start-work flow (read `$DEV_FLOWS_BASE/flows/claude/start-work/flow.md` and follow it, with the same caller, so its commands are `/<caller>:<name>` too) with `<ID> --yes --run <ID> <flags>`",
     )
     // Each start runs in the background, and the next question doesn't wait.
-    expect(ticketsToWork).toContain(
+    expect(startTicketQueue).toContain(
       "start it in the background, and ask about the next issue in the same turn",
     )
-    expect(ticketsToWork).toContain("First wait for every start still running")
+    expect(startTicketQueue).toContain(
+      "First wait for every start still running",
+    )
     const startWork = skill("start-work")
     // Starts running at once keep their files apart and open one at a time.
     expect(startWork).toContain("plus `/<name>` with `--run <name>`")
@@ -590,9 +592,9 @@ describe("dev flows", () => {
     expect(takesFlags.map((f) => f.path)).toEqual([
       "flows/claude/create-tickets/flow.md",
       "flows/claude/ready/flow.md",
+      "flows/claude/start-ticket-queue/flow.md",
       "flows/claude/start-work/flow.md",
       "flows/claude/sync/flow.md",
-      "flows/claude/tickets-to-work/flow.md",
     ])
     for (const file of files) {
       expect(file.content.includes(UNKNOWN_FLAGS)).toBe(

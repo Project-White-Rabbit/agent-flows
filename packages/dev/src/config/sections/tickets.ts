@@ -218,7 +218,7 @@ export const tickets: SectionSpec = {
     {
       key: "blockerMark",
       description:
-        "Mark at the start of the title of an issue that stops a customer: create-tickets adds it to an item marked `blocker`, sync keeps it when it retitles, and tickets-to-work takes marked issues first within each priority",
+        "Mark at the start of the title of an issue that stops a customer: create-tickets adds it to an item marked `blocker`, sync keeps it when it retitles, and start-ticket-queue takes marked issues first within each priority",
       example: "🛑",
       pattern: MARK,
     },
@@ -234,7 +234,7 @@ export const tickets: SectionSpec = {
       key: "ranks",
       type: "string[]",
       description:
-        "The team's names for the tracker's priorities, one each for `urgent`, `high`, `medium`, `low`, and `none`, in that order (default `Urgent`, `High`, `Medium`, `Low`, `No priority`): start-work's `--section-by-rank` names sections after them, tickets-to-work shows them and takes them in `--priority`, and create-tickets takes them as an item's priority and shows them beside it",
+        "The team's names for the tracker's priorities, one each for `urgent`, `high`, `medium`, `low`, and `none`, in that order (default `Urgent`, `High`, `Medium`, `Low`, `No priority`): start-work's `--section-by-rank` names sections after them, start-ticket-queue shows them and takes them in `--priority`, and create-tickets takes them as an item's priority and shows them beside it",
       example: ["Urgent", "P0", "P1", "P2", "Audit"],
       check: (value: FieldValue) => ranksProblem(value as string[]),
     },

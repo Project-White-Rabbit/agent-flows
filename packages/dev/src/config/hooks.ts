@@ -340,9 +340,9 @@ export const HOOK_FLOWS = [
   "prototype",
   "ready",
   "server",
+  "start-ticket-queue",
   "start-work",
   "sync",
-  "tickets-to-work",
 ] as const
 
 /**
@@ -367,9 +367,9 @@ export const FLOW_MODES: Record<string, string[]> = {
     "list",
     "status",
   ],
+  "start-ticket-queue": ["default"],
   "start-work": ["default"],
   sync: ["default", "local", "remote"],
-  "tickets-to-work": ["default"],
 }
 
 /**
@@ -429,12 +429,13 @@ function stringList(value: unknown): value is string[] {
  * Problems in the hook list at `where` (a point's config path), and keys a
  * newer plugin may know.
  */
-// The flows renamed in config format 4. The upgrade renames a hook's flows
-// filter, but a command that tests $AGENT_FLOWS_FLOW against an old name
+// The flows renamed in config formats 4 and 7. The upgrade renames a hook's
+// flows filter, but a command that tests $AGENT_FLOWS_FLOW against an old name
 // itself would silently stop matching, so it gets a warning instead.
 const OLD_FLOW_NAMES: Record<string, string> = {
   merge: "finish",
   close: "cancel",
+  "tickets-to-work": "start-ticket-queue",
 }
 
 /**
