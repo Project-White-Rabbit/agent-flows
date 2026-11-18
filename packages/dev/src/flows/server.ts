@@ -21,7 +21,7 @@ export const serverFlow: Flow = devKit.defineFlow({
     hooks: HOOKS_COMMAND,
     server: {
       description:
-        "`start [--command <cmd>] [--url <url>]` finds the dev server this checkout runs, or starts one in the background and waits until it answers, and prints its `status` and `url`; `restart` stops it and starts it again; `stop [--all]` stops the one it started in this worktree (every one in this repo's worktrees with `--all`); `list` prints the ones it started; `adopt [--pid <pid>] [--command <cmd>]` restarts this checkout's unwatched server under the watchdog. Each first stops the servers it started for worktrees that are gone (`reaped`). With `server.up`, each runs the repo's own server manager's commands instead, and prints `managed`",
+        "`start [--command <cmd>] [--url <url>]` finds the dev server this checkout runs, or starts one in the background and waits until it answers, and prints its `status` and `url`; `restart` stops it and starts it again; `stop [--all]` stops the one it started in this worktree (every one in this repo's worktrees with `--all`); `list` prints the ones it started; `adopt [--pid <pid>] [--command <cmd>]` restarts this checkout's unwatched server under the watchdog. `--branch <branch>` makes any of them work on the server of the worktree that has that branch checked out (with `server.up` and no such worktree, the manager's commands get the branch alone). Each first stops the servers it started for worktrees that are gone (`reaped`). With `server.up`, each runs the repo's own server manager's commands instead, and prints `managed`",
       args: "<subcommand>",
     },
   }),
@@ -56,7 +56,9 @@ export const serverFlow: Flow = devKit.defineFlow({
 
 The server it starts (\`server.command\` from the config) runs in the background, its output in a log in the repo's git dir, and goes on running after this ends, for the person to keep using. It doesn't run forever: a watchdog stops it once its worktree is deleted, or once nothing has been connected to it (no page open on it) for \`server.idleTimeout\` minutes (4 hours by default). The servers it starts are recorded for the whole repo, so every run also stops any left by a deleted worktree. It never edits the working tree, commits, or pushes.
 
-A repo whose servers a manager of its own runs (a daemon or script that starts them in the background) sets \`server.up\` instead of \`server.command\`, and \`server.down\`, \`server.restart\`, \`server.status\`, and \`server.list\` as it has them: then the command runs those, prints \`managed\`, and runs no watchdog, since the manager decides when its servers stop. \`up\`, \`down\`, and \`status\` are other names for \`default\`, \`stop\`, and \`list\`, for a front end that used them.`,
+A repo whose servers a manager of its own runs (a daemon or script that starts them in the background) sets \`server.up\` instead of \`server.command\`, and \`server.down\`, \`server.restart\`, \`server.status\`, and \`server.list\` as it has them: then the command runs those, prints \`managed\`, and runs no watchdog, since the manager decides when its servers stop. \`up\`, \`down\`, and \`status\` are other names for \`default\`, \`stop\`, and \`list\`, for a front end that used them.
+
+A branch name after the mode (\`up feature/x\`, \`restart feature/x\`, \`stop feature/x\`, \`status feature/x\`) works on that branch's server instead of this worktree's: the one of the worktree that has it checked out, or, with \`server.up\` and no worktree holding it, the one the repo's manager runs for it. Pass it as \`--branch <branch>\` to every \`{{command:server}}\` call below; without \`server.up\`, a branch no worktree holds is an error to relay.`,
   invariants: [
     "**Only this checkout's server.** Never stop or restart a server this command didn't start without the person's say-so, and never one of another checkout, except one it started for a worktree that's gone (the command stops those itself) or every one it started, when the person asks with `stop all`.",
     "**When another command runs this one** (`{{cmd}}preview`), end with the server's `url` and how it got there, for that command to go on with, rather than a report of your own, and ask nothing it can't answer: a question this asks the person is still asked, but a stop is that command's stop.",
@@ -76,7 +78,7 @@ A repo whose servers a manager of its own runs (a daemon or script that starts t
           body: `If the argument is \`help\`, print the block below verbatim and stop.
 
 \`\`\`
-{{cmd}}server  [up | restart | adopt | stop [all] | down | list | status | help]
+{{cmd}}server  [up | restart | adopt | stop [all] | down | list | status | help] [<branch>]
 
 Starts this worktree's dev server when it isn't running (server.command, in
 the background, its output in a log in the git dir) and prints where it
@@ -89,6 +91,8 @@ adopt: restart a server started by hand under the watchdog, without asking
 stop (or down): stops the dev server started in this worktree
 stop all: stops every dev server started in this repo's worktrees
 list (or status): the dev servers started in this repo's worktrees
+<branch> after any of them: that branch's server, from the worktree that has
+it checked out (with server.up, the manager's, for any branch)
 
 With server.up, the repo's own manager runs its servers: these run its
 commands (server.up, server.restart, server.down, server.list) instead, and

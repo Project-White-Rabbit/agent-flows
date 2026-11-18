@@ -246,6 +246,17 @@ describe("ciSettings", () => {
   })
 })
 
+describe("fixPushChecks", () => {
+  it("reruns only the failed checks before a fix push when set to failed", () => {
+    expect(ciSettings({ ready: { fixPushChecks: "failed" } })).toMatchObject({
+      fixPushChecks: "failed",
+    })
+    expect(ciSettings({ ready: { fixPushChecks: "all" } })).not.toHaveProperty(
+      "fixPushChecks",
+    )
+  })
+})
+
 describe("runPass", () => {
   it("counts a run's passes from its first, across earlier runs on the branch", () => {
     const t = new Date("2026-10-26T12:00:00Z")

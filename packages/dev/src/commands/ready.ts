@@ -377,6 +377,11 @@ export type CiSettings = {
   rollupChecks: string[]
   /** The repo has no CI config, so an empty check set reads as no CI after one poll. */
   noCiConfig?: boolean
+  /**
+   * What a CI fix push reruns locally first: `failed`, only the checks for
+   * the failures it fixes; unset, every fix and check command.
+   */
+  fixPushChecks?: "failed"
 }
 
 export function ciSettings(
@@ -400,6 +405,9 @@ export function ciSettings(
     settleGraceSeconds: positive(section.settleGrace) ?? 0,
     requireChecks: section.requireChecks === true,
     rollupChecks: stringList(section.rollupChecks),
+    ...(section.fixPushChecks === "failed"
+      ? { fixPushChecks: "failed" as const }
+      : {}),
   }
 }
 
@@ -605,6 +613,7 @@ function plan(args: string[]): void {
         : {}),
       ...(ci.requireChecks ? { requireChecks: true } : {}),
       ...(ci.rollupChecks.length > 0 ? { rollupChecks: ci.rollupChecks } : {}),
+      ...(ci.fixPushChecks ? { fixPushChecks: ci.fixPushChecks } : {}),
       ...(hasCiConfig(root) ? {} : { noCiConfig: true }),
     },
     logDir,

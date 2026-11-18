@@ -435,6 +435,61 @@ export function syncStamp(now: Date, timeZone?: string | null): string {
   }
 }
 
+/** A short id an error tracker gives an issue: `WEB-4P`, `API-1A2B`. */
+const SHORT_ID = /^[A-Z][A-Z0-9_]*-[A-Z0-9]+$/
+const LINK = /\[([^\]]*)\]\(([^)\s]+)\)/g
+const URL_TOKEN = /https?:\/\/[^\s)>\]]+/g
+
+/**
+ * The error refs in a pull request body's error lines: each line labeled
+ * `Errors` or one of `labels` (the error-tracking entries' names, as
+ * `linkLabels` `integration` and bitfab-dev's `> Sentry: Fixes WEB-4P
+ * ([title](URL))` write them), quoted or plain. A line may hold several,
+ * separated by commas; each is its short id when it shows one, else its URL.
+ */
+export function errorRefsInBody(body: string, labels: string[] = []): string[] {
+  const names = new Set(
+    ["errors", ...labels].map((label) => label.trim().toLowerCase()),
+  )
+  const refs: string[] = []
+  for (const raw of body.split(/\r?\n/)) {
+    const line = raw.replace(/^\s*(>\s*)?/, "")
+    const colon = line.indexOf(":")
+    if (colon < 0) {
+      continue
+    }
+    const label = line.slice(0, colon).replace(/\*/g, "").trim().toLowerCase()
+    if (!names.has(label)) {
+      continue
+    }
+    // Commas inside a link's text are part of a title, not a separator.
+    const links: string[] = []
+    const rest = line
+      .slice(colon + 1)
+      .replace(LINK, (_, text: string, url: string) => {
+        links.push(url)
+        const id = text.trim()
+        return SHORT_ID.test(id) ? ` ${id} ` : ` \u0000${links.length - 1} `
+      })
+    for (const part of rest.split(",")) {
+      const words = part.split(/[\s()]+/).filter(Boolean)
+      const id = words.find((word) => SHORT_ID.test(word))
+      if (id) {
+        refs.push(id)
+        continue
+      }
+      const placeholder = words.find((word) => word.startsWith("\u0000"))
+      const url = placeholder
+        ? links[Number(placeholder.slice(1))]
+        : part.match(URL_TOKEN)?.[0]
+      if (url) {
+        refs.push(url)
+      }
+    }
+  }
+  return [...new Set(refs)]
+}
+
 // --- git ---------------------------------------------------------------------
 
 function git(args: string[]): string | undefined {
@@ -928,7 +983,16 @@ function survey(args: Args): void {
     }
     changed = legacy !== undefined
   }
-  const passedRefs = args.flags.get("error-ref") ?? []
+  const bodyFile = flag(args, "pr-body")
+  const passedRefs = [
+    ...(args.flags.get("error-ref") ?? []),
+    ...(bodyFile && fs.existsSync(bodyFile)
+      ? errorRefsInBody(
+          fs.readFileSync(bodyFile, "utf8"),
+          args.flags.get("error-label") ?? [],
+        )
+      : []),
+  ]
   if (passedRefs.length > 0 && mode !== "local") {
     stored = {
       ...stored,
@@ -1171,12 +1235,16 @@ function finish(args: Args): void {
 
 const USAGE = `Usage: sync.ts <command>
 
-  survey <default|local|remote> --base <branch> --pr <pr> [--error-ref <ref>]... [--no-catch-up]
+  survey <default|local|remote> --base <branch> --pr <pr> [--error-ref <ref>]...
+         [--pr-body <file> [--error-label <name>]...] [--no-catch-up]
                   Fetch the base (not in remote mode), read git state, and
                   print it with the gate: runLocal, runRemote, noop, and the
                   branch's sync format (the config's sync section, then the
                   format it was last written in). Error refs are remembered
-                  for the branch until a remote sync links them.
+                  for the branch until a remote sync links them, with the
+                  ones in <file>'s error lines ("> Errors:", or labeled with
+                  an --error-label: "> Sentry: Fixes WEB-4P (...)"), so a
+                  ref only the pull request holds still resolves on merge.
                   --no-catch-up: a base that moved is no reason for local
                   work. Refuses on a branch in repo.protectedBranches.
                   catchUpBy is sync.catchUp: merge (the default) or rebase.

@@ -83,6 +83,8 @@ export type Assigned = {
   openSubIssues?: boolean
   pullRequests?: string[]
   blocks?: boolean
+  /** It's in a tracker entry at `link` (read-only). */
+  link?: boolean
 }
 
 /** A workspace as a workspaces integration's `workspaces` op returned it. */
@@ -516,6 +518,7 @@ export function queue(
   issues: Assigned[],
   workspaces: Workspace[],
   mark?: string,
+  options: { linked?: boolean } = {},
 ): Assigned[] {
   const order = (issue: Assigned) =>
     [
@@ -527,6 +530,7 @@ export function queue(
   return issues
     .filter(
       (issue) =>
+        (options.linked !== false || !issue.link) &&
         !issue.openSubIssues &&
         (issue.pullRequests ?? []).length === 0 &&
         !workspaceOn(
@@ -577,6 +581,7 @@ export function describeTicket(
 }
 
 const SWITCHES = new Set([
+  "no-linked",
   "section-by-rank",
   "no-section",
   "workspaces-repository",
@@ -701,11 +706,12 @@ function list(args: Args): void {
     requiredFlag(args, "input"),
   )
   const ranks = ranksOf(args)
-  const mark = readRules(repoRoot()).blockerMark
+  const rules = readRules(repoRoot())
   const all = queue(
     input.issues ?? [],
     [...(input.workspaces ?? []), ...listWorktrees()],
-    mark,
+    rules.blockerMark,
+    { linked: rules.queueLinked !== false && !args.has("no-linked") },
   )
   const priorities = args.has("priority")
     ? parsePriorities(args.get("priority") as string, ranks)
@@ -719,7 +725,7 @@ function list(args: Args): void {
     .slice(0, limit)
   console.log(
     [
-      ...shown.map((issue) => describeTicket(issue, ranks, mark)),
+      ...shown.map((issue) => describeTicket(issue, ranks, rules.blockerMark)),
       `COUNT ${shown.length}`,
       `TOTAL ${all.length}`,
     ].join("\n"),
@@ -848,10 +854,13 @@ const USAGE = `Usage: work.ts <command>
                   Add a "> Branch:" line on top of the description in <file>,
                   in place. Prints ADDED <file>, or UNCHANGED when it has one.
   list --input <file> [--priority <names>] [--limit <n>] [--ranks <names>]
+       [--no-linked]
                   The tickets in <file> ({"issues": [...], "workspaces": [...]})
                   with no work started yet, in the order to pick them up
                   (by priority, then the config's tickets.blockerMark in the
-                  title, then due date, then blocking other work):
+                  title, then due date, then blocking other work). A ticket
+                  marked "link": true (from a read-only tracker) is left out
+                  with --no-linked or the config's tickets.queueLinked false:
                     TICKET <ID> "<rank>" due=<date|none>
                            filed=<date|unknown> [by="<name>"] [<state>]
                            [blocker] [blocks-other-work] "<title>" <url>

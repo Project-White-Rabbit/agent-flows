@@ -510,7 +510,7 @@ describe("dev flows", () => {
       files.find((f) => f.path === flowPath(id))?.content ?? ""
     expect(skill("sync")).toContain("[--no-catch-up]")
     expect(skill("sync")).toMatch(
-      /sync\.ts" survey <mode> --base <base> --pr <pr> \[--error-ref <ref>\]\.\.\. \[--no-catch-up\]/,
+      /sync\.ts" survey <mode> --base <base> --pr <pr> \[--error-ref <ref>\]\.\.\. \[--pr-body <file> \[--error-label <name>\]\.\.\.\] \[--no-catch-up\]/,
     )
     expect(skill("sync/references/local")).toContain(
       "**Skip with `--no-catch-up`:**",
@@ -989,6 +989,30 @@ describe("dev flows", () => {
     expect(skill).toContain("Never open another browser to do it")
     expect(skill.indexOf("## 5. The repo's steps on the page")).toBeGreaterThan(
       skill.indexOf("## 4. Make sure it loaded"),
+    )
+  })
+
+  it("covers the gaps moving bitfab-dev onto the base found", () => {
+    const all = (id: string) =>
+      files
+        .filter((f) => f.path.startsWith(`flows/claude/${id}/`))
+        .map((f) => f.content)
+        .join("\n")
+    // A read-only tracker's same work: dropped, or still filed.
+    expect(all("create-tickets")).toContain("tickets.linkedWork")
+    expect(all("create-tickets")).toContain("Also tracked in <entry>")
+    // The queue can leave read-only trackers out.
+    expect(all("start-ticket-queue")).toContain("[--no-linked]")
+    expect(all("start-ticket-queue")).toContain("tickets.queueLinked")
+    // Ready can rerun only the checks for the failure it fixes.
+    expect(all("ready")).toContain("ci.fixPushChecks")
+    // The server for another branch.
+    expect(all("server")).toContain("--branch <branch>")
+    expect(all("server")).toContain("[<branch>]")
+    // Prototype looks in the workspace app's pane before the session's browser.
+    const look = all("prototype")
+    expect(look.indexOf("In the workspace app's browser pane")).toBeLessThan(
+      look.indexOf("Else when this session's browser tools can open"),
     )
   })
 

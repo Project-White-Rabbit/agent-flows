@@ -75,6 +75,26 @@ describe("superset's project on this machine", () => {
     })
   })
 
+  it("reads workspaces in every project, so work open in another one counts", () => {
+    const ops = superset.provides.workspaces?.workspaces as { cli: string }
+    expect(ops.cli).toContain("in every project, not only `{project}`")
+    expect(ops.cli).not.toContain("keeping the ones with `projectId`")
+  })
+
+  it("shows a page only in a pane the person can see", () => {
+    const open = superset.provides.browser?.openUrl as { cli: string }
+    expect(open.cli).toContain(
+      "superset panes open browser --workspace <workspace> --url <url> --json",
+    )
+    expect(open.cli).toContain("is an agent's: leave it alone")
+    // superset browser open only as the fallback for a CLI with no panes,
+    // in a new tab so it can't take over a pane in use.
+    expect(open.cli).not.toContain(
+      "superset browser open --workspace <workspace> --url <url> --show --json",
+    )
+    expect(open.cli).toContain("--target new-tab --show")
+  })
+
   it("keeps no project id in the config", () => {
     expect(superset.fields.map((f) => f.key)).toEqual(["agent", "browser"])
     expect(superset.machine?.keys).toEqual(["project"])

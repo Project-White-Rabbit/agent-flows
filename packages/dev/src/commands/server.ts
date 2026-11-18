@@ -484,6 +484,35 @@ function logFile(dir: string, root: string): string {
   return path.join(dir, "logs", `${name.slice(-120)}.log`)
 }
 
+/**
+ * Where `server --branch <branch>` runs: the worktree that has `branch`
+ * checked out, as `root`. With none, `root` stays `here` and `branch`
+ * comes back as `elsewhere`: only a manager of the repo's own
+ * (`server.up`) can run a server for a branch no checkout here holds.
+ */
+export function serverTarget(
+  here: string,
+  branch: string | undefined,
+): { root: string; elsewhere?: string } {
+  if (!branch) {
+    return { root: here }
+  }
+  const out = run("git", ["worktree", "list", "--porcelain"], here)
+  let dir: string | undefined
+  for (const line of out.status === 0 ? out.stdout.split("\n") : []) {
+    if (line.startsWith("worktree ")) {
+      dir = line.slice("worktree ".length)
+    } else if (dir && line === `branch refs/heads/${branch}`) {
+      try {
+        return { root: fs.realpathSync(dir) }
+      } catch {
+        // Gone from disk, though git still lists it until it's pruned.
+      }
+    }
+  }
+  return { root: here, elsewhere: branch }
+}
+
 /** This repo's worktrees, or undefined when git can't list them. */
 function worktrees(root: string): Set<string> | undefined {
   const out = run("git", ["worktree", "list", "--porcelain"], root)
@@ -1550,21 +1579,26 @@ async function listManaged(
       }
 }
 
-/** The run `startManaged` and the rest take, for this worktree. */
-function managedRun(
+/**
+ * The run `startManaged` and the rest take, for this worktree, or for
+ * `elsewhere`, a branch no worktree here has checked out: the manager gets
+ * that branch, and no worktree (`{worktree}` is empty).
+ */
+export function managedRun(
   dir: string,
   root: string,
   settings: Settings,
   manager: Manager,
   port: number | undefined,
+  elsewhere?: string,
 ): ManagedRun {
   return {
     root,
-    log: logFile(dir, root),
+    log: elsewhere ? logFile(dir, `branch-${elsewhere}`) : logFile(dir, root),
     manager,
     vars: {
-      branch: branchOf(root),
-      worktree: root,
+      branch: elsewhere ?? branchOf(root),
+      worktree: elsewhere ? "" : root,
       ...(port === undefined ? {} : { port }),
     },
     settings,
@@ -1662,6 +1696,13 @@ const USAGE = `Usage: server.ts <subcommand>
                      Stop the server these commands started in this worktree
                      (if any) and start it again, as start does
 
+  --branch <branch>  (start, status, stop, list, restart, adopt) Work on the
+                     server of the worktree that has <branch> checked out,
+                     not this one's. With server.up and no worktree holding
+                     it, the manager's commands get that branch as {branch}
+                     and an empty {worktree}; without server.up, it's an
+                     error.
+
   With server.up, the repo's own manager runs its servers, and these run its
   commands instead (from the repo root, with $BRANCH, $WORKTREE, and, with
   server.ports, $PORT, also as {branch}, {worktree}, and {port}): start runs
@@ -1682,6 +1723,12 @@ const USAGE = `Usage: server.ts <subcommand>
   time one it started answers, and its server.stopped hooks each time one
   stops while its worktree is still there (the watchdog's stops included);
   start, adopt, and stop print what they did as hooks.`
+
+function notCheckedOut(branch: string): UsageError {
+  return new UsageError(
+    `no worktree of this repo has ${branch} checked out, and server.command runs from a checkout: check it out in a worktree first (a manager of the repo's own, server.up, can run one for any branch)`,
+  )
+}
 
 export async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv
@@ -1708,10 +1755,16 @@ export async function main(argv: string[]): Promise<void> {
   }
   try {
     const flags = parseFlags(rest, new Set(["all"]))
-    const root = fs.realpathSync(repoRoot())
+    const here = fs.realpathSync(repoRoot())
+    const { root, elsewhere } = serverTarget(here, flags.get("branch"))
     const dir = stateDir("server", { cwd: root, shared: true })
     // Where preview kept the one server it started, before this command.
     migrateLegacy(dir, root, stateDir("preview", { cwd: root }))
+    if (elsewhere && command === "adopt") {
+      throw new UsageError(
+        `no worktree of this repo has ${elsewhere} checked out, so there's no server of its checkout to adopt`,
+      )
+    }
     if (command === "stop" || command === "list") {
       // Stopping must work whatever else the config gets wrong: finish and
       // cancel run it once the work is over.
@@ -1724,8 +1777,18 @@ export async function main(argv: string[]): Promise<void> {
       const manager = settings?.manager
       const managed =
         settings && manager
-          ? managedRun(dir, root, settings, manager, rememberedPort(dir, root))
+          ? managedRun(
+              dir,
+              root,
+              settings,
+              manager,
+              elsewhere ? undefined : rememberedPort(dir, root),
+              elsewhere,
+            )
           : undefined
+      if (elsewhere && !managed) {
+        throw notCheckedOut(elsewhere)
+      }
       if (command === "stop") {
         if (managed) {
           const reaped = await reap(dir, root)
@@ -1757,8 +1820,8 @@ export async function main(argv: string[]): Promise<void> {
       const looking = command === "status"
       const reaped = looking ? [] : await reap(dir, root)
       const extra = reaped.length > 0 ? { reaped } : {}
-      let port = rememberedPort(dir, root)
-      if (port === undefined && settings.ports && !looking) {
+      let port = elsewhere ? undefined : rememberedPort(dir, root)
+      if (port === undefined && settings.ports && !looking && !elsewhere) {
         port = choosePort(dir, root, settings.ports)
         if (port === undefined) {
           printJson({ ...noFreePort(settings), ...extra })
@@ -1766,7 +1829,7 @@ export async function main(argv: string[]): Promise<void> {
           return
         }
       }
-      const managed = managedRun(dir, root, settings, manager, port)
+      const managed = managedRun(dir, root, settings, manager, port, elsewhere)
       if (command !== "restart") {
         const found = await findManaged(managed)
         if (found || looking) {
@@ -1789,6 +1852,9 @@ export async function main(argv: string[]): Promise<void> {
         process.exitCode = 1
       }
       return
+    }
+    if (elsewhere) {
+      throw notCheckedOut(elsewhere)
     }
     if (command === "restart") {
       const { stopped, reaped } = await stop(dir, root, false)

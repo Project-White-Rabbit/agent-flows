@@ -206,14 +206,26 @@ function headsMergedPr(ctx: StackContext, branch: string): boolean {
 export type Parent = {
   parent: string
   source: "recorded" | "pull request" | "created from"
+  /**
+   * The parent recorded in git config, when the open pull request's base
+   * disagreed with it and won: the pull request was retargeted by hand.
+   */
+  overrode?: string
 }
 
 /**
- * `branch`'s parent: its recorded one; else its open pull request's base,
- * when that base heads an open or merged pull request of its own (a base
- * that doesn't is the trunk, or a pull request opened against the wrong
- * branch); else, with no pull request yet, the branch it was created from,
- * when that one heads an open pull request. Undefined means it isn't stacked.
+ * `branch`'s parent. With an open pull request, its base: the pull request
+ * is what the person sees and retargets by hand, so its base wins over a
+ * parent recorded in git config (as bitfab-dev's `branch-parent.sh` read it).
+ * Two exceptions keep the record: a recorded parent that merged (the host
+ * moved the pull request when it landed, and sync still has to move the
+ * branch off it), and a base that's no stacked branch at all (it heads no
+ * open or merged pull request of its own and isn't the trunk: a pull request
+ * opened against the wrong branch). A base that's the trunk means it isn't
+ * stacked. With no pull request, the recorded parent, else the branch it was
+ * created from (git's reflog), when that one heads an open pull request.
+ * Undefined means it isn't stacked. When the host can't be read, a recorded
+ * parent still answers; with none, it throws.
  */
 export function findParent(
   ctx: StackContext,
@@ -222,33 +234,52 @@ export function findParent(
 ): Parent | undefined {
   const records = known.records ?? recordedParents(ctx.sh)
   const recorded = records.get(branch)
-  if (recorded) {
-    return { parent: recorded, source: "recorded" }
+  let prs = known.prs
+  if (!prs) {
+    try {
+      prs = openPrs(ctx)
+    } catch (error) {
+      if (recorded) {
+        return { parent: recorded, source: "recorded" }
+      }
+      throw error
+    }
   }
-  const prs = known.prs ?? openPrs(ctx)
   const heads = new Set(prs.map((pr) => pr.headRefName))
   const own = prs.find((pr) => pr.headRefName === branch)
-  if (own) {
-    const base = own.baseRefName
-    if (
-      base !== ctx.base &&
-      base !== branch &&
-      (heads.has(base) || headsMergedPr(ctx, base))
-    ) {
-      return { parent: base, source: "pull request" }
+  if (!own) {
+    if (recorded) {
+      return { parent: recorded, source: "recorded" }
+    }
+    const from = createdFrom(ctx.sh, branch)
+    if (from && from !== ctx.base && heads.has(from)) {
+      return { parent: from, source: "created from" }
     }
     return undefined
   }
-  const from = createdFrom(ctx.sh, branch)
-  if (from && from !== ctx.base && heads.has(from)) {
-    return { parent: from, source: "created from" }
+  const base = own.baseRefName
+  if (recorded === base) {
+    return { parent: recorded, source: "recorded" }
   }
-  return undefined
+  if (recorded && !heads.has(recorded) && headsMergedPr(ctx, recorded)) {
+    return { parent: recorded, source: "recorded" }
+  }
+  if (base === ctx.base) {
+    return undefined
+  }
+  if (base !== branch && (heads.has(base) || headsMergedPr(ctx, base))) {
+    return {
+      parent: base,
+      source: "pull request",
+      ...(recorded ? { overrode: recorded } : {}),
+    }
+  }
+  return recorded ? { parent: recorded, source: "recorded" } : undefined
 }
 
 function notStacked(branch: string): Error {
   return new Error(
-    `${branch} isn't stacked: no parent is recorded (git config branch.${branch}.${RECORD}), its pull request's base isn't another stacked branch, and it wasn't created from a branch with an open pull request`,
+    `${branch} isn't stacked: its open pull request targets the base, or, with none open, no parent is recorded (git config branch.${branch}.${RECORD}) and it wasn't created from a branch with an open pull request, or its pull request's base isn't another stacked branch`,
   )
 }
 
@@ -259,10 +290,19 @@ export function stackOf(
   prs: OpenPr[],
   records: Map<string, string>,
 ): Downstack {
-  // Each open pull request's head stacks on its recorded parent, else its base.
+  // Each open pull request's head stacks on its base when that's the trunk
+  // or another open pull request's head (it wins over a record, as in
+  // findParent), else on its recorded parent, else its base.
+  const heads = new Set(prs.map((pr) => pr.headRefName))
   const parents = new Map<string, string>()
   for (const pr of prs) {
-    parents.set(pr.headRefName, records.get(pr.headRefName) ?? pr.baseRefName)
+    const base = pr.baseRefName
+    parents.set(
+      pr.headRefName,
+      base === ctx.base || heads.has(base)
+        ? base
+        : (records.get(pr.headRefName) ?? base),
+    )
   }
   const own = findParent(ctx, branch, { prs, records })
   if (own) {
@@ -363,23 +403,36 @@ export async function parentOp(ctx: StackContext): Promise<Parent> {
 export async function trackOp(
   ctx: StackContext,
   parent: string,
-): Promise<{ branch: string; parent: string; recorded: boolean }> {
+): Promise<{
+  branch: string
+  parent: string
+  recorded: boolean
+  retargeted: boolean
+}> {
   const branch = currentBranch(ctx.sh)
   if (parent === branch) {
     throw new Error(`${branch} can't be stacked on itself`)
   }
+  const prs = openPrs(ctx)
   // Only on a stacked branch: recording any other base (a pull request
   // opened by hand against the wrong branch) would get it past finish's gate.
   if (
     parent !== ctx.base &&
-    !openPrs(ctx).some((pr) => pr.headRefName === parent) &&
+    !prs.some((pr) => pr.headRefName === parent) &&
     !headsMergedPr(ctx, parent)
   ) {
     throw new Error(
       `${parent} isn't a stacked branch (it heads no open or merged pull request), so ${branch} isn't stacked on it: open ${parent}'s pull request first, or retarget ${branch}'s to the base`,
     )
   }
-  return { branch, parent, recorded: recordParent(ctx, branch, parent) }
+  const recorded = recordParent(ctx, branch, parent)
+  // An open pull request's base wins over the record, so it moves too.
+  const retargeted = retarget(
+    ctx,
+    prs.find((pr) => pr.headRefName === branch),
+    parent,
+  )
+  return { branch, parent, recorded, retargeted }
 }
 
 export async function downstackOp(ctx: StackContext): Promise<Downstack> {
@@ -615,9 +668,14 @@ export async function submitOp(ctx: StackContext): Promise<{
   created: boolean
   retargeted: boolean
   forced: boolean
+  overrode?: string
 }> {
   const branch = currentBranch(ctx.sh)
-  const parent = parentOrBase(ctx, branch)
+  const found = findParent(ctx, branch)
+  const parent = found?.parent ?? ctx.base
+  if (!parent) {
+    throw notStacked(branch)
+  }
   let forced = false
   const push = ctx.sh.run("git", ["push", "-u", "origin", "HEAD"])
   if (push.status !== 0) {
@@ -662,8 +720,17 @@ export async function submitOp(ctx: StackContext): Promise<{
         .at(-1) ?? ""
     created = true
   }
+  // The record follows the pull request's base, so a retarget by hand sticks.
   recordParent(ctx, branch, parent)
-  return { branch, parent, url, created, retargeted, forced }
+  return {
+    branch,
+    parent,
+    url,
+    created,
+    retargeted,
+    forced,
+    ...(found?.overrode ? { overrode: found.overrode } : {}),
+  }
 }
 
 export type StackMerge = {

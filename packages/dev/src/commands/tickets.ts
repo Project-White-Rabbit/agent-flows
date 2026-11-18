@@ -194,7 +194,14 @@ export type Rules = {
   timezone?: string
   /** How start-work names a workspace on an issue (`{id}: {title}`). */
   workspaceName?: string
+  /** An item a read-only tracker already has: `drop` (the default) or `file`. */
+  linkedWork?: LinkedWorkRule
+  /** start-ticket-queue lists read-only trackers' issues (default true). */
+  queueLinked?: boolean
 }
+
+export const LINKED_WORK_RULES = ["drop", "file"] as const
+export type LinkedWorkRule = (typeof LINKED_WORK_RULES)[number]
 
 export const SUB_ISSUE_RULES = ["auto", "ask", "never"] as const
 export type SubIssueRule = (typeof SUB_ISSUE_RULES)[number]
@@ -1241,6 +1248,12 @@ export function readRules(root: string): Rules {
     ...(typeof s.workspaceName === "string" &&
     !workspaceNameProblem(s.workspaceName)
       ? { workspaceName: s.workspaceName }
+      : {}),
+    ...(LINKED_WORK_RULES.includes(s.linkedWork as never)
+      ? { linkedWork: s.linkedWork as LinkedWorkRule }
+      : {}),
+    ...(typeof s.queueLinked === "boolean"
+      ? { queueLinked: s.queueLinked }
       : {}),
   }
 }
