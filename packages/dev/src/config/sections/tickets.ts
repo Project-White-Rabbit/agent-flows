@@ -44,18 +44,30 @@ export function ranksProblem(ranks: string[]): string | undefined {
 
 /**
  * The placeholders a `workspaceName` template fills in, and the forms each
- * takes after a colon: `short` (the id's number), or a length to cut to.
+ * takes after a colon: `short` (the id's number), a length to cut to (`N`),
+ * or a date format (`FORMAT`).
  */
 export const WORKSPACE_NAME_PLACEHOLDERS = {
   id: ["short"],
   title: ["N"],
   priority: [],
   category: ["N"],
-} as const satisfies Record<string, readonly ("short" | "N")[]>
+  due: ["FORMAT"],
+} as const satisfies Record<string, readonly ("short" | "N" | "FORMAT")[]>
+
+/** The parts of a `{due:FORMAT}` date format, longest first so `MMM` wins over `MM`. */
+export const DATE_TOKENS = ["YYYY", "YY", "MMM", "MM", "M", "DD", "D"] as const
+
+const DATE_TOKEN = DATE_TOKENS.join("|")
+
+/** A date format: tokens, with spaces, `/`, `.`, `,`, or `-` between them. */
+const DATE_FORMAT = `(?:${DATE_TOKEN})(?:[ /.,-]*(?:${DATE_TOKEN}))*`
 
 /** A placeholder in a `workspaceName` template: its name, then its form. */
-export const WORKSPACE_NAME_PLACEHOLDER =
-  /\{(id|title|priority|category)(?::(short|[1-9]\d*))?\}/g
+export const WORKSPACE_NAME_PLACEHOLDER = new RegExp(
+  `\\{(id|title|priority|category|due)(?::(short|[1-9]\\d*|${DATE_FORMAT}))?\\}`,
+  "g",
+)
 
 /** The placeholders as a list for messages: `{id}`, `{id:short}`, … */
 function placeholderList(): string {
@@ -88,12 +100,13 @@ export function workspaceNameProblem(template: string): string | undefined {
     return (
       form === undefined ||
       (form === "short" && forms.includes("short")) ||
-      (/^[1-9]\d*$/.test(form) && forms.includes("N"))
+      (/^[1-9]\d*$/.test(form) && forms.includes("N")) ||
+      (new RegExp(`^${DATE_FORMAT}$`).test(form) && forms.includes("FORMAT"))
     )
   }
   const unknown = used.find((text) => !known(text))
   if (unknown !== undefined) {
-    return `has an unknown placeholder \`{${unknown}}\` (use ${placeholderList()}, where N is a length)`
+    return `has an unknown placeholder \`{${unknown}}\` (use ${placeholderList()}, where N is a length and FORMAT a date format of ${DATE_TOKENS.map((t) => `\`${t}\``).join(", ")}, such as \`MM/DD\` or \`MMM D\`)`
   }
   const names = used.map((text) => text.split(":")[0])
   return !names.includes("id") && !names.includes("title")
@@ -241,7 +254,7 @@ export const tickets: SectionSpec = {
     {
       key: "workspaceName",
       description:
-        "How start-work names the workspace it opens on an issue (and the one `--reuse` renames), with `{id}` for the issue's id (`{id:short}` its number alone), `{title}` for its title (`{title:40}` cut at a word to at most 40 characters; `{category:N}` likewise), `{priority}` for its priority by the team's name for it (`ranks`), and `{category}` for its label by the kind of work (from the tracker's `values.labels`); default `{id}: {title}`. A priority or category the issue doesn't have drops out with the separator beside it. Work with no issue is still named after its title",
+        "How start-work names the workspace it opens on an issue (and the one `--reuse` renames), with `{id}` for the issue's id (`{id:short}` its number alone), `{title}` for its title (`{title:40}` cut at a word to at most 40 characters; `{category:N}` likewise), `{priority}` for its priority by the team's name for it (`ranks`), `{category}` for its label by the kind of work (from the tracker's `values.labels`), and `{due}` for its due date (`2026-11-30`; `{due:MM/DD}` in a format of `YYYY`, `YY`, `MMM`, `MM`, `M`, `DD`, and `D`, such as `{due:MMM D}` for `Nov 30`); default `{id}: {title}`. A priority, category, or due date the issue doesn't have drops out with the separator beside it. Work with no issue is still named after its title",
       example: "{priority}/{category}: {title}",
       check: (value: FieldValue) => workspaceNameProblem(value as string),
     },

@@ -104,6 +104,30 @@ describe("planStart", () => {
     expect(workspaceName(ticket(), "{id} ({category}) {title}")).toBe(
       "ENG-12 Fix the login redirect",
     )
+    const due = ticket({ dueDate: "2026-03-07" })
+    expect(workspaceName(due, "{id} {due}: {title}")).toBe(
+      "ENG-12 2026-03-07: Fix the login redirect",
+    )
+    expect(workspaceName(due, "{title} [{due:MM/DD}]")).toBe(
+      "Fix the login redirect [03/07]",
+    )
+    expect(workspaceName(due, "{id} ({due:MMM D, YYYY}) {title:3}")).toBe(
+      "ENG-12 (Mar 7, 2026) Fix",
+    )
+    expect(workspaceName(due, "{due:D.M.YY} {id}")).toBe("7.3.26 ENG-12")
+    expect(
+      workspaceName(
+        ticket({ dueDate: "2026-12-25T00:00:00.000Z" }),
+        "{id} {due}",
+      ),
+    ).toBe("ENG-12 2026-12-25")
+    expect(workspaceName(ticket(), "{title} [{due:MM/DD}]")).toBe(
+      "Fix the login redirect",
+    )
+    expect(workspaceName(ticket(), "{due:D.M.YY} {id}")).toBe("ENG-12")
+    expect(
+      workspaceName(ticket({ dueDate: null }), "{id}/{due:MMM D}: {title}"),
+    ).toBe("ENG-12: Fix the login redirect")
     expect(
       planStart(ticket(), [], { workspaceName: "{title} ({id})" }),
     ).toMatchObject({ name: "Fix the login redirect (ENG-12)" })

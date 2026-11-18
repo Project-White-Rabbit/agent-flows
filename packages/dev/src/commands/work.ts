@@ -18,6 +18,7 @@ import {
 } from "../config/branch-line.ts"
 import { plainDocumentLinks } from "../config/links.ts"
 import {
+  DATE_TOKENS,
   DEFAULT_RANKS,
   DEFAULT_WORKSPACE_NAME,
   ranksProblem,
@@ -63,6 +64,8 @@ export type Ticket = {
   branchName?: string | null
   /** Its label by the kind of work, for `{category}` in a workspace name. */
   category?: string | null
+  /** Its due date, `YYYY-MM-DD`, for `{due}` in a workspace name. */
+  dueDate?: string | null
   /** `getIssue` found nothing. */
   missing?: boolean
 }
@@ -208,10 +211,52 @@ export function cutAt(text: string, limit: number): string {
   return kept.replace(/[\s/|:,.·_-]+$/, "")
 }
 
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+]
+
+/**
+ * A `YYYY-MM-DD` date (or a timestamp that starts with one) in `format`, made
+ * of `YYYY`, `YY`, `MMM` (`Nov`), `MM`, `M`, `DD`, and `D`: `MM/DD` reads
+ * `11/30`. Anything that isn't such a date comes back as it is.
+ */
+export function formatDate(date: string, format: string): string {
+  const match = date.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) {
+    return date
+  }
+  const [, year, month, day] = match
+  const parts: Record<(typeof DATE_TOKENS)[number], string> = {
+    YYYY: year,
+    YY: year.slice(2),
+    MMM: MONTHS[Number(month) - 1] ?? month,
+    MM: month,
+    M: String(Number(month)),
+    DD: day,
+    D: String(Number(day)),
+  }
+  return format.replace(
+    new RegExp(DATE_TOKENS.join("|"), "g"),
+    (token) => parts[token as keyof typeof parts],
+  )
+}
+
 /**
  * A workspace's name for an issue: `template` with its id (`{id:short}`: its
- * number), title, priority (the team's name for it, nothing for none), and
- * category filled in, `{title:N}` and `{category:N}` cut to N characters. A
+ * number), title, priority (the team's name for it, nothing for none),
+ * category, and due date filled in, `{title:N}` and `{category:N}` cut to N
+ * characters and `{due:FORMAT}` in that date format (`{due:MM/DD}`). A
  * part the issue doesn't have drops out with the separator before it, or the
  * one after it when it comes first, and so do the brackets it leaves empty:
  * `{priority}/{category}: {title}` with no category reads `P0: Fix it`.
@@ -229,9 +274,13 @@ export function workspaceName(
         ? rankName(ticket.priority, ranks)
         : "",
     category: ticket.category?.trim() ?? "",
+    due: ticket.dueDate?.trim() ?? "",
   }
   const fill = (key: string, form?: string): string => {
     const value = values[key]
+    if (key === "due") {
+      return value && form ? formatDate(value, form) : value.slice(0, 10)
+    }
     if (form === "short") {
       return value.match(/(\d+)\D*$/)?.[1] ?? value
     }
@@ -246,7 +295,7 @@ export function workspaceName(
       continue
     }
     const first = /^[\s([]*$/.test(name.slice(0, at))
-    const part = token.replace(/[{}]/g, "\\$&")
+    const part = token.replace(/[{}.*+?^$|()[\]\\]/g, "\\$&")
     name = name.replace(
       new RegExp(first ? part + SEPARATORS : SEPARATORS + part),
       "",
@@ -829,7 +878,9 @@ const USAGE = `Usage: work.ts <command>
                   the config's tickets.workspaceName filled in (default
                   "{id}: {title}"; also {priority}, {category} (a
                   ticket's "category" in <file>), {id:short} (the id's
-                  number), and {title:N} and {category:N} (cut to N
+                  number), {due} (a ticket's "dueDate"; {due:MM/DD} in
+                  a format of YYYY, YY, MMM, MM, M, DD, and D), and
+                  {title:N} and {category:N} (cut to N
                   characters, at a word when one ends in reach)). Without a
                   placement flag, a workspace goes in the section of the one
                   this session runs in, or none; with --workspaces-repository (the

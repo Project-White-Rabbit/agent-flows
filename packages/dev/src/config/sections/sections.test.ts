@@ -1007,8 +1007,24 @@ describe("workspace name template", () => {
     expect(workspaceNameProblem("{id:short} {category:4}: {title:40}")).toBe(
       undefined,
     )
+    expect(workspaceNameProblem("{title} [{due}]")).toBe(undefined)
+    expect(workspaceNameProblem("{id} {due:MM/DD}: {title}")).toBe(undefined)
+    expect(workspaceNameProblem("{id} ({due:MMM D, YYYY})")).toBe(undefined)
+    expect(workspaceNameProblem("{id} {due:D.M.YY}")).toBe(undefined)
+    expect(workspaceNameProblem("{id} {due:Q}")).toMatch(
+      /^has an unknown placeholder `\{due:Q\}`/,
+    )
+    expect(workspaceNameProblem("{id} {due:40}")).toMatch(
+      /^has an unknown placeholder `\{due:40\}`/,
+    )
+    expect(workspaceNameProblem("{title:MM}")).toMatch(
+      /^has an unknown placeholder `\{title:MM\}`/,
+    )
+    expect(workspaceNameProblem("{due:MM/DD}")).toBe(
+      "must name the issue with `{id}` or `{title}`",
+    )
     expect(workspaceNameProblem("{title:short}")).toBe(
-      "has an unknown placeholder `{title:short}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, where N is a length)",
+      "has an unknown placeholder `{title:short}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, `{due}`, `{due:FORMAT}`, where N is a length and FORMAT a date format of `YYYY`, `YY`, `MMM`, `MM`, `M`, `DD`, `D`, such as `MM/DD` or `MMM D`)",
     )
     expect(workspaceNameProblem("{id:0} {title}")).toMatch(
       /^has an unknown placeholder `\{id:0\}`/,
@@ -1023,7 +1039,7 @@ describe("workspace name template", () => {
       "must name the issue with `{id}` or `{title}`",
     )
     expect(workspaceNameProblem("{id} {name}")).toBe(
-      "has an unknown placeholder `{name}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, where N is a length)",
+      "has an unknown placeholder `{name}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, `{due}`, `{due:FORMAT}`, where N is a length and FORMAT a date format of `YYYY`, `YY`, `MMM`, `MM`, `M`, `DD`, `D`, such as `MM/DD` or `MMM D`)",
     )
     expect(
       checkConfig({
@@ -1032,7 +1048,7 @@ describe("workspace name template", () => {
         tickets: { workspaceName: "{key}" },
       }).issues,
     ).toEqual([
-      "tickets.workspaceName has an unknown placeholder `{key}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, where N is a length)",
+      "tickets.workspaceName has an unknown placeholder `{key}` (use `{id}`, `{id:short}`, `{title}`, `{title:N}`, `{priority}`, `{category}`, `{category:N}`, `{due}`, `{due:FORMAT}`, where N is a length and FORMAT a date format of `YYYY`, `YY`, `MMM`, `MM`, `M`, `DD`, `D`, such as `MM/DD` or `MMM D`)",
     ])
   })
 })

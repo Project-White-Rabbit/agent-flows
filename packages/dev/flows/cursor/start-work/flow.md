@@ -105,7 +105,7 @@ integration (a workspace app, or plain git worktrees); set it up with
    ```json
    {
      "tickets": [
-       { "id": "<ID>", "title": "...", "url": "...", "description": "...", "stage": "todo", "priority": "high", "category": "<its label by the kind of work, or null>", "branchName": "<suggested branch, or null>" },
+       { "id": "<ID>", "title": "...", "url": "...", "description": "...", "stage": "todo", "priority": "high", "category": "<its label by the kind of work, or null>", "dueDate": "<YYYY-MM-DD, or null>", "branchName": "<suggested branch, or null>" },
        { "id": "<ID>", "missing": true }
      ],
      "workspaces": [
@@ -114,7 +114,7 @@ integration (a workspace app, or plain git worktrees); set it up with
    }
    ```
 
-   `stage` is its workflow state as one of `todo` (triage, backlog, and not started count), `in progress`, `in review`, `done`, or `canceled`; `priority` is `urgent`, `high`, `medium`, `low`, or `none`; `category` is the one of its labels in the set the agent instructions or the tracker entry's `values.labels` give (with no set, its only label), else `null`; `branchName` is the branch the tracker suggests for it, or `null`. An issue `getIssue` doesn't find is `"missing": true`. A workspace's `section` is `null` when it has none, and `current` is true for the one this session runs in. When no variant of a `workspaces` op works here, leave its workspaces out and say so: `work.ts` still checks this repo's git worktrees.
+   `stage` is its workflow state as one of `todo` (triage, backlog, and not started count), `in progress`, `in review`, `done`, or `canceled`; `priority` is `urgent`, `high`, `medium`, `low`, or `none`; `category` is the one of its labels in the set the agent instructions or the tracker entry's `values.labels` give (with no set, its only label), else `null`; `dueDate` is its due date, or `null`; `branchName` is the branch the tracker suggests for it, or `null`. An issue `getIssue` doesn't find is `"missing": true`. A workspace's `section` is `null` when it has none, and `current` is true for the one this session runs in. When no variant of a `workspaces` op works here, leave its workspaces out and say so: `work.ts` still checks this repo's git worktrees.
 2. **Decide.** Run it with the section flag when one was given:
 
    ```bash
