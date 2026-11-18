@@ -1,11 +1,11 @@
 ---
-name: dev-flows-tickets-to-work
-description: "Go through your open issues that have no pull request or workspace yet, most urgent first, and start, skip, or close each one. Usage: /dev-flows-tickets-to-work [--priority <ranks>] [--limit <n>] [--section <name> | --section-by-rank] [--workspaces <entry>] [help]"
+name: dev-flows-start-ticket-queue
+description: "Go through your open issues that have no pull request or workspace yet, most urgent first, and start, skip, or close each one. Usage: /dev-flows-start-ticket-queue [--priority <ranks>] [--limit <n>] [--section <name> | --section-by-rank] [--workspaces <entry>] [help]"
 ---
 
-<!-- Generated: sends /dev-flows-tickets-to-work to the tickets-to-work flow in dev-flows-base. Do not edit by hand. -->
+<!-- Generated: sends /dev-flows-start-ticket-queue to the start-ticket-queue flow in dev-flows-base. Do not edit by hand. -->
 
-# /dev-flows-tickets-to-work
+# /dev-flows-start-ticket-queue
 
 This command's instructions are in the dev-flows-base plugin.
 
@@ -13,6 +13,6 @@ This command's instructions are in the dev-flows-base plugin.
 
    When neither prints a directory, stop: dev-flows-base isn't installed. Tell the user to install the dev-flows-base plugin from the agent-flows marketplace (https://github.com/Project-White-Rabbit/agent-flows), or run `git clone https://github.com/Project-White-Rabbit/agent-flows ~/.config/agent-flows/dev-flows-base`, then start a new session.
 2. **Check it's one this plugin can follow.** Read the `contract` in `<that directory>/flows/manifest.json`. When it isn't 1, stop: dev-flows is out of date for the installed dev-flows-base. Tell the user to update the dev-flows plugin (from agent-flows) and start a new session.
-3. **Follow the flow.** Read `<that directory>/flows/cursor/tickets-to-work/flow.md` with your file-reading tool and follow it to the end, as the caller `dev-flows` (its commands are `/dev-flows-<name>`), with these arguments: $ARGUMENTS.
+3. **Follow the flow.** Read `<that directory>/flows/cursor/start-ticket-queue/flow.md` with your file-reading tool and follow it to the end, as the caller `dev-flows` (its commands are `/dev-flows-<name>`), with these arguments: $ARGUMENTS.
 
    When `echo "$DEV_FLOWS_BASE"` printed nothing, write that directory in place of `$DEV_FLOWS_BASE` in every command the flow gives.

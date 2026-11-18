@@ -12,9 +12,9 @@
       "prototype",
       "ready",
       "server",
+      "start-ticket-queue",
       "start-work",
-      "sync",
-      "tickets-to-work"
+      "sync"
     ],
     "cursor": [
       "cancel",
@@ -26,9 +26,9 @@
       "prototype",
       "ready",
       "server",
+      "start-ticket-queue",
       "start-work",
-      "sync",
-      "tickets-to-work"
+      "sync"
     ],
     "codex": [
       "cancel",
@@ -40,9 +40,9 @@
       "prototype",
       "ready",
       "server",
+      "start-ticket-queue",
       "start-work",
-      "sync",
-      "tickets-to-work"
+      "sync"
     ],
     "amp": [
       "cancel",
@@ -54,9 +54,9 @@
       "prototype",
       "ready",
       "server",
+      "start-ticket-queue",
       "start-work",
-      "sync",
-      "tickets-to-work"
+      "sync"
     ]
   }
 }

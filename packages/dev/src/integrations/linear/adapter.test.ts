@@ -249,7 +249,7 @@ describe("linear assignedIssues adapter", () => {
     })
   })
 
-  it("reads every page and reports what tickets-to-work sorts by", async () => {
+  it("reads every page and reports what start-ticket-queue sorts by", async () => {
     const node = (identifier: string, extra: object) => ({
       identifier,
       title: identifier,
