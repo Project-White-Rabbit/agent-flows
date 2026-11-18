@@ -987,9 +987,23 @@ describe("dev flows", () => {
       "run preview.afterOpen --flow preview --mode <mode> --url <target>`",
     )
     expect(skill).toContain("Never open another browser to do it")
-    expect(skill.indexOf("## 4. The repo's steps on the page")).toBeGreaterThan(
+    expect(skill.indexOf("## 5. The repo's steps on the page")).toBeGreaterThan(
+      skill.indexOf("## 4. Make sure it loaded"),
+    )
+  })
+
+  it("makes sure preview's page loaded in a browser it can see, reloading while the server starts", () => {
+    const skill =
+      files.find((f) => f.path === "flows/claude/preview/flow.md")?.content ??
+      ""
+    expect(skill.indexOf("## 4. Make sure it loaded")).toBeGreaterThan(
       skill.indexOf("## 3. Open it"),
     )
+    expect(skill).toContain(
+      "Wait a few seconds and reload it in that same browser",
+    )
+    expect(skill).toContain("Never edit the code to make it go away here")
+    expect(skill).toContain("A `000` (nothing answered)")
   })
 
   it("shows a prototype's mockup wherever the session can, outside the working tree unless kept", () => {
