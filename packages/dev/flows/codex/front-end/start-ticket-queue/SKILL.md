@@ -1,6 +1,6 @@
 ---
 name: start-ticket-queue
-description: "Go through your open issues that have no pull request or workspace yet, most urgent first, and start, skip, or close each one. Invoke with $__FRONT_END_PLUGIN__:start-ticket-queue [--priority <ranks>] [--limit <n>] [--section <name> | --section-by-rank] [--workspaces <entry>] [help]."
+description: "Go through your open issues that have no pull request or workspace yet, in the team's order (customer blockers, then most urgent, by default), and start, skip, or close each one. Invoke with $__FRONT_END_PLUGIN__:start-ticket-queue [--priority <ranks>] [--limit <n>] [--section <name> | --section-by-rank] [--workspaces <entry>] [help]."
 ---
 
 <!-- Generated: sends $__FRONT_END_PLUGIN__:start-ticket-queue to the start-ticket-queue flow in dev-flows-base. Do not edit by hand. -->
