@@ -336,6 +336,24 @@ function notStarted(ticket: Ticket): boolean {
   return ticket.stage === undefined || ticket.stage === "todo"
 }
 
+/**
+ * A new workspace's section without --section-by-rank: the one given, else
+ * the current workspace's, or none in another repository, whose sections
+ * aren't this one's.
+ */
+function sectionFor(
+  workspaces: Workspace[],
+  options: StartOptions,
+): string | null {
+  if (options.section !== undefined) {
+    return options.section
+  }
+  if (options.otherRepository) {
+    return null
+  }
+  return workspaces.find((w) => w.current)?.section?.trim() || null
+}
+
 export function planStart(
   ticket: Ticket,
   workspaces: Workspace[],
@@ -358,14 +376,9 @@ export function planStart(
       move: notStarted(ticket),
     }
   }
-  const current = workspaces.find((w) => w.current)
   const section = options.byRank
     ? rankName(ticket.priority, options.ranks)
-    : options.section !== undefined
-      ? options.section
-      : options.otherRepository
-        ? null
-        : current?.section?.trim() || null
+    : sectionFor(workspaces, options)
   return {
     action: "start",
     id: ticket.id,
@@ -397,6 +410,63 @@ export function describeStart(start: Start, prompt?: string): string {
   const section = start.section === null ? "none" : `"${start.section}"`
   const promptPart = prompt ? ` prompt=${prompt}` : ""
   return `START ${start.id} "${start.ticket.title}" name="${start.name}" branch=${start.branch} exact=${start.exact ? "yes" : "no"} section=${section} state=${state}${promptPart}`
+}
+
+/** Untracked work in a new workspace, as `plan --title` decides it. */
+export type Untracked =
+  | {
+      action: "start"
+      title: string
+      name: string
+      branch: string
+      section: string | null
+    }
+  | { action: "exists"; title: string; workspace: Workspace }
+
+/**
+ * Untracked work in a new workspace: named after its title, on a branch from
+ * it (the integration adds its prefix), unless a workspace is on that branch.
+ */
+export function planUntracked(
+  title: string,
+  workspaces: Workspace[],
+  options: StartOptions = {},
+): Untracked {
+  const branch = slugify(title, 60)
+  if (!branch) {
+    throw new UsageError(
+      `the title \`${title}\` has no letters or digits to name a branch after`,
+    )
+  }
+  const existing = workspaces.find(
+    (w) => w.branch && w.branch.split("/").at(-1) === branch,
+  )
+  if (existing) {
+    return { action: "exists", title: title.trim(), workspace: existing }
+  }
+  return {
+    action: "start",
+    title: title.trim(),
+    name: title.trim(),
+    branch,
+    section: sectionFor(workspaces, options),
+  }
+}
+
+/** What an untracked workspace's agent starts on: the title and the notes. */
+export function untrackedPrompt(title: string, notes: string): string {
+  const body = notes.trim()
+  const head = `Work on: ${title.trim()}`
+  return body && body !== title.trim() ? `${head}\n\n${body}\n` : `${head}\n`
+}
+
+export function describeUntracked(start: Untracked, prompt?: string): string {
+  if (start.action === "exists") {
+    return `EXISTS "${start.title}" workspace="${start.workspace.name ?? start.workspace.id}" branch=${start.workspace.branch}`
+  }
+  const section = start.section === null ? "none" : `"${start.section}"`
+  const promptPart = prompt ? ` prompt=${prompt}` : ""
+  return `START "${start.title}" name="${start.name}" branch=${start.branch} exact=no section=${section} state=keep${promptPart}`
 }
 
 /** Work on an issue, or on untracked work, in this workspace instead of a new one. */
@@ -679,10 +749,7 @@ function repositoryKeys(repository: Repository): string[] {
 
 /** The text names the key as a word of its own (`noah-server`, not `noah-server-2`). */
 function names(text: string, key: string): boolean {
-  const escaped = key.replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\const SWITCHES = new Set([",
-  )
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   return new RegExp(`(^|[^\\w-])${escaped}($|[^\\w-])`, "i").test(text)
 }
 
@@ -816,6 +883,28 @@ function plan(args: Args): void {
   const workspaces = [...(input.workspaces ?? []), ...listWorktrees()]
   const prompts =
     args.get("prompts") ?? path.join(path.dirname(file), "prompts")
+  if (args.has("title")) {
+    if (options.byRank || (input.tickets ?? []).length > 0) {
+      throw new UsageError(
+        "--title takes no tickets in --input and no --section-by-rank",
+      )
+    }
+    const title = requiredFlag(args, "title")
+    const start = planUntracked(title, workspaces, options)
+    if (start.action !== "start") {
+      console.log(describeUntracked(start))
+      return
+    }
+    const notes = args.get("notes")
+    const prompt = path.join(prompts, `${start.branch}.md`)
+    fs.mkdirSync(prompts, { recursive: true })
+    fs.writeFileSync(
+      prompt,
+      untrackedPrompt(title, notes ? fs.readFileSync(notes, "utf8") : ""),
+    )
+    console.log(describeUntracked(start, prompt))
+    return
+  }
   const lines = (input.tickets ?? []).map((ticket) => {
     const start = planStart(ticket, workspaces, options)
     if (start.action !== "start") {
@@ -1013,6 +1102,7 @@ const USAGE = `Usage: work.ts <command>
 
   plan --input <file> [--section <name> | --section-by-rank | --no-section]
        [--workspaces-repository] [--ranks <names>] [--prompts <dir>]
+       [--title "<title>" [--notes <file>]]
                   Decide each ticket in <file> ({"tickets": [...], "workspaces":
                   [...]}) against the open workspaces and this repo's git
                   worktrees. Writes nothing to any tracker. Prints one line each:
@@ -1032,6 +1122,14 @@ const USAGE = `Usage: work.ts <command>
                   placement flag, a workspace goes in the section of the one
                   this session runs in, or none; with --workspaces-repository (the
                   workspaces open in another repository), in none.
+                  With --title, plans one new workspace for work with no
+                  ticket (<file> gives only "workspaces"), named <title> on
+                  a branch from it, its agent's prompt the title and the
+                  notes in --notes:
+                    START "<title>" name="<title>" branch=<branch> exact=no
+                          section=<"name"|none> state=keep prompt=<file>
+                  or EXISTS "<title>" workspace="<name>" branch=<branch>
+                  when a workspace is already on that branch.
   reuse (--input <file> | --title "<title>")
         [--section <name> | --section-by-rank | --no-section] [--ranks <names>]
         [--yes [--rename <command>]]
