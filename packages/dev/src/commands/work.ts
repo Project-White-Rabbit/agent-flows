@@ -221,6 +221,14 @@ const SEPARATOR = "[\\s/|:,.·_~\\-\\u2013\\u2014]"
 
 const SEPARATORS = `${SEPARATOR}*`
 
+/**
+ * The literal text glued to a placeholder from the left: one word or symbol
+ * (`@` in `@{due}`, `due ` in `due {due}`) with the spaces after it, and no
+ * separator, brace, or bracket. It belongs to the placeholder, so it drops
+ * out with it.
+ */
+const GLUED = new RegExp(`[^${SEPARATOR.slice(1, -1)}{}()[\\]]+\\s*$`)
+
 /** A bracketed part of a workspace name, `(…)` or `[…]`, with no brackets inside. */
 const BRACKETED = /[([][^()[\]]*[)\]]/g
 
@@ -317,15 +325,18 @@ function fillName(template: string, values: NameValues): string {
     const parts = [...text.matchAll(WORKSPACE_NAME_PLACEHOLDER)]
     return parts.length > 0 && parts.every(([, key, form]) => !fill(key, form))
   }
-  // A part that drops out takes the separator before it, or the one after it
-  // when it comes first.
+  // A part that drops out takes the word or symbol glued to it (`@{due}`,
+  // `due {due}`), then the separator before that, or the one after it when it
+  // comes first.
   const drop = (name: string, part: string): string => {
-    const at = name.indexOf(part)
+    let at = name.indexOf(part)
     if (at < 0) {
       return name
     }
+    const glued = name.slice(0, at).match(GLUED)?.[0] ?? ""
+    at -= glued.length
     const first = /^[\s([]*$/.test(name.slice(0, at))
-    const pattern = escapeRegex(part)
+    const pattern = escapeRegex(glued + part)
     return name.replace(
       new RegExp(first ? pattern + SEPARATORS : SEPARATORS + pattern),
       "",
@@ -361,6 +372,8 @@ function fillName(template: string, values: NameValues): string {
  * part the issue doesn't have drops out with the separator before it, or the
  * one after it when it comes first, and so do the brackets it leaves empty:
  * `{priority}/{category}: {title}` with no category reads `P0: Fix it`. A
+ * word or symbol glued to a part goes with it: `{id} @{due}: {title}` and
+ * `{id} due {due}: {title}` with no due date both read `ENG-12: Fix it`. A
  * bracketed part with nothing filled in goes whole, its own words included:
  * `{title} (due {due:MMM D})` with no due date reads `Fix it`.
  */

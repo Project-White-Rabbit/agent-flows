@@ -262,6 +262,40 @@ describe("workspaceName with parts missing", () => {
     )
   })
 
+  it("drops the word or symbol glued to an empty part", () => {
+    const issue = ticket({
+      id: "HVT-4366",
+      title: "Show running Bitfab experiments inside the app",
+      priority: "high",
+    })
+    const ranks = ["P0", "P1", "P2", "P3"]
+    for (const template of [
+      "{priority} {id:short} @{due:M/D}: {title:40}",
+      "{priority} {id:short} due {due:M/D}: {title:40}",
+    ]) {
+      expect(workspaceName(issue, template, ranks)).toBe(
+        "P1 4366: Show running Bitfab experiments inside",
+      )
+    }
+    const due = ticket({ ...issue, dueDate: "2026-11-30" })
+    expect(
+      workspaceName(due, "{priority} {id:short} @{due:M/D}: {title:40}", ranks),
+    ).toBe("P1 4366 @11/30: Show running Bitfab experiments inside")
+    expect(
+      workspaceName(
+        due,
+        "{priority} {id:short} due {due:M/D}: {title:40}",
+        ranks,
+      ),
+    ).toBe("P1 4366 due 11/30: Show running Bitfab experiments inside")
+    expect(workspaceName(plain, "due {due}: {id} {title}")).toBe(
+      "ENG-12 Fix login",
+    )
+    expect(workspaceName(plain, "{id} - #{category} - {title}")).toBe(
+      "ENG-12 - Fix login",
+    )
+  })
+
   it("takes dashes and tildes as separators", () => {
     expect(workspaceName(plain, "{id} \u2014 {due}")).toBe("ENG-12")
     expect(workspaceName(plain, "{id} \u2013 {due} \u2013 {title}")).toBe(
@@ -293,6 +327,28 @@ describe("followsTemplate", () => {
     )
     expect(followsTemplate("ENG-12", "ENG-12", "{id}: {title}")).toBe(true)
     expect(followsTemplate("#7 Fix", "#7", "#{id:short} {title}")).toBe(true)
+  })
+
+  it("matches names whose glued word or symbol dropped with its part", () => {
+    for (const glue of ["@", "due "]) {
+      const template = `{priority} {id:short} ${glue}{due:M/D}: {title:40}`
+      expect(followsTemplate("P1 4366: Old title", "HVT-4366", template)).toBe(
+        true,
+      )
+      expect(
+        followsTemplate(
+          `P1 4366 ${glue}11/30: Old title`,
+          "HVT-4366",
+          template,
+        ),
+      ).toBe(true)
+      expect(
+        followsTemplate(`4366 ${glue}11/30: Old title`, "HVT-4366", template),
+      ).toBe(true)
+      expect(followsTemplate("P1 4366 Old title", "HVT-4366", template)).toBe(
+        false,
+      )
+    }
   })
 
   it("doesn't match a name given by hand, or another issue's", () => {
