@@ -7,11 +7,13 @@ import {
   type Assigned,
   agentPrompt,
   branchFor,
+  describeRefresh,
   describeRepository,
   describeReuse,
   describeStart,
   describeTicket,
   describeUntracked,
+  followsTemplate,
   gitWorktrees,
   main,
   namedPaths,
@@ -24,6 +26,7 @@ import {
   planUntracked,
   queue,
   type Repository,
+  refreshName,
   releaseLock,
   renameBranch,
   slugify,
@@ -219,6 +222,162 @@ describe("planStart", () => {
     expect(
       planStart(ticket(), current, { otherRepository: true, byRank: true }),
     ).toMatchObject({ section: "High" })
+  })
+})
+
+describe("workspaceName with parts missing", () => {
+  const plain = ticket({ title: "Fix login" })
+
+  it("drops a bracketed part whose placeholders are empty, words and all", () => {
+    expect(workspaceName(plain, "{id}: {title} (due {due})")).toBe(
+      "ENG-12: Fix login",
+    )
+    expect(workspaceName(plain, "{id}: {title} [due {due:MMM D}]")).toBe(
+      "ENG-12: Fix login",
+    )
+    expect(workspaceName(plain, "{id} - (due {due}) - {title}")).toBe(
+      "ENG-12 - Fix login",
+    )
+    expect(workspaceName(plain, "(due {due}) {id}: {title}")).toBe(
+      "ENG-12: Fix login",
+    )
+    expect(
+      workspaceName(
+        ticket({ title: "Fix login", dueDate: "2026-11-30" }),
+        "{id}: {title} (due {due:MMM D})",
+      ),
+    ).toBe("ENG-12: Fix login (due Nov 30)")
+  })
+
+  it("keeps a bracketed part with something filled in", () => {
+    expect(
+      workspaceName(
+        ticket({ title: "Fix login", priority: "high" }),
+        "{id} ({priority}, {due}) {title}",
+      ),
+    ).toBe("ENG-12 (High) Fix login")
+    expect(workspaceName(plain, "{title} (by {id})")).toBe(
+      "Fix login (by ENG-12)",
+    )
+  })
+
+  it("takes dashes and tildes as separators", () => {
+    expect(workspaceName(plain, "{id} \u2014 {due}")).toBe("ENG-12")
+    expect(workspaceName(plain, "{id} \u2013 {due} \u2013 {title}")).toBe(
+      "ENG-12 \u2013 Fix login",
+    )
+    expect(workspaceName(plain, "{due} ~ {id}")).toBe("ENG-12")
+    expect(
+      workspaceName(ticket({ title: "Fix it \u2014 now" }), "{title:7}"),
+    ).toBe("Fix it")
+  })
+})
+
+describe("followsTemplate", () => {
+  it("matches a name the template gave, whatever the parts were", () => {
+    const template = "{id} [{priority}] {title} (due {due:MM/DD})"
+    expect(
+      followsTemplate(
+        "ENG-12 [High] Old title (due 11/30)",
+        "ENG-12",
+        template,
+      ),
+    ).toBe(true)
+    expect(followsTemplate("ENG-12 Old title", "ENG-12", template)).toBe(true)
+    expect(followsTemplate("ENG-12 [Low] Old title", "ENG-12", template)).toBe(
+      true,
+    )
+    expect(followsTemplate("ENG-12: Fix it", "ENG-12", "{id}: {title}")).toBe(
+      true,
+    )
+    expect(followsTemplate("ENG-12", "ENG-12", "{id}: {title}")).toBe(true)
+    expect(followsTemplate("#7 Fix", "#7", "#{id:short} {title}")).toBe(true)
+  })
+
+  it("doesn't match a name given by hand, or another issue's", () => {
+    expect(followsTemplate("Login spike", "ENG-12", "{id}: {title}")).toBe(
+      false,
+    )
+    expect(followsTemplate("ENG-13: Fix it", "ENG-12", "{id}: {title}")).toBe(
+      false,
+    )
+    expect(followsTemplate("Fix it (ENG-12)", "ENG-12", "{id}: {title}")).toBe(
+      false,
+    )
+    expect(followsTemplate("ENG-12: Fix it", "ENG-12", "{title}")).toBe(false)
+    expect(followsTemplate("ENG-1.: x", "ENG-12", "{id}: {title}")).toBe(false)
+  })
+})
+
+describe("refreshName", () => {
+  const template = "{id} [{priority}] {title} (due {due:MMM D})"
+  const now = ticket({
+    title: "Fix login",
+    priority: "urgent",
+    dueDate: "2026-12-01",
+  })
+
+  it("renames a name the template gave when the issue changed", () => {
+    expect(
+      refreshName(
+        now,
+        { name: "ENG-12 [High] Fix logins (due Nov 30)" },
+        template,
+      ),
+    ).toEqual({
+      action: "rename",
+      name: "ENG-12 [Urgent] Fix login (due Dec 1)",
+      from: "ENG-12 [High] Fix logins (due Nov 30)",
+    })
+    expect(
+      describeRefresh(
+        refreshName(
+          ticket({ title: "Fix login" }),
+          { name: "ENG-12 Fix it (due Nov 30)" },
+          template,
+        ),
+      ),
+    ).toBe(
+      'RENAME name="ENG-12 [High] Fix login" from="ENG-12 Fix it (due Nov 30)" section=keep',
+    )
+  })
+
+  it("keeps a name that fits and leaves one given by hand", () => {
+    expect(
+      refreshName(
+        now,
+        { name: "ENG-12 [Urgent] Fix login (due Dec 1)" },
+        template,
+      ),
+    ).toEqual({ action: "keep", name: "ENG-12 [Urgent] Fix login (due Dec 1)" })
+    expect(refreshName(now, { name: "Login spike" }, template)).toEqual({
+      action: "leave",
+      name: "Login spike",
+      reason: "named by hand",
+    })
+    expect(describeRefresh(refreshName(now, { name: "Old" }, "{title}"))).toBe(
+      'LEAVE name="Old" reason="tickets.workspaceName has no {id}"',
+    )
+  })
+
+  it("moves a workspace filed by rank to its priority's section", () => {
+    expect(
+      refreshName(
+        now,
+        { name: "ENG-12 [Urgent] Fix login (due Dec 1)", section: "High" },
+        template,
+      ),
+    ).toMatchObject({ action: "rename", section: "Urgent" })
+    expect(
+      refreshName(
+        now,
+        { name: "ENG-12 [Urgent] Fix login (due Dec 1)", section: "Bugs" },
+        template,
+      ),
+    ).toMatchObject({ action: "keep" })
+    expect(
+      refreshName(now, { name: "Mine", section: "High" }, template),
+    ).toMatchObject({ action: "leave" })
   })
 })
 
@@ -768,6 +927,24 @@ describe("work.ts", () => {
     expect(
       capture(["plan", "--input", input, "--workspaces-repository"]),
     ).toContain("section=none")
+  })
+
+  it("says what a workspace's name becomes from its issue", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-"))
+    const input = path.join(dir, "name.json")
+    fs.writeFileSync(
+      input,
+      JSON.stringify({
+        ticket: ticket({ title: "Fix login" }),
+        workspace: { name: "ENG-12: Fix it", section: null },
+      }),
+    )
+    expect(capture(["name", "--input", input])).toBe(
+      'RENAME name="ENG-12: Fix login" from="ENG-12: Fix it" section=keep',
+    )
+    fs.writeFileSync(input, JSON.stringify({ ticket: ticket() }))
+    capture(["name", "--input", input])
+    expect(process.exitCode).toBe(2)
   })
 
   it("adds a branch line to a description file in place", () => {
