@@ -12,6 +12,7 @@ import {
   describeReuse,
   describeStart,
   describeTicket,
+  describeUntracked,
   gitWorktrees,
   main,
   namedPaths,
@@ -21,6 +22,7 @@ import {
   planRename,
   planReuse,
   planStart,
+  planUntracked,
   queue,
   type Repository,
   releaseLock,
@@ -28,6 +30,7 @@ import {
   slugify,
   type Ticket,
   takeLock,
+  untrackedPrompt,
   type Workspace,
   workspaceName,
 } from "./work.ts"
@@ -532,6 +535,16 @@ describe("pickRepository", () => {
   })
   const none = () => false
 
+  it("reads a name with regex characters as plain text", () => {
+    const dotted: Repository = { name: "web.v2", remote: null, path: null }
+    expect(
+      pickRepository(issue("Lands in web.v2"), [here, dotted], new Map(), none),
+    ).toMatchObject({ repository: dotted, from: "named" })
+    expect(
+      pickRepository(issue("Lands in webxv2"), [here, dotted], new Map(), none),
+    ).toMatchObject({ from: "unsure" })
+  })
+
   it("takes the only repository there is", () => {
     expect(pickRepository(issue("Anything"), [here], new Map(), none)).toEqual({
       repository: here,
@@ -787,6 +800,45 @@ describe("reuse", () => {
   })
 })
 
+describe("untracked work in a new workspace", () => {
+  it("names it after its title, on a branch from it, in this one's section", () => {
+    const start = planUntracked("Move the hooks into bridges/", [
+      { branch: "main", section: "Refactors", current: true },
+    ])
+    expect(describeUntracked(start, "p.md")).toBe(
+      'START "Move the hooks into bridges/" name="Move the hooks into bridges/" branch=move-the-hooks-into-bridges exact=no section="Refactors" state=keep prompt=p.md',
+    )
+    expect(
+      planUntracked("x", [{ current: true, section: "A" }], { section: null }),
+    ).toMatchObject({ section: null })
+    expect(
+      planUntracked("x", [{ current: true, section: "A" }], {
+        otherRepository: true,
+      }),
+    ).toMatchObject({ section: null })
+    expect(() => planUntracked("!!", [])).toThrow(/no letters or digits/)
+  })
+
+  it("starts nothing when a workspace is already on its branch", () => {
+    expect(
+      describeUntracked(
+        planUntracked("Try the cache", [
+          { name: "cache", branch: "sam/try-the-cache" },
+        ]),
+      ),
+    ).toBe('EXISTS "Try the cache" workspace="cache" branch=sam/try-the-cache')
+  })
+
+  it("hands the agent the title and the notes", () => {
+    expect(untrackedPrompt("Try the cache", "Use redis.\n")).toBe(
+      "Work on: Try the cache\n\nUse redis.\n",
+    )
+    expect(untrackedPrompt("Try the cache", "Try the cache")).toBe(
+      "Work on: Try the cache\n",
+    )
+  })
+})
+
 describe("work.ts", () => {
   let dir: string
   afterEach(() => {
@@ -816,6 +868,34 @@ describe("work.ts", () => {
     expect(out).toContain(`section=none state=move prompt=${prompt}`)
     expect(out).toContain("SKIP ENG-9 not found")
     expect(fs.readFileSync(prompt, "utf8")).toMatch(/^Work on issue ENG-12/)
+  })
+
+  it("plans untracked work from --title and --notes", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-"))
+    const input = path.join(dir, "start.json")
+    const notes = path.join(dir, "notes.md")
+    fs.writeFileSync(input, JSON.stringify({ workspaces: [] }))
+    fs.writeFileSync(notes, "Keep the behaviour the same.")
+    const out = capture([
+      "plan",
+      "--input",
+      input,
+      "--title",
+      "Try the cache",
+      "--notes",
+      notes,
+      "--no-section",
+    ])
+    const prompt = path.join(dir, "prompts", "try-the-cache.md")
+    expect(out).toBe(
+      `START "Try the cache" name="Try the cache" branch=try-the-cache exact=no section=none state=keep prompt=${prompt}`,
+    )
+    expect(fs.readFileSync(prompt, "utf8")).toBe(
+      "Work on: Try the cache\n\nKeep the behaviour the same.\n",
+    )
+    fs.writeFileSync(input, JSON.stringify({ tickets: [ticket()] }))
+    capture(["plan", "--input", input, "--title", "x"])
+    expect(process.exitCode).toBe(2)
   })
 
   it("takes --workspaces-repository as no section in the other repository", () => {

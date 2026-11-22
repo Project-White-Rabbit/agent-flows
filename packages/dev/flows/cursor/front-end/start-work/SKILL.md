@@ -1,6 +1,6 @@
 ---
 name: __FRONT_END_PLUGIN__-start-work
-description: "File issues from notes and open a workspace with a coding agent on each, or start work on issues already filed. Not for syncing a branch. Usage: /__FRONT_END_PLUGIN__-start-work [issue ids | notes URL | pasted notes] [--start-only] [--reuse [--no-ticket]] [--confirm] [--section <name> | --section-by-rank | --no-section] [--workspaces <entry>] [--workspaces-repository <name>] [--yes] [--run <name>] [help]"
+description: "File issues from notes and open a workspace with a coding agent on each, or start work on issues already filed. Not for syncing a branch. Usage: /__FRONT_END_PLUGIN__-start-work [issue ids | notes URL | pasted notes] [--start-only] [--reuse] [--no-ticket] [--confirm] [--section <name> | --section-by-rank | --no-section] [--workspaces <entry>] [--workspaces-repository <name>] [--yes] [--run <name>] [help]"
 ---
 
 <!-- Generated: sends /__FRONT_END_PLUGIN__-start-work to the start-work flow in dev-flows-base. Do not edit by hand. -->
