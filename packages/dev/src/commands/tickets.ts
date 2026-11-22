@@ -31,6 +31,8 @@ import {
 import {
   DEFAULT_RANKS,
   ISSUE_PRIORITIES,
+  type QueueOrderKey,
+  queueOrderProblem,
   ranksProblem,
   workspaceNameProblem,
 } from "../config/sections/tickets.ts"
@@ -198,6 +200,8 @@ export type Rules = {
   linkedWork?: LinkedWorkRule
   /** start-ticket-queue lists read-only trackers' issues (default true). */
   queueLinked?: boolean
+  /** The sort keys start-ticket-queue orders the queue by, in turn. */
+  queueOrder?: QueueOrderKey[]
   /** Each tracker project's repository, as `<project>=<repository>`. */
   repositories?: string[]
 }
@@ -1256,6 +1260,11 @@ export function readRules(root: string): Rules {
       : {}),
     ...(typeof s.queueLinked === "boolean"
       ? { queueLinked: s.queueLinked }
+      : {}),
+    ...(Array.isArray(s.queueOrder) &&
+    s.queueOrder.every((k) => typeof k === "string") &&
+    !queueOrderProblem(s.queueOrder as string[])
+      ? { queueOrder: s.queueOrder as QueueOrderKey[] }
       : {}),
     ...(Array.isArray(s.repositories) &&
     s.repositories.every((r) => typeof r === "string")

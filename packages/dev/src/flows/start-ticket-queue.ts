@@ -30,7 +30,7 @@ export const startTicketQueueFlow: Flow = devKit.defineFlow({
   title: "{{cmd}}start-ticket-queue",
   frontmatter: {
     description:
-      "Go through your open issues that have no pull request or workspace yet, most urgent first, and start, skip, or close each one.",
+      "Go through your open issues that have no pull request or workspace yet, in the team's order (customer blockers, then most urgent, by default), and start, skip, or close each one.",
     argumentHint:
       "[--priority <ranks>] [--limit <n>] [--section <name> | --section-by-rank] [--workspaces <entry>] [help]",
   },
@@ -47,7 +47,7 @@ export const startTicketQueueFlow: Flow = devKit.defineFlow({
   compile: { mode: { default: "monolith" }, inlinePhases: [] },
   entries: { default: "main/list", help: "main/help" },
   defaultMode: "default",
-  intro: `Walks through the open issues assigned to you that have no pull request, workspace, or git worktree yet, most urgent first, and decides each one with you: start it (through \`{{cmd}}start-work\`: a workspace with a coding agent on it, in the repository the issue's work lands in, and the issue moved to in progress), skip it, or close it. One issue at a time, one question each. A start runs in the background, so the next question comes right away, and every start's result reaches you by the report. Issues are read and closed through the repo's configured issue tracker, and workspaces through its workspaces integration (\`{{cmd}}configure\`).`,
+  intro: `Walks through the open issues assigned to you that have no pull request, workspace, or git worktree yet, in the order the config's \`tickets.queueOrder\` sets (by default the ones whose title has the team's blocker mark first, then most urgent first, then the most recently filed), and decides each one with you: start it (through \`{{cmd}}start-work\`: a workspace with a coding agent on it, in the repository the issue's work lands in, and the issue moved to in progress), skip it, or close it. One issue at a time, one question each. A start runs in the background, so the next question comes right away, and every start's result reaches you by the report. Issues are read and closed through the repo's configured issue tracker, and workspaces through its workspaces integration (\`{{cmd}}configure\`).`,
   invariants: [
     "**Act through the integrations' ops.** Issues are read and closed, and workspaces listed, only through the ops `configure.ts integrations` returns, run as given; workspaces open only through `{{cmd}}start-work`.",
     "**The person decides every issue.** One question per issue, never several in one, never skipped because the answer looks obvious.",
@@ -74,9 +74,11 @@ export const startTicketQueueFlow: Flow = devKit.defineFlow({
                               [--workspaces <entry>] [help]
 
 Goes through your open issues that have no pull request, workspace, or git
-worktree yet, most urgent first (then the ones whose title has the team's
-blocker mark, then the earliest due, then the ones blocking other work),
-and asks about each one:
+worktree yet, in the config's tickets.queueOrder (by default the ones
+whose title has the team's blocker mark first, then most urgent first, then
+the most recently filed; it can also take the least urgent, the earliest
+or latest due, the oldest, or the ones blocking other work first: set it
+with {{cmd}}configure tickets), and asks about each one:
   - Start: opens a workspace with a coding agent on it and moves the issue
     to in progress ({{cmd}}start-work), in the background, so the next
     question comes right away. It opens in the repository the issue's work
@@ -119,7 +121,7 @@ An issue with open sub-issues is left out: its sub-issues are the work.
    {{command:work}} list --input <dir>/issues.json [--priority <ranks>] [--limit <n>] [--ranks <names>] [--no-linked]
    \`\`\`
 
-   ${RANKS}. It reads the config's \`tickets.blockerMark\` itself, and marks an issue whose title has it \`blocker\`. It leaves out the issues marked \`link\` when the config's \`tickets.queueLinked\` is false, and with \`--no-linked\` (pass it when the person asks to leave the read-only trackers out this time: "only our own tracker"). It prints one \`TICKET\` line per issue with no work started yet (no open sub-issues, no pull request, and no workspace or git worktree on its branch), already in the order to go through them, then \`COUNT <n>\` (the issues printed) and \`TOTAL <n>\` (before \`--priority\` and \`--limit\`). With \`repositories\`, each line ends with the repository its work lands in: \`repo="<name>"\` and \`from=\` why (\`named\`: the issue names it; \`project\`: the config's \`tickets.repositories\` maps its project to it; \`code\`: that checkout holds the paths it names; \`only\`: there's no other), plus \`here\` when that's this repository; or \`repo=?\` when it's unclear, with \`candidates="<names>"\` when the issue names more than one. Exit code 2 is an unknown \`--priority\` rank (say which ones exist, and stop) or bad input (fix \`issues.json\` and run it again).
+   ${RANKS}. It reads the config's \`tickets.blockerMark\` itself, and marks an issue whose title has it \`blocker\`. It orders them by the config's \`tickets.queueOrder\` itself too: its keys in turn, each breaking the ties of the ones before (\`blocker\` the marked ones first, \`blocks\` the ones blocking other work first, \`most-urgent\` or \`least-urgent\`, \`earliest-due\` or \`latest-due\`, \`newest\` or \`oldest\` by when it was filed), by default \`blocker\`, \`most-urgent\`, \`newest\`, and an issue with no due date or filing date last within its group either way round. When the person asks for another order ("oldest first" is \`oldest\`, "by due date" is \`earliest-due\`), say the config's \`tickets.queueOrder\` sets it and \`{{cmd}}configure tickets\` records it, and go on in this order. It leaves out the issues marked \`link\` when the config's \`tickets.queueLinked\` is false, and with \`--no-linked\` (pass it when the person asks to leave the read-only trackers out this time: "only our own tracker"). It prints one \`TICKET\` line per issue with no work started yet (no open sub-issues, no pull request, and no workspace or git worktree on its branch), already in the order to go through them, then \`COUNT <n>\` (the issues printed) and \`TOTAL <n>\` (before \`--priority\` and \`--limit\`). With \`repositories\`, each line ends with the repository its work lands in: \`repo="<name>"\` and \`from=\` why (\`named\`: the issue names it; \`project\`: the config's \`tickets.repositories\` maps its project to it; \`code\`: that checkout holds the paths it names; \`only\`: there's no other), plus \`here\` when that's this repository; or \`repo=?\` when it's unclear, with \`candidates="<names>"\` when the issue names more than one. Exit code 2 is an unknown \`--priority\` rank (say which ones exist, and stop) or bad input (fix \`issues.json\` and run it again).
 
 When \`COUNT\` is 0, say there is nothing waiting and stop; when \`TOTAL\` is above 0, say instead that the filters left out all \`TOTAL\` issues, and stop. Otherwise say how many issues there are, and when \`COUNT\` is less than \`TOTAL\`, how many the filters left out.`,
           next: "main/decide",

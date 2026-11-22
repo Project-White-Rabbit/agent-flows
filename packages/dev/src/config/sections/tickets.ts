@@ -211,6 +211,58 @@ export function repositoriesProblem(entries: string[]): string | undefined {
   return twice === undefined ? undefined : `maps the project \`${twice}\` twice`
 }
 
+/**
+ * What start-ticket-queue can order the queue by, each naming its own way
+ * round, and what it sorts on: two keys on the same thing (`newest` and
+ * `oldest`) can't both be in one order.
+ */
+export const QUEUE_ORDER_KEYS = {
+  blocker: "blocker mark",
+  blocks: "blocking other work",
+  "most-urgent": "priority",
+  "least-urgent": "priority",
+  "earliest-due": "due date",
+  "latest-due": "due date",
+  newest: "filing date",
+  oldest: "filing date",
+} as const
+export type QueueOrderKey = keyof typeof QUEUE_ORDER_KEYS
+
+/**
+ * The queue's order when `tickets.queueOrder` doesn't say: the marked
+ * blockers first (they stop a customer), then most urgent first, then the
+ * most recently filed.
+ */
+export const DEFAULT_QUEUE_ORDER: QueueOrderKey[] = [
+  "blocker",
+  "most-urgent",
+  "newest",
+]
+
+const QUEUE_ORDER_LIST = Object.keys(QUEUE_ORDER_KEYS)
+  .map((k) => `\`${k}\``)
+  .join(", ")
+
+/** What's wrong with `tickets.queueOrder`, or undefined: known keys, one per thing sorted on. */
+export function queueOrderProblem(keys: string[]): string | undefined {
+  if (keys.length === 0) {
+    return "must name at least one key"
+  }
+  const unknown = keys.find((k) => !Object.hasOwn(QUEUE_ORDER_KEYS, k))
+  if (unknown !== undefined) {
+    return `has an unknown key \`${unknown}\` (use ${QUEUE_ORDER_LIST})`
+  }
+  const on = keys.map((k) => QUEUE_ORDER_KEYS[k as QueueOrderKey])
+  const again = on.findIndex((what, i) => on.indexOf(what) !== i)
+  if (again < 0) {
+    return undefined
+  }
+  const before = keys[on.indexOf(on[again])]
+  return before === keys[again]
+    ? `names \`${before}\` twice`
+    : `names \`${before}\` and \`${keys[again]}\`, which both sort by ${on[again]} (keep one)`
+}
+
 /** A tracked doc about how the team prioritizes (`TASK_PRIORITIZATION.md`). */
 const PRIORITIZATION_DOC = /(^|\/)[^/]*priorit[^/]*\.mdx?$/i
 
@@ -257,7 +309,7 @@ export const tickets: SectionSpec = {
     {
       key: "blockerMark",
       description:
-        "Mark at the start of the title of an issue that stops a customer: create-tickets adds it to an item marked `blocker`, sync keeps it when it retitles, and start-ticket-queue takes marked issues first within each priority",
+        "Mark at the start of the title of an issue that stops a customer: create-tickets adds it to an item marked `blocker`, sync keeps it when it retitles, and start-ticket-queue takes marked issues first, ahead of every priority (as `queueOrder` places `blocker`)",
       example: "🛑",
       pattern: MARK,
     },
@@ -326,6 +378,19 @@ export const tickets: SectionSpec = {
       example: false,
     },
     {
+      key: "queueOrder",
+      type: "string[]",
+      description:
+        "The order start-ticket-queue goes through issues in, as sort keys applied in turn, each breaking the ties of the ones before it: `blocker` (the issues whose title has `blockerMark` first), `blocks` (the ones blocking other work first), `most-urgent` or `least-urgent`, `earliest-due` or `latest-due`, and `newest` or `oldest` (by when it was filed), at most one of each pair. Default `blocker`, `most-urgent`, `newest`; an issue with no due date, or no known filing date, comes last within its group either way round",
+      example: ["most-urgent", "latest-due", "blocker", "blocks"],
+      pattern: {
+        regex:
+          /^(blocker|blocks|most-urgent|least-urgent|earliest-due|latest-due|newest|oldest)$/,
+        hint: "`blocker`, `blocks`, `most-urgent`, `least-urgent`, `earliest-due`, `latest-due`, `newest`, or `oldest`",
+      },
+      check: (value: FieldValue) => queueOrderProblem(value as string[]),
+    },
+    {
       key: "repositories",
       type: "string[]",
       description:
@@ -353,6 +418,6 @@ export const tickets: SectionSpec = {
     },
   ],
   lookup:
-    "Leave it out unless the repo's agent instructions say how the team ranks and files work: a planning document per cycle, a mark for customer blockers, due dates required at some priorities, its own names for the priorities (P0, P1, …, read off the doc that maps them to the tracker's), parents ranked by their sub-issues, whether work goes under a larger issue, the estimates the team sizes work in, which repository a tracker project's work lands in when it isn't this one",
+    "Leave it out unless the repo's agent instructions say how the team ranks and files work: a planning document per cycle, a mark for customer blockers, due dates required at some priorities, its own names for the priorities (P0, P1, …, read off the doc that maps them to the tracker's), parents ranked by their sub-issues, whether work goes under a larger issue, the order to take up the issues in (most urgent first, then the earliest due, …), the estimates the team sizes work in, which repository a tracker project's work lands in when it isn't this one",
   detect: detectTickets,
 }

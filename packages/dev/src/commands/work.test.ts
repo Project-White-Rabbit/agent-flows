@@ -3,6 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { QueueOrderKey } from "../config/sections/tickets.ts"
 import {
   type Assigned,
   agentPrompt,
@@ -403,7 +404,142 @@ describe("namesTicket", () => {
 })
 
 describe("queue", () => {
-  it("orders by priority, then due date, then blocking other work", () => {
+  const OLD_ORDER = [
+    "most-urgent",
+    "blocker",
+    "earliest-due",
+    "blocks",
+  ] as const
+
+  it("orders by the blocker mark, then priority, then most recently filed by default", () => {
+    const issues = [
+      assigned("ENG-1", {
+        priority: "high",
+        createdAt: "2026-11-01T09:00:00Z",
+      }),
+      assigned("ENG-2", {
+        priority: "high",
+        createdAt: "2026-11-03T09:00:00Z",
+      }),
+      assigned("ENG-3", {
+        priority: "urgent",
+        createdAt: "2026-10-01T09:00:00Z",
+      }),
+      assigned("ENG-4", {
+        priority: "high",
+        title: "🛑 Acme can't log in",
+        createdAt: "2026-10-01T09:00:00Z",
+      }),
+      assigned("ENG-5", {
+        priority: "high",
+        createdAt: "2026-11-02T09:00:00Z",
+      }),
+      assigned("ENG-6", { priority: "low", createdAt: "2026-11-19T09:00:00Z" }),
+      assigned("ENG-7", {
+        priority: "low",
+        title: "🛑 Beta can't export",
+        createdAt: "2026-11-18T09:00:00Z",
+      }),
+    ]
+    // Blockers first, even ahead of an urgent issue, by priority among them.
+    expect(queue(issues, [], "🛑").map((i) => i.id)).toEqual([
+      "ENG-4",
+      "ENG-7",
+      "ENG-3",
+      "ENG-2",
+      "ENG-5",
+      "ENG-1",
+      "ENG-6",
+    ])
+    // With no mark, blocker ties everywhere: priority, then the filing date.
+    expect(queue(issues, []).map((i) => i.id)).toEqual([
+      "ENG-3",
+      "ENG-2",
+      "ENG-5",
+      "ENG-1",
+      "ENG-4",
+      "ENG-6",
+      "ENG-7",
+    ])
+  })
+
+  it("puts an issue with no readable filing date last within its group, in the order given", () => {
+    const issues = [
+      assigned("ENG-1"),
+      assigned("ENG-2", { createdAt: "not a date" }),
+      assigned("ENG-3", { createdAt: "2026-11-01" }),
+      assigned("ENG-4", { createdAt: null }),
+      assigned("ENG-5", { createdAt: "2026-11-02" }),
+      assigned("ENG-6", { priority: "urgent" }),
+    ]
+    expect(queue(issues, []).map((i) => i.id)).toEqual([
+      "ENG-6",
+      "ENG-5",
+      "ENG-3",
+      "ENG-1",
+      "ENG-2",
+      "ENG-4",
+    ])
+  })
+
+  it("orders by each key on its own", () => {
+    const issues = [
+      assigned("ENG-1", { priority: "low", createdAt: "2026-11-03" }),
+      assigned("ENG-2", { priority: "urgent", dueDate: "2026-12-01" }),
+      assigned("ENG-3", { title: "🛑 Down", createdAt: "2026-11-01" }),
+      assigned("ENG-4", { blocks: true, dueDate: "2026-11-15" }),
+    ]
+    const by = (key: QueueOrderKey) =>
+      queue(issues, [], "🛑", { order: [key] }).map((i) => i.id)
+    expect(by("most-urgent")).toEqual(["ENG-2", "ENG-3", "ENG-4", "ENG-1"])
+    expect(by("blocker")).toEqual(["ENG-3", "ENG-1", "ENG-2", "ENG-4"])
+    expect(by("earliest-due")).toEqual(["ENG-4", "ENG-2", "ENG-1", "ENG-3"])
+    expect(by("blocks")).toEqual(["ENG-4", "ENG-1", "ENG-2", "ENG-3"])
+    expect(by("newest")).toEqual(["ENG-1", "ENG-3", "ENG-2", "ENG-4"])
+  })
+
+  it("takes each pair either way round, its missing values still last", () => {
+    const issues = [
+      assigned("ENG-1", { dueDate: "2026-11-01", createdAt: "2026-11-03" }),
+      assigned("ENG-2", { dueDate: "someday", createdAt: "2026-11-01" }),
+      assigned("ENG-3", { dueDate: "2026-12-01", createdAt: "bad" }),
+      assigned("ENG-4", { priority: "urgent", dueDate: "2026-11-15" }),
+    ]
+    const by = (key: QueueOrderKey) =>
+      queue(issues, [], "🛑", { order: [key] }).map((i) => i.id)
+    expect(by("earliest-due")).toEqual(["ENG-1", "ENG-4", "ENG-3", "ENG-2"])
+    expect(by("latest-due")).toEqual(["ENG-3", "ENG-4", "ENG-1", "ENG-2"])
+    expect(by("newest")).toEqual(["ENG-1", "ENG-2", "ENG-3", "ENG-4"])
+    expect(by("oldest")).toEqual(["ENG-2", "ENG-1", "ENG-3", "ENG-4"])
+    expect(by("most-urgent")).toEqual(["ENG-4", "ENG-1", "ENG-2", "ENG-3"])
+    expect(by("least-urgent")).toEqual(["ENG-1", "ENG-2", "ENG-3", "ENG-4"])
+    expect(
+      queue(issues, [], undefined, {
+        order: ["most-urgent", "latest-due"],
+      }).map((i) => i.id),
+    ).toEqual(["ENG-4", "ENG-3", "ENG-1", "ENG-2"])
+  })
+
+  it("follows a custom order", () => {
+    const issues = [
+      assigned("ENG-1", { priority: "urgent", dueDate: "2026-12-01" }),
+      assigned("ENG-2", { priority: "low", dueDate: "2026-11-01" }),
+      assigned("ENG-3", {
+        priority: "high",
+        dueDate: "2026-12-01",
+        createdAt: "2026-11-05",
+      }),
+      assigned("ENG-4", { priority: "medium", dueDate: "2026-12-01" }),
+    ]
+    // Same due date: the filed one first, then by priority among the rest.
+    expect(
+      queue(issues, [], undefined, {
+        order: ["earliest-due", "newest", "most-urgent"],
+      }).map((i) => i.id),
+    ).toEqual(["ENG-2", "ENG-3", "ENG-1", "ENG-4"])
+  })
+
+  it("orders by priority, then due date, then blocking other work, when told to", () => {
     const issues = [
       assigned("ENG-1", { priority: "low" }),
       assigned("ENG-2", { priority: "high", dueDate: "2026-11-02" }),
@@ -419,7 +555,9 @@ describe("queue", () => {
       }),
     ]
     // A deadline orders work within a priority; blocking breaks a tie.
-    expect(queue(issues, []).map((i) => i.id)).toEqual([
+    expect(
+      queue(issues, [], undefined, { order: [...OLD_ORDER] }).map((i) => i.id),
+    ).toEqual([
       "ENG-6",
       "ENG-3",
       "ENG-8",
@@ -436,20 +574,26 @@ describe("queue", () => {
       assigned("ENG-1", { priority: "high", dueDate: "2026-11-01" }),
       assigned("ENG-2", { priority: "high", title: "🛑 Acme can't log in" }),
     ]
-    expect(queue(issues, [], "🛑").map((i) => i.id)).toEqual(["ENG-2", "ENG-1"])
+    expect(
+      queue(issues, [], "🛑", { order: [...OLD_ORDER] }).map((i) => i.id),
+    ).toEqual(["ENG-2", "ENG-1"])
   })
 
-  it("puts issues with the blocker mark first within their priority", () => {
+  it("puts issues with the blocker mark first, ahead of a more urgent one", () => {
     const issues = [
       assigned("ENG-1", { priority: "high", blocks: true }),
       assigned("ENG-2", { priority: "high", title: "🛑 Acme can't log in" }),
       assigned("ENG-3", { priority: "urgent" }),
     ]
     expect(queue(issues, [], "🛑").map((i) => i.id)).toEqual([
-      "ENG-3",
       "ENG-2",
+      "ENG-3",
       "ENG-1",
     ])
+    // With the old order, only within their priority.
+    expect(
+      queue(issues, [], "🛑", { order: [...OLD_ORDER] }).map((i) => i.id),
+    ).toEqual(["ENG-3", "ENG-2", "ENG-1"])
     expect(describeTicket(issues[1] as Assigned, undefined, "🛑")).toContain(
       " blocker ",
     )
@@ -1024,6 +1168,46 @@ describe("work.ts", () => {
         "Now,Next,Soon,Later,Someday",
       ]),
     ).toContain('section="Next"')
+  })
+
+  it("orders the queue by the config's tickets.queueOrder", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-"))
+    execFileSync("git", ["-C", dir, "init", "-q", "-b", "main"])
+    fs.mkdirSync(path.join(dir, ".agent-flows"))
+    fs.writeFileSync(
+      path.join(dir, ".agent-flows", "config.json"),
+      JSON.stringify({
+        version: 2,
+        repo: { baseBranch: "main" },
+        tickets: { queueOrder: ["earliest-due", "most-urgent"] },
+      }),
+    )
+    fs.writeFileSync(
+      path.join(dir, "issues.json"),
+      JSON.stringify({
+        issues: [
+          assigned("ENG-1", { priority: "urgent" }),
+          assigned("ENG-2", { priority: "low", dueDate: "2026-11-01" }),
+        ],
+      }),
+    )
+    const out = execFileSync(
+      "node",
+      [
+        path.join(import.meta.dirname, "work.ts"),
+        "list",
+        "--input",
+        "issues.json",
+      ],
+      { cwd: dir, encoding: "utf8" },
+    )
+    expect(out.split("\n").map((line) => line.split(" ")[1])).toEqual([
+      "ENG-2",
+      "ENG-1",
+      "2",
+      "2",
+      undefined,
+    ])
   })
 
   it("ends each TICKET line with the repository its work lands in", () => {

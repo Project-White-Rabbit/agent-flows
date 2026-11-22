@@ -19,9 +19,11 @@ import {
 import { plainDocumentLinks } from "../config/links.ts"
 import {
   DATE_TOKENS,
+  DEFAULT_QUEUE_ORDER,
   DEFAULT_RANKS,
   DEFAULT_WORKSPACE_NAME,
   projectRepositories,
+  type QueueOrderKey,
   ranksProblem,
   WORKSPACE_NAME_PLACEHOLDER,
 } from "../config/sections/tickets.ts"
@@ -788,27 +790,78 @@ export function isBlocker(issue: Assigned, mark?: string): boolean {
   return Boolean(mark && issue.title.includes(mark))
 }
 
+/** A date as ms, or undefined when there's none or it can't be read. */
+function timeOf(date?: string | null): number | undefined {
+  const at = date ? Date.parse(date) : Number.NaN
+  return Number.isNaN(at) ? undefined : at
+}
+
+/**
+ * Where an issue stands on a `tickets.queueOrder` key, the lowest taken
+ * first, or undefined when it has no due date or no filing date it can read.
+ */
+function rankOn(
+  key: QueueOrderKey,
+  issue: Assigned,
+  mark?: string,
+): number | string | undefined {
+  const urgency = PRIORITIES.indexOf(issue.priority ?? "none")
+  const due = timeOf(issue.dueDate)
+  const filed = timeOf(issue.createdAt)
+  switch (key) {
+    case "blocker":
+      return isBlocker(issue, mark) ? 0 : 1
+    case "blocks":
+      return issue.blocks ? 0 : 1
+    case "most-urgent":
+      return urgency
+    case "least-urgent":
+      return -urgency
+    case "earliest-due":
+      return due
+    case "latest-due":
+      return due === undefined ? undefined : -due
+    case "newest":
+      return filed === undefined ? undefined : -filed
+    case "oldest":
+      return filed
+  }
+}
+
+/**
+ * How two issues compare on one `tickets.queueOrder` key, the one to take
+ * first below zero. An issue with no due date or no filing date it can read
+ * comes after those with one, whichever way round the key takes them.
+ */
+function compareBy(
+  key: QueueOrderKey,
+  a: Assigned,
+  b: Assigned,
+  mark?: string,
+): number {
+  const [x, y] = [rankOn(key, a, mark), rankOn(key, b, mark)]
+  if (x === undefined || y === undefined) {
+    return Number(x === undefined) - Number(y === undefined)
+  }
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
 /**
  * Tickets with no work started on them yet, in the order to pick them up:
- * most urgent first, then the ones whose title carries the blocker mark
- * (`mark`: they stop a customer), then the earliest due (a deadline is the
- * order within a priority), then the ones blocking other work. One with open
- * sub-issues is left out (they're what gets worked on), and so is one with a
- * pull request or a workspace on its branch.
+ * by each of `order`'s keys in turn (`tickets.queueOrder`; default the
+ * ones whose title carries the blocker mark `mark` first, since they stop a
+ * customer, then most urgent first, then the most recently filed). Issues every
+ * key ties on keep the order they came in. One with open sub-issues is left
+ * out (they're what gets worked on), and so is one with a pull request or a
+ * workspace on its branch.
  */
 export function queue(
   issues: Assigned[],
   workspaces: Workspace[],
   mark?: string,
-  options: { linked?: boolean } = {},
+  options: { linked?: boolean; order?: QueueOrderKey[] } = {},
 ): Assigned[] {
-  const order = (issue: Assigned) =>
-    [
-      PRIORITIES.indexOf(issue.priority ?? "none"),
-      isBlocker(issue, mark) ? 0 : 1,
-      issue.dueDate ?? "9999-12-31",
-      issue.blocks ? 0 : 1,
-    ] as const
+  const order = options.order ?? DEFAULT_QUEUE_ORDER
   return issues
     .filter(
       (issue) =>
@@ -822,10 +875,13 @@ export function queue(
         ),
     )
     .sort((a, b) => {
-      const [x, y] = [order(a), order(b)]
-      return (
-        x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2]) || x[3] - y[3]
-      )
+      for (const key of order) {
+        const by = compareBy(key, a, b, mark)
+        if (by !== 0) {
+          return by
+        }
+      }
+      return 0
     })
 }
 
@@ -1151,7 +1207,10 @@ function list(args: Args): void {
     input.issues ?? [],
     [...(input.workspaces ?? []), ...listWorktrees()],
     rules.blockerMark,
-    { linked: rules.queueLinked !== false && !args.has("no-linked") },
+    {
+      linked: rules.queueLinked !== false && !args.has("no-linked"),
+      order: rules.queueOrder,
+    },
   )
   const priorities = args.has("priority")
     ? parsePriorities(args.get("priority") as string, ranks)
@@ -1332,8 +1391,9 @@ const USAGE = `Usage: work.ts <command>
        [--no-linked]
                   The tickets in <file> ({"issues": [...], "workspaces": [...],
                   "repositories": [...]}) with no work started yet, in the order to pick them up
-                  (by priority, then the config's tickets.blockerMark in the
-                  title, then due date, then blocking other work). A ticket
+                  (by the config's tickets.queueOrder, default its
+                  tickets.blockerMark in the title, then priority, then most
+                  recently filed). A ticket
                   marked "link": true (from a read-only tracker) is left out
                   with --no-linked or the config's tickets.queueLinked false:
                     TICKET <ID> "<rank>" due=<date|none>

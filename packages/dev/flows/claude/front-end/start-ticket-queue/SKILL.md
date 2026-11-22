@@ -1,5 +1,5 @@
 ---
-description: Go through your open issues that have no pull request or workspace yet, most urgent first, and start, skip, or close each one.
+description: Go through your open issues that have no pull request or workspace yet, in the team's order (customer blockers, then most urgent, by default), and start, skip, or close each one.
 argument-hint: "[--priority <ranks>] [--limit <n>] [--section <name> | --section-by-rank] [--workspaces <entry>] [help]"
 ---
 

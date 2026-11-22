@@ -8,6 +8,7 @@ import { detectPythonReady, detectReady, ready } from "./ready.ts"
 import { detectServer } from "./server.ts"
 import { BITFAB_DEV_FORMAT, sync } from "./sync.ts"
 import {
+  queueOrderProblem,
   ranksFromDoc,
   ranksProblem,
   tickets,
@@ -994,6 +995,54 @@ describe("ticket ranks", () => {
     ).toEqual([
       "tickets.ranks must name 5 ranks, one each for urgent, high, medium, low, none (got 2)",
     ])
+  })
+})
+
+describe("queue order", () => {
+  it("takes the known keys, one per thing they sort by", () => {
+    expect(queueOrderProblem(["blocker", "most-urgent", "newest"])).toBe(
+      undefined,
+    )
+    expect(
+      queueOrderProblem([
+        "oldest",
+        "latest-due",
+        "blocks",
+        "blocker",
+        "least-urgent",
+      ]),
+    ).toBe(undefined)
+    expect(queueOrderProblem([])).toBe("must name at least one key")
+    expect(queueOrderProblem(["most-urgent", "priority"])).toBe(
+      "has an unknown key `priority` (use `blocker`, `blocks`, `most-urgent`, `least-urgent`, `earliest-due`, `latest-due`, `newest`, `oldest`)",
+    )
+    expect(queueOrderProblem(["toString"])).toMatch(/^has an unknown key/)
+    expect(queueOrderProblem(["newest", "blocker", "newest"])).toBe(
+      "names `newest` twice",
+    )
+    expect(queueOrderProblem(["newest", "oldest"])).toBe(
+      "names `newest` and `oldest`, which both sort by filing date (keep one)",
+    )
+    expect(queueOrderProblem(["earliest-due", "latest-due"])).toBe(
+      "names `earliest-due` and `latest-due`, which both sort by due date (keep one)",
+    )
+  })
+
+  it("is checked in the config", () => {
+    const issues = (queueOrder: unknown) =>
+      checkConfig({
+        version: 2,
+        repo: { baseBranch: "main" },
+        tickets: { queueOrder },
+      }).issues
+    expect(issues(["blocker", "most-urgent", "newest"])).toEqual([])
+    expect(issues(["most-urgent", "least-urgent"])).toEqual([
+      "tickets.queueOrder names `most-urgent` and `least-urgent`, which both sort by priority (keep one)",
+    ])
+    expect(issues(["-due"])).toEqual([
+      "tickets.queueOrder must list only `blocker`, `blocks`, `most-urgent`, `least-urgent`, `earliest-due`, `latest-due`, `newest`, or `oldest` (not `-due`)",
+    ])
+    expect(issues("newest")).not.toEqual([])
   })
 })
 
