@@ -211,8 +211,21 @@ export function branchFor(ticket: Ticket): { branch: string; exact: boolean } {
   }
 }
 
-/** Characters that only separate a workspace name's parts. */
-const SEPARATORS = "[\\s/|:,.·_-]*"
+/**
+ * A character that only separates a workspace name's parts: a space, one of
+ * `/ | : , . · _ ~`, a hyphen, or an en or em dash.
+ */
+const SEPARATOR = "[\\s/|:,.·_~\\-\\u2013\\u2014]"
+
+const SEPARATORS = `${SEPARATOR}*`
+
+/** A bracketed part of a workspace name, `(…)` or `[…]`, with no brackets inside. */
+const BRACKETED = /[([][^()[\]]*[)\]]/g
+
+/** `text` with every regex metacharacter escaped. */
+function escapeRegex(text: string): string {
+  return text.replace(/[{}.*+?^$|()[\]\\-]/g, "\\$&")
+}
 
 /** `text` cut to at most `limit` characters, at a word when one ends in reach. */
 export function cutAt(text: string, limit: number): string {
@@ -223,7 +236,7 @@ export function cutAt(text: string, limit: number): string {
   const cut = text.slice(0, limit + 1)
   const end = cut.lastIndexOf(" ")
   const kept = end > 0 ? cut.slice(0, end) : text.slice(0, limit)
-  return kept.replace(/[\s/|:,.·_-]+$/, "")
+  return kept.replace(new RegExp(`${SEPARATOR}+$`), "")
 }
 
 const MONTHS = [
@@ -267,21 +280,14 @@ export function formatDate(date: string, format: string): string {
   )
 }
 
-/**
- * A workspace's name for an issue: `template` with its id (`{id:short}`: its
- * number), title, priority (the team's name for it, nothing for none),
- * category, and due date filled in, `{title:N}` and `{category:N}` cut to N
- * characters and `{due:FORMAT}` in that date format (`{due:MM/DD}`). A
- * part the issue doesn't have drops out with the separator before it, or the
- * one after it when it comes first, and so do the brackets it leaves empty:
- * `{priority}/{category}: {title}` with no category reads `P0: Fix it`.
- */
-export function workspaceName(
-  ticket: Ticket,
-  template: string = DEFAULT_WORKSPACE_NAME,
-  ranks: string[] = DEFAULT_RANKS,
-): string {
-  const values: Record<string, string> = {
+/** A workspace name's parts for an issue, before any form is applied. */
+type NameValues = Record<
+  "id" | "title" | "priority" | "category" | "due",
+  string
+>
+
+function nameValues(ticket: Ticket, ranks: string[]): NameValues {
+  return {
     id: ticket.id,
     title: ticket.title?.trim() ?? "",
     priority:
@@ -291,8 +297,12 @@ export function workspaceName(
     category: ticket.category?.trim() ?? "",
     due: ticket.dueDate?.trim() ?? "",
   }
+}
+
+/** `template` filled in with `values`, dropping the parts that are empty. */
+function fillName(template: string, values: NameValues): string {
   const fill = (key: string, form?: string): string => {
-    const value = values[key]
+    const value = values[key as keyof NameValues]
     if (key === "due") {
       return value && form ? formatDate(value, form) : value.slice(0, 10)
     }
@@ -301,20 +311,36 @@ export function workspaceName(
     }
     return form ? cutAt(value, Number(form)) : value
   }
-  let name = template
-  for (const [token, key, form] of template.matchAll(
-    WORKSPACE_NAME_PLACEHOLDER,
-  )) {
-    const at = name.indexOf(token)
-    if (fill(key, form) || at < 0) {
-      continue
+  const empty = (text: string) => {
+    const parts = [...text.matchAll(WORKSPACE_NAME_PLACEHOLDER)]
+    return parts.length > 0 && parts.every(([, key, form]) => !fill(key, form))
+  }
+  // A part that drops out takes the separator before it, or the one after it
+  // when it comes first.
+  const drop = (name: string, part: string): string => {
+    const at = name.indexOf(part)
+    if (at < 0) {
+      return name
     }
     const first = /^[\s([]*$/.test(name.slice(0, at))
-    const part = token.replace(/[{}.*+?^$|()[\]\\]/g, "\\$&")
-    name = name.replace(
-      new RegExp(first ? part + SEPARATORS : SEPARATORS + part),
+    const pattern = escapeRegex(part)
+    return name.replace(
+      new RegExp(first ? pattern + SEPARATORS : SEPARATORS + pattern),
       "",
     )
+  }
+  let name = template
+  // A bracketed part whose placeholders are all empty goes whole, with the
+  // words around them: `(due {due})` leaves nothing behind.
+  for (const [group] of template.matchAll(BRACKETED)) {
+    if (empty(group)) {
+      name = drop(name, group)
+    }
+  }
+  for (const [token] of template.matchAll(WORKSPACE_NAME_PLACEHOLDER)) {
+    if (empty(token)) {
+      name = drop(name, token)
+    }
   }
   return name
     .replace(WORKSPACE_NAME_PLACEHOLDER, (_, key: string, form?: string) =>
@@ -323,6 +349,128 @@ export function workspaceName(
     .replace(/\(\s*\)|\[\s*\]/g, "")
     .replace(/\s+/g, " ")
     .trim()
+}
+
+/**
+ * A workspace's name for an issue: `template` with its id (`{id:short}`: its
+ * number), title, priority (the team's name for it, nothing for none),
+ * category, and due date filled in, `{title:N}` and `{category:N}` cut to N
+ * characters and `{due:FORMAT}` in that date format (`{due:MM/DD}`). A
+ * part the issue doesn't have drops out with the separator before it, or the
+ * one after it when it comes first, and so do the brackets it leaves empty:
+ * `{priority}/{category}: {title}` with no category reads `P0: Fix it`. A
+ * bracketed part with nothing filled in goes whole, its own words included:
+ * `{title} (due {due:MMM D})` with no due date reads `Fix it`.
+ */
+export function workspaceName(
+  ticket: Ticket,
+  template: string = DEFAULT_WORKSPACE_NAME,
+  ranks: string[] = DEFAULT_RANKS,
+): string {
+  return fillName(template, nameValues(ticket, ranks))
+}
+
+/** Stand-ins for the parts of a name that change: none can be in a real one. */
+const STAND_INS = {
+  title: "\uE000",
+  priority: "\uE001",
+  category: "\uE002",
+  due: "\uE003",
+} as const
+
+/**
+ * Whether `name` reads as `template` filled in for the issue `id`, whatever
+ * its title, priority, category, and due date were then: the id where the
+ * template puts it, and the template's own words and separators around the
+ * rest. A name someone gave the workspace by hand doesn't, unless they kept
+ * the template's shape. Without `{id}` in the template nothing tells the two
+ * apart, so no name counts.
+ */
+export function followsTemplate(
+  name: string,
+  id: string,
+  template: string = DEFAULT_WORKSPACE_NAME,
+): boolean {
+  if (!/\{id[:}]/.test(template)) {
+    return false
+  }
+  const keys = Object.keys(STAND_INS) as (keyof typeof STAND_INS)[]
+  // Every combination of the parts that can drop out, the title included.
+  for (let mask = 0; mask < 1 << keys.length; mask++) {
+    const values: NameValues = {
+      id,
+      title: "",
+      priority: "",
+      category: "",
+      due: "",
+    }
+    keys.forEach((key, i) => {
+      values[key] = mask & (1 << i) ? STAND_INS[key] : ""
+    })
+    let pattern = escapeRegex(fillName(template, values))
+    for (const stand of Object.values(STAND_INS)) {
+      pattern = pattern.replaceAll(stand, ".+?")
+    }
+    if (new RegExp(`^${pattern}$`).test(name.replace(/\s+/g, " ").trim())) {
+      return true
+    }
+  }
+  return false
+}
+
+/** What sync does with this workspace's name once its issue may have changed. */
+export type Refresh =
+  | { action: "rename"; name: string; from: string; section?: string }
+  | { action: "keep"; name: string }
+  | { action: "leave"; name: string; reason: string }
+
+/**
+ * The name this workspace takes now: the template filled in for the issue as
+ * it is, when the current name followed the template (so a new title,
+ * priority, or due date shows), and left alone when someone named it by hand.
+ * A workspace in the section named for a priority (start-work's
+ * `--section-by-rank`) moves to the one for the issue's priority now.
+ */
+export function refreshName(
+  ticket: Ticket,
+  workspace: Workspace,
+  template: string = DEFAULT_WORKSPACE_NAME,
+  ranks: string[] = DEFAULT_RANKS,
+): Refresh {
+  const current = workspace.name?.trim() ?? ""
+  const name = workspaceName(ticket, template, ranks)
+  const section = workspace.section?.trim()
+  const rank = rankName(ticket.priority, ranks)
+  const moves = section && ranks.includes(section) && section !== rank
+  if (current !== name && !followsTemplate(current, ticket.id, template)) {
+    return {
+      action: "leave",
+      name: current,
+      reason: /\{id[:}]/.test(template)
+        ? "named by hand"
+        : "tickets.workspaceName has no {id}",
+    }
+  }
+  if (current === name && !moves) {
+    return { action: "keep", name }
+  }
+  return {
+    action: "rename",
+    name,
+    from: current,
+    ...(moves ? { section: rank } : {}),
+  }
+}
+
+export function describeRefresh(refresh: Refresh): string {
+  switch (refresh.action) {
+    case "keep":
+      return `KEEP name="${refresh.name}"`
+    case "leave":
+      return `LEAVE name="${refresh.name}" reason="${refresh.reason}"`
+    case "rename":
+      return `RENAME name="${refresh.name}" from="${refresh.from}" section=${refresh.section === undefined ? "keep" : `"${refresh.section}"`}`
+  }
 }
 
 export function rankName(
@@ -960,6 +1108,23 @@ function reuse(args: Args): void {
   }
 }
 
+function name(args: Args): void {
+  const input = readJson<{ ticket?: Ticket; workspace?: Workspace }>(
+    requiredFlag(args, "input"),
+  )
+  if (!input.ticket?.id || typeof input.workspace?.name !== "string") {
+    throw new UsageError(
+      'name takes {"ticket": {"id", ...}, "workspace": {"name", "section"}}',
+    )
+  }
+  const template = readRules(repoRoot()).workspaceName ?? DEFAULT_WORKSPACE_NAME
+  console.log(
+    describeRefresh(
+      refreshName(input.ticket, input.workspace, template, ranksOf(args)),
+    ),
+  )
+}
+
 function branchLine(args: Args): void {
   const file = requiredFlag(args, "description")
   const branch = requiredFlag(args, "branch")
@@ -1146,6 +1311,20 @@ const USAGE = `Usage: work.ts <command>
                   is pushed or the new name is taken. --rename renames with
                   <command> (a stacking integration's rename op, its <name>
                   left in) instead of git branch -m.
+  name --input <file> [--ranks <names>]
+                  The name for the workspace in <file> ({"ticket": {...},
+                  "workspace": {"name", "section"}}, the ticket as for
+                  plan) now, as sync keeps it in step with its issue:
+                    RENAME name="<new>" from="<old>" section=<"name"|keep>
+                  when its name follows the config's tickets.workspaceName
+                  and the issue's title, priority, category, or due date
+                  changed it (section="<rank>" when it sits in another
+                  priority's section, as --section-by-rank filed it),
+                    KEEP name="<name>"
+                  when it already fits, or
+                    LEAVE name="<name>" reason="<why>"
+                  when someone named it by hand (or the template has no
+                  {id} to tell).
   branch-line --description <file> --branch <branch>
                   Add a "> Branch:" line on top of the description in <file>,
                   in place. Prints ADDED <file>, or UNCHANGED when it has one.
@@ -1190,6 +1369,7 @@ else ${DEFAULT_RANKS.join(", ")}). Exits ${USAGE_EXIT} on bad arguments or input
 const SUBCOMMANDS: Record<string, (args: Args) => void> = {
   plan,
   reuse,
+  name,
   "branch-line": branchLine,
   list,
   lock,
